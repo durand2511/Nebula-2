@@ -7,9 +7,91 @@ import {
   DeleteProjectParams,
 } from "@workspace/api-zod";
 import { openai } from "@workspace/integrations-openai-ai-server";
-import { logger } from "../lib/logger";
 
 const router = Router();
+
+const FILE_BLOCK_REGEX = /FILE:\s*(.+?)\nLANGUAGE:\s*(.+?)\n```[\w]*\n([\s\S]*?)```/g;
+
+function buildSystemPrompt(projectName: string, fileContext: string): string {
+  return `You are Buildly, an expert AI web app builder. Generate beautiful, fully-functional web apps for a project called "${projectName}", with clean, well-structured, modular code.
+
+CRITICAL RULES:
+- Split the app into MULTIPLE well-organized files — never one giant file:
+  - index.html — markup only; link sibling files with relative paths
+  - styles.css — all custom styling
+  - script.js — all JavaScript logic (for complex apps, split into several JS files like app.js, ui.js, storage.js, each referenced from index.html)
+- index.html must reference siblings exactly like: <link rel="stylesheet" href="styles.css"> and <script src="script.js"></script> (and <script src="app.js"></script> etc.)
+- You may use Tailwind via CDN in index.html for utility classes, but real custom styles belong in styles.css
+- Use CDN links for libraries (Chart.js, etc). NO npm, NO build step
+- Make it BEAUTIFUL and FULLY FUNCTIONAL — every button/form/interaction works. Dark theme with vibrant accents unless told otherwise
+
+OUTPUT FORMAT — output each file as its own block, html first:
+FILE: index.html
+LANGUAGE: html
+\`\`\`
+...full file...
+\`\`\`
+FILE: styles.css
+LANGUAGE: css
+\`\`\`
+...full file...
+\`\`\`
+FILE: script.js
+LANGUAGE: javascript
+\`\`\`
+...full file...
+\`\`\`
+
+After ALL file blocks, write ONE short sentence (max 20 words) describing what you did. NEVER repeat code in that sentence.${fileContext}`;
+}
+
+function buildFileContext(files: { path: string; content: string }[]): string {
+  if (files.length === 0) return "";
+  return `\n\nCurrent project files (modify these as needed):\n${files
+    .map((f) => `--- ${f.path} ---\n${f.content}`)
+    .join("\n\n")}`;
+}
+
+function extractExplanation(raw: string): string {
+  const lastFence = raw.lastIndexOf("```");
+  let tail = lastFence >= 0 ? raw.slice(lastFence + 3) : raw;
+  tail = tail
+    .replace(/^[a-zA-Z]*\n/, "")
+    .replace(/FILE:\s*[^\n]+/g, "")
+    .replace(/LANGUAGE:\s*[^\n]+/g, "")
+    .trim();
+  return tail || "Done! Your app has been updated.";
+}
+
+async function persistGeneratedFiles(
+  projectId: number,
+  raw: string,
+  existingFiles: { id: number; path: string }[],
+): Promise<string[]> {
+  const written: string[] = [];
+  let match;
+  FILE_BLOCK_REGEX.lastIndex = 0;
+  while ((match = FILE_BLOCK_REGEX.exec(raw)) !== null) {
+    const [, filePath, language, fileContent] = match;
+    const trimmedPath = filePath.trim();
+    written.push(trimmedPath);
+    const existing = existingFiles.find((f) => f.path === trimmedPath);
+    if (existing) {
+      await db
+        .update(projectFiles)
+        .set({ content: fileContent, language: language.trim(), updatedAt: new Date() })
+        .where(eq(projectFiles.id, existing.id));
+    } else {
+      await db.insert(projectFiles).values({
+        projectId,
+        path: trimmedPath,
+        content: fileContent,
+        language: language.trim(),
+      });
+    }
+  }
+  return written;
+}
 
 router.get("/projects", async (req, res) => {
   try {
@@ -181,36 +263,11 @@ router.post("/projects/:projectId/messages", async (req, res) => {
       .from(projectFiles)
       .where(eq(projectFiles.projectId, projectId));
 
-    const fileContext =
-      existingFiles.length > 0
-        ? `\n\nCurrent project files:\n${existingFiles.map((f) => `--- ${f.path} ---\n${f.content}`).join("\n\n")}`
-        : "";
-
-    const systemPrompt = `You are Buildly, an expert AI web app builder. Generate beautiful, fully-functional web applications.
-
-CRITICAL RULES:
-- Always output a SINGLE self-contained index.html file that works directly in a browser iframe
-- Use Tailwind CSS via CDN: <script src="https://cdn.tailwindcss.com"></script>
-- All CSS and JavaScript must be inline — no external files
-- For charts/graphs use Chart.js CDN. For icons use Lucide CDN or Unicode/emoji
-- NO npm, NO build steps, NO external file imports
-- Make it BEAUTIFUL: modern design, proper spacing, smooth animations, polished UI
-- Make it FUNCTIONAL: all buttons/forms/interactions must work with real JavaScript
-- Use a dark theme with vibrant accent colors unless the user says otherwise
-
-FORMAT YOUR RESPONSE — first the file block, then the explanation:
-FILE: index.html
-LANGUAGE: html
-\`\`\`
-<!DOCTYPE html>
-... complete working app ...
-\`\`\`
-
-Then 1-2 sentences describing what you built or changed.${fileContext}`;
+    const systemPrompt = buildSystemPrompt(projectRows[0].name, buildFileContext(existingFiles));
 
     const completion = await openai.chat.completions.create({
       model: "gpt-5.4",
-      max_completion_tokens: 8192,
+      max_completion_tokens: 16384,
       messages: [
         { role: "system", content: systemPrompt },
         ...chatMessages,
@@ -219,38 +276,130 @@ Then 1-2 sentences describing what you built or changed.${fileContext}`;
 
     const aiContent = completion.choices[0]?.message?.content ?? "I'm sorry, I couldn't generate a response.";
 
-    const fileRegex = /FILE:\s*(.+?)\nLANGUAGE:\s*(.+?)\n```[\w]*\n([\s\S]*?)```/g;
-    let match;
-    while ((match = fileRegex.exec(aiContent)) !== null) {
-      const [, filePath, language, fileContent] = match;
-      const trimmedPath = filePath.trim();
-      const existing = existingFiles.find((f) => f.path === trimmedPath);
-      if (existing) {
-        await db
-          .update(projectFiles)
-          .set({ content: fileContent, language: language.trim(), updatedAt: new Date() })
-          .where(eq(projectFiles.id, existing.id));
-      } else {
-        await db.insert(projectFiles).values({
-          projectId,
-          path: trimmedPath,
-          content: fileContent,
-          language: language.trim(),
-        });
-      }
-    }
-
+    await persistGeneratedFiles(projectId, aiContent, existingFiles);
     await db.update(projects).set({ updatedAt: new Date() }).where(eq(projects.id, projectId));
 
     const [assistantMsg] = await db
       .insert(projectMessages)
-      .values({ projectId, role: "assistant", content: aiContent })
+      .values({ projectId, role: "assistant", content: extractExplanation(aiContent) })
       .returning();
 
     res.status(201).json(assistantMsg);
   } catch (err) {
     req.log.error({ err }, "Failed to send message");
     res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.post("/projects/:projectId/messages/stream", async (req, res) => {
+  const projectId = Number(req.params.projectId);
+  if (isNaN(projectId)) {
+    res.status(400).json({ error: "Invalid project ID" });
+    return;
+  }
+
+  const content = req.body?.content;
+  if (!content || typeof content !== "string") {
+    res.status(400).json({ error: "content is required" });
+    return;
+  }
+
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
+  res.flushHeaders?.();
+
+  const send = (event: Record<string, unknown>) => {
+    res.write(`data: ${JSON.stringify(event)}\n\n`);
+  };
+
+  try {
+    const projectRows = await db.select().from(projects).where(eq(projects.id, projectId));
+    if (projectRows.length === 0) {
+      send({ type: "error", message: "Project not found" });
+      res.end();
+      return;
+    }
+
+    await db.insert(projectMessages).values({ projectId, role: "user", content });
+
+    const history = await db
+      .select()
+      .from(projectMessages)
+      .where(eq(projectMessages.projectId, projectId))
+      .orderBy(projectMessages.createdAt);
+
+    const chatMessages = history.map((m) => ({
+      role: m.role as "user" | "assistant",
+      content: m.content,
+    }));
+
+    const existingFiles = await db
+      .select()
+      .from(projectFiles)
+      .where(eq(projectFiles.projectId, projectId));
+
+    const isFirstBuild = existingFiles.length === 0;
+    const systemPrompt = buildSystemPrompt(projectRows[0].name, buildFileContext(existingFiles));
+
+    send({
+      type: "status",
+      message: isFirstBuild ? "Planning your app" : "Reviewing your request",
+    });
+
+    const stream = await openai.chat.completions.create({
+      model: "gpt-5.4",
+      max_completion_tokens: 16384,
+      stream: true,
+      messages: [{ role: "system", content: systemPrompt }, ...chatMessages],
+    });
+
+    let full = "";
+    const seenFiles = new Set<string>();
+    for await (const chunk of stream) {
+      const delta = chunk.choices[0]?.delta?.content ?? "";
+      if (!delta) continue;
+      full += delta;
+      const re = /FILE:\s*([^\n]+)\n/g;
+      let m;
+      while ((m = re.exec(full)) !== null) {
+        const path = m[1].trim();
+        if (!seenFiles.has(path)) {
+          seenFiles.add(path);
+          send({ type: "file", path });
+        }
+      }
+    }
+
+    send({ type: "status", message: "Saving files" });
+
+    const written = await persistGeneratedFiles(projectId, full, existingFiles);
+
+    if (written.length === 0 && existingFiles.length === 0) {
+      send({
+        type: "error",
+        message: "I couldn't generate valid files. Please try rephrasing your request.",
+      });
+      res.end();
+      return;
+    }
+
+    await db.update(projects).set({ updatedAt: new Date() }).where(eq(projects.id, projectId));
+
+    const explanation = extractExplanation(full);
+    const [assistantMsg] = await db
+      .insert(projectMessages)
+      .values({ projectId, role: "assistant", content: explanation })
+      .returning();
+
+    send({ type: "message", id: assistantMsg.id, content: explanation });
+    send({ type: "done", files: written });
+    res.end();
+  } catch (err) {
+    req.log.error({ err }, "Failed to stream message");
+    send({ type: "error", message: "Something went wrong while building your app." });
+    res.end();
   }
 });
 

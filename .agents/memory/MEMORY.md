@@ -1,0 +1,1 @@
+- [Buildly streaming & preview](buildly-streaming.md) — SSE build streaming needs `X-Accel-Buffering: no`; iframe preview must inline separate css/js; chat stores explanation only.
