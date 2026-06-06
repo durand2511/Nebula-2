@@ -29,6 +29,8 @@ export function Home() {
         onSuccess: (project) => {
           queryClient.invalidateQueries({ queryKey: getListProjectsQueryKey() });
           queryClient.invalidateQueries({ queryKey: getGetRecentProjectsQueryKey() });
+          // Store prompt so workspace auto-sends it as the first AI message
+          sessionStorage.setItem(`initial-prompt-${project.id}`, prompt);
           setLocation(`/projects/${project.id}`);
         }
       }

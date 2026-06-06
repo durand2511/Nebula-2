@@ -1,0 +1,70 @@
+🎨 5. UI Layout (Index.tsx)
+
+┌─────────────────────────────────────────────┐
+│ Sidebar  │  Chat            │  Preview/Code │
+│ projects │  - messages      │  toggle:      │
+│          │  - BuildSteps    │  • iframe     │
+│          │  - ChatInput     │  • CodeExplorer│
+└─────────────────────────────────────────────┘
+Chat links: berichten + bouwstappen + input
+Preview rechts: iframe met srcDoc={html} óf CodeExplorer met virtuele bestanden
+Publish-knop boven preview opent PublishPanel
+📦 6. File Splitter (de "echte" code view)
+
+src/ai/fileSplitter.ts neemt de monolithische gegenereerde HTML en splitst die op via DOMParser:
+
+generated.html  →  splitHtmlToFiles()  →  Virtual tree:
+                                          /components/Button.js
+                                          /components/Card.js
+                                          /pages/HomePage.js
+                                          /api/submitForm.js
+                                          /styles/main.css
+                                          index.html
+CodeExplorer.tsx toont dit als een IDE met file-tree links, tabs bovenaan, code in het midden.
+
+💾 7. Database Schema (Supabase)
+
+profiles — gebruikersprofielen (trigger handle_new_user)
+projects — opgeslagen apps per gebruiker
+user_roles (indien aangemaakt) — voor admin rollen
+Storage buckets:
+published-apps (public) — gepubliceerde HTML bestanden
+user-files (public) — uploads
+RLS staat aan met policies op auth.uid().
+
+🔐 8. Auth flow
+
+src/contexts/AuthContext.tsx:
+supabase.auth.onAuthStateChange() listener
+Bij login → redirect naar /
+Protected routes checken user state
+Email/password + (optioneel) Google OAuth
+🚀 9. Om dit naar Replit te porten
+
+Wat je moet doen:
+
+A. Project setup
+
+npm create vite@latest mijn-app -- --template react-ts
+cd mijn-app
+npm install
+npx tailwindcss init -p
+npx shadcn@latest init
+B. Dependencies
+
+npm install @supabase/supabase-js react-router-dom lucide-react sonner zod react-hook-form
+npm install @radix-ui/react-* # shadcn deps
+C. Environment variables (Replit Secrets tab)
+
+VITE_SUPABASE_URL=https://yyodrhzawnrcrxggreue.supabase.co
+VITE_SUPABASE_PUBLISHABLE_KEY=<anon key>
+LOVABLE_API_KEY=<vraag bij Lovable team — werkt alleen met Lovable's eigen gateway>
+⚠️ Belangrijk: LOVABLE_API_KEY werkt alléén met ai.gateway.lovable.dev binnen Lovable's omgeving. Buiten Lovable kun je beter overstappen op:
+OpenAI: OPENAI_API_KEY + https://api.openai.com/v1/chat/completions
+Google Gemini direct: GEMINI_API_KEY + https://generativelanguage.googleapis.com
+Anthropic: ANTHROPIC_API_KEY
+D. Edge functions vervangen
+
+Supabase edge functions werken hetzelfde op Replit — je deployt ze via Supabase CLI:
+
+supabase functions deploy generate-app

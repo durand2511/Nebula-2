@@ -1,0 +1,87 @@
+🏗️ 1. Tech Stack
+
+Onderdeel	Technologie
+Frontend	React 18 + Vite 5 + TypeScript
+Styling	Tailwind CSS v3 + shadcn/ui componenten
+Routing	React Router
+Backend	Supabase (Postgres + Auth + Storage + Edge Functions)
+AI	Lovable AI Gateway (Google Gemini modellen) via LOVABLE_API_KEY
+State	React hooks + localStorage
+📁 2. Folder Structuur
+
+src/
+├── ai/                    # AI agent pipeline (de kern!)
+│   ├── agent.ts          # Hoofd-orchestrator
+│   ├── planner.ts        # Maakt app-plan
+│   ├── builder.ts        # Genereert HTML
+│   ├── editor.ts         # Past bestaande app aan
+│   ├── critic.ts         # Beoordeelt kwaliteit
+│   ├── scorer.ts         # Geeft score (0-10)
+│   ├── tester.ts         # Test gegenereerde app
+│   ├── architecture.ts   # Bouwt blueprint
+│   ├── fileSplitter.ts   # Splitst HTML in virtuele bestanden
+│   ├── uiAgent.ts        # Plant UI-componenten
+│   ├── backendAgent.ts   # Plant database schema
+│   ├── memory.ts         # Onthoudt eerdere apps
+│   ├── versioning.ts     # Versie-historie
+│   ├── state.ts          # AgentState tracker
+│   └── constraints.ts    # System prompts + regels
+├── api/ai.ts             # Calls naar edge functions
+├── components/
+│   ├── ChatMessages.tsx
+│   ├── ChatInput.tsx
+│   ├── LivePreview.tsx   # iframe met de gegenereerde app
+│   ├── CodeExplorer.tsx  # IDE-achtige file viewer
+│   ├── ArchitecturePanel.tsx
+│   ├── PublishPanel.tsx
+│   ├── VersionHistory.tsx
+│   └── ui/...            # shadcn componenten
+├── pages/
+│   ├── Index.tsx         # Hoofdscherm (chat + preview)
+│   ├── Auth.tsx
+│   └── Profile.tsx
+├── contexts/AuthContext.tsx
+├── lib/
+│   ├── projects.ts       # CRUD voor projecten
+│   ├── storage.ts
+│   └── aiStream.ts       # Streaming HTML parser
+└── integrations/supabase/client.ts
+
+supabase/functions/
+├── chat-ai/              # Chat antwoord + intent detectie
+├── generate-app/         # Genereert volledige HTML app
+├── plan-ai/              # Maakt JSON plan
+├── critic-ai/            # Beoordeelt app kwaliteit
+├── publish-app/          # Publiceert naar storage bucket
+├── app-ai-proxy/         # Proxy voor gepubliceerde apps
+└── app-data-api/         # Data API voor gepubliceerde apps
+🔄 3. De Agent Pipeline (kern van de app)
+
+Wanneer een gebruiker iets typt, doorloopt runAgent() in src/ai/agent.ts deze fases:
+
+User input
+  ↓
+1. UNDERSTANDING     → callChatAI() → intent (build/edit/quick-edit/discuss)
+  ↓
+2. PLANNING          → createPlan() → AppPlan (screens, components, data, logic)
+  ↓
+3. UI AGENT          → generateUI() → enriched screens met componenten
+  ↓
+4. BACKEND AGENT     → generateBackendSchema() → database schema
+  ↓
+5. ARCHITECTURE      → generateArchitecture() → blueprint (components/pages/api/models)
+  ↓
+6. BUILDING          → buildDirect() → streamt HTML via generate-app edge function
+  ↓
+7. TESTING           → runTests() → checkt structuur, interactiviteit
+  ↓
+8. SCORING           → scoreApp() → 0-10
+  ↓
+9. CRITIC + FIX LOOP (max 5x, tot score ≥ 8)
+   - critic-ai analyseert
+   - issues worden gefixt via buildDirect()
+   - opnieuw testen en scoren
+  ↓
+10. MEMORY + VERSIONING → opslaan in localStorage
+  ↓
+Done!
