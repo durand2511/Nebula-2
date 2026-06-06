@@ -183,6 +183,7 @@ export function ProjectWorkspace() {
         ]);
       } finally {
         setIsStreaming(false);
+        setBuildSteps((prev) => prev.map((s) => ({ ...s, done: true })));
         setPendingUser(null);
         await Promise.all([
           queryClient.invalidateQueries({ queryKey: getListMessagesQueryKey(projectId) }),
@@ -312,21 +313,28 @@ export function ProjectWorkspace() {
                 </div>
               )}
 
-              {/* Live build steps */}
-              {isStreaming && buildSteps.length > 0 && (
-                <div className="space-y-2">
-                  {buildSteps.map((step, i) => (
-                    <div key={i} className="flex items-center gap-2 text-xs">
-                      {step.done ? (
-                        <Check className="h-3.5 w-3.5 text-primary shrink-0" />
-                      ) : (
-                        <Loader2 className="h-3.5 w-3.5 text-primary animate-spin shrink-0" />
-                      )}
-                      <span className={step.done ? "text-muted-foreground" : "text-foreground font-medium"}>
-                        {step.label}
-                      </span>
-                    </div>
-                  ))}
+              {/* Activity log (Replit-style) */}
+              {buildSteps.length > 0 && (
+                <div className="space-y-1.5">
+                  {buildSteps.map((step, i) => {
+                    const isFile = step.label.startsWith("Writing");
+                    return (
+                      <div key={i} className="flex items-center gap-2.5 text-xs">
+                        <span className="flex h-5 w-5 items-center justify-center rounded-md border border-border/60 bg-card/40 shrink-0 text-muted-foreground">
+                          {!step.done ? (
+                            <Loader2 className="h-3 w-3 animate-spin text-foreground" />
+                          ) : isFile ? (
+                            <FileCode2 className="h-3 w-3" />
+                          ) : (
+                            <Check className="h-3 w-3" />
+                          )}
+                        </span>
+                        <span className={step.done ? "text-muted-foreground" : "text-foreground"}>
+                          {step.label}
+                        </span>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
 
