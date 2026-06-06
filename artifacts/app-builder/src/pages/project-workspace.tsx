@@ -17,7 +17,6 @@ import {
   ChevronLeft,
   Code2,
   MonitorPlay,
-  User,
   FolderOpen,
   File as FileIcon,
   RefreshCw,
@@ -286,37 +285,28 @@ export function ProjectWorkspace() {
                   Describe what you want to build to get started.
                 </div>
               ) : (
-                messages?.map((msg) => (
-                  <div key={msg.id} className={`flex gap-3 ${msg.role === "user" ? "flex-row-reverse" : ""}`}>
-                    {msg.role === "user" ? (
-                      <div className="h-7 w-7 rounded-md flex items-center justify-center shrink-0 bg-primary/20 text-primary">
-                        <User className="h-3.5 w-3.5" />
+                messages?.map((msg) =>
+                  msg.role === "user" ? (
+                    <div key={msg.id} className="flex justify-end">
+                      <div className="text-sm rounded-lg px-3.5 py-2 max-w-[90%] whitespace-pre-wrap bg-primary/10 text-foreground">
+                        {msg.content}
                       </div>
-                    ) : (
-                      <div className="h-7 w-7 rounded-md flex items-center justify-center shrink-0 bg-primary text-primary-foreground text-[10px] font-semibold">
-                        AI
-                      </div>
-                    )}
-                    <div
-                      className={`text-sm rounded-lg px-4 py-2.5 max-w-[85%] whitespace-pre-wrap ${
-                        msg.role === "user"
-                          ? "bg-primary/10 border border-primary/20 text-foreground"
-                          : "bg-secondary/50 border border-border text-foreground/90 leading-relaxed"
-                      }`}
-                    >
-                      {msg.role === "assistant" ? cleanContent(msg.content) : msg.content}
                     </div>
-                  </div>
-                ))
+                  ) : (
+                    <div
+                      key={msg.id}
+                      className="text-sm text-foreground/90 leading-relaxed whitespace-pre-wrap"
+                    >
+                      {cleanContent(msg.content)}
+                    </div>
+                  )
+                )
               )}
 
               {/* Optimistic pending user message */}
               {pendingUser && (
-                <div className="flex gap-3 flex-row-reverse">
-                  <div className="h-7 w-7 rounded-md flex items-center justify-center shrink-0 bg-primary/20 text-primary">
-                    <User className="h-3.5 w-3.5" />
-                  </div>
-                  <div className="text-sm rounded-lg px-4 py-2.5 max-w-[85%] whitespace-pre-wrap bg-primary/10 border border-primary/20 text-foreground">
+                <div className="flex justify-end">
+                  <div className="text-sm rounded-lg px-3.5 py-2 max-w-[90%] whitespace-pre-wrap bg-primary/10 text-foreground">
                     {pendingUser}
                   </div>
                 </div>
@@ -324,24 +314,19 @@ export function ProjectWorkspace() {
 
               {/* Live build steps */}
               {isStreaming && buildSteps.length > 0 && (
-                <div className="flex gap-3">
-                  <div className="h-7 w-7 rounded-md flex items-center justify-center shrink-0 bg-primary text-primary-foreground text-[10px] font-semibold">
-                    AI
-                  </div>
-                  <div className="flex-1 rounded-lg border border-border bg-secondary/40 p-3 space-y-2">
-                    {buildSteps.map((step, i) => (
-                      <div key={i} className="flex items-center gap-2 text-xs">
-                        {step.done ? (
-                          <Check className="h-3.5 w-3.5 text-primary shrink-0" />
-                        ) : (
-                          <Loader2 className="h-3.5 w-3.5 text-primary animate-spin shrink-0" />
-                        )}
-                        <span className={step.done ? "text-muted-foreground" : "text-foreground font-medium"}>
-                          {step.label}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
+                <div className="space-y-2">
+                  {buildSteps.map((step, i) => (
+                    <div key={i} className="flex items-center gap-2 text-xs">
+                      {step.done ? (
+                        <Check className="h-3.5 w-3.5 text-primary shrink-0" />
+                      ) : (
+                        <Loader2 className="h-3.5 w-3.5 text-primary animate-spin shrink-0" />
+                      )}
+                      <span className={step.done ? "text-muted-foreground" : "text-foreground font-medium"}>
+                        {step.label}
+                      </span>
+                    </div>
+                  ))}
                 </div>
               )}
 
