@@ -1,2 +1,3 @@
 - [Buildly streaming & preview](buildly-streaming.md) — SSE build streaming needs `X-Accel-Buffering: no`; iframe preview must inline separate css/js; chat stores explanation only.
 - [Buildly design directives target generated apps](buildly-design-target.md) — design-quality instructions belong in the generation system prompt, not Buildly's own UI chrome.
+- [app-builder preview](app-builder-preview.md) — generated apps render in a no-same-origin sandboxed iframe; validate postMessage by e.source (origin is opaque), self-healing error banner.

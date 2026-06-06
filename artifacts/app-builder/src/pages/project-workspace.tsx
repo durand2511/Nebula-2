@@ -22,6 +22,9 @@ import {
   RefreshCw,
   Check,
   FileCode2,
+  AlertTriangle,
+  Wand2,
+  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -68,6 +71,15 @@ function buildPreviewHtml(files: ProjectFile[] | undefined): string {
       html = html.replace(re, `<script>\n${f.content}\n</script>`);
     }
   }
+
+  // Inject a tiny reporter (first thing in the doc) that forwards runtime errors
+  // to the parent window so Buildly can surface them and offer an auto-fix.
+  const reporter = `<script>(function(){function r(p){try{parent.postMessage({__buildlyError:true,message:String(p.message||"Error"),source:p.source||"",line:p.line||0},"*")}catch(e){}}window.addEventListener("error",function(e){r({message:e.message,source:e.filename,line:e.lineno})});window.addEventListener("unhandledrejection",function(e){var m=e.reason&&e.reason.message?e.reason.message:e.reason;r({message:"Unhandled promise rejection: "+m})});})();</script>`;
+  if (/<head[^>]*>/i.test(html)) {
+    html = html.replace(/<head[^>]*>/i, (m) => m + reporter);
+  } else {
+    html = reporter + html;
+  }
   return html;
 }
 
@@ -88,9 +100,11 @@ export function ProjectWorkspace() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [buildSteps, setBuildSteps] = useState<BuildStep[]>([]);
   const [pendingUser, setPendingUser] = useState<string | null>(null);
+  const [previewErrors, setPreviewErrors] = useState<string[]>([]);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const autoSentRef = useRef(false);
+  const previewIframeRef = useRef<HTMLIFrameElement>(null);
 
   const { data: project, isLoading: isLoadingProject } = useGetProject(projectId, {
     query: { enabled: !!projectId, queryKey: getGetProjectQueryKey(projectId) },
@@ -116,12 +130,33 @@ export function ProjectWorkspace() {
     }
   }, [files, selectedFile]);
 
+  // Listen for runtime errors forwarded by the preview iframe.
+  useEffect(() => {
+    function onMessage(e: MessageEvent) {
+      // Only trust messages coming from our own preview iframe.
+      if (!previewIframeRef.current || e.source !== previewIframeRef.current.contentWindow) return;
+      const d = e.data as { __buildlyError?: boolean; message?: string; source?: string; line?: number };
+      if (!d || !d.__buildlyError || typeof d.message !== "string") return;
+      const file = d.source ? d.source.split("/").pop() : "";
+      const detail = file ? `${d.message} (${file}:${d.line ?? "?"})` : d.message;
+      setPreviewErrors((prev) => (prev.includes(detail) ? prev : [...prev, detail].slice(-4)));
+    }
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, []);
+
+  // Reset captured errors whenever the preview reloads.
+  useEffect(() => {
+    setPreviewErrors([]);
+  }, [previewKey]);
+
   const streamMessage = useCallback(
     async (messageContent: string) => {
       if (!projectId) return;
       setIsStreaming(true);
       setBuildSteps([]);
       setPendingUser(messageContent);
+      setPreviewErrors([]);
       setActiveTab("preview");
 
       try {
@@ -220,6 +255,15 @@ export function ProjectWorkspace() {
       e.preventDefault();
       handleSendMessage();
     }
+  };
+
+  const handleAutoFix = () => {
+    if (isStreaming || !projectId || previewErrors.length === 0) return;
+    const errText = previewErrors.join("; ");
+    setPreviewErrors([]);
+    void streamMessage(
+      `The app has a runtime error in the preview: ${errText}. Find the root cause and fix it so the app runs with no console errors. Return the full corrected files.`
+    );
   };
 
   const activeFile = files?.find((f) => f.path === selectedFile);
@@ -481,13 +525,47 @@ export function ProjectWorkspace() {
                   <p className="text-sm">Writing your code file by file…</p>
                 </div>
               ) : previewHtml ? (
-                <iframe
-                  key={previewKey}
-                  srcDoc={previewHtml}
-                  className="flex-1 w-full border-0 bg-white"
-                  sandbox="allow-scripts allow-forms allow-modals allow-popups"
-                  title="App Preview"
-                />
+                <div className="relative flex-1 flex">
+                  <iframe
+                    key={previewKey}
+                    ref={previewIframeRef}
+                    srcDoc={previewHtml}
+                    className="flex-1 w-full border-0 bg-white"
+                    sandbox="allow-scripts allow-forms allow-modals allow-popups"
+                    title="App Preview"
+                  />
+                  {previewErrors.length > 0 && !isStreaming && (
+                    <div className="absolute bottom-4 left-4 right-4 z-10">
+                      <div className="flex items-start gap-3 rounded-lg border border-destructive/40 bg-destructive/10 backdrop-blur px-4 py-3 shadow-lg">
+                        <AlertTriangle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-foreground">
+                            Runtime error detected
+                          </p>
+                          <p className="text-xs text-muted-foreground truncate font-mono">
+                            {previewErrors[previewErrors.length - 1]}
+                          </p>
+                        </div>
+                        <Button
+                          size="sm"
+                          className="h-8 shrink-0"
+                          onClick={handleAutoFix}
+                          data-testid="button-auto-fix"
+                        >
+                          <Wand2 className="h-3.5 w-3.5 mr-1.5" />
+                          Fix automatically
+                        </Button>
+                        <button
+                          onClick={() => setPreviewErrors([])}
+                          className="text-muted-foreground hover:text-foreground shrink-0"
+                          aria-label="Dismiss"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
               ) : (
                 <div className="flex-1 flex flex-col items-center justify-center gap-4 text-muted-foreground">
                   <Terminal className="h-16 w-16 opacity-20" />

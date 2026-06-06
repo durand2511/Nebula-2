@@ -10,7 +10,27 @@ import { openai } from "@workspace/integrations-openai-ai-server";
 
 const router = Router();
 
-const FILE_BLOCK_REGEX = /FILE:\s*(.+?)\nLANGUAGE:\s*(.+?)\n```[\w]*\n([\s\S]*?)```/g;
+// Tolerant parser: LANGUAGE line is optional, and the language may instead sit
+// on the opening fence (e.g. ```html). Handles CRLF and extra fence metadata.
+const FILE_BLOCK_REGEX =
+  /FILE:\s*(.+?)\s*\r?\n(?:LANGUAGE:\s*(.+?)\s*\r?\n)?```([\w+-]*)[^\n]*\r?\n([\s\S]*?)```/g;
+
+function inferLanguage(path: string): string {
+  const ext = path.split(".").pop()?.toLowerCase() ?? "";
+  const map: Record<string, string> = {
+    html: "html",
+    htm: "html",
+    css: "css",
+    js: "javascript",
+    mjs: "javascript",
+    cjs: "javascript",
+    json: "json",
+    svg: "svg",
+    ts: "typescript",
+    md: "markdown",
+  };
+  return map[ext] ?? "plaintext";
+}
 
 function buildSystemPrompt(projectName: string, fileContext: string): string {
   return `You are Buildly, an expert AI web app builder. Generate beautiful, fully-functional web apps for a project called "${projectName}", with clean, well-structured, modular code.
@@ -54,6 +74,14 @@ CODE QUALITY:
 - NO placeholder text like "TODO", "coming soon", or dead buttons — every button and link must actually do something.
 - Seed real, realistic sample data so the app is demonstrable on first load.
 - Clear variable/function names and clean, readable code.
+
+RUNTIME ROBUSTNESS (critical — the app MUST run with ZERO uncaught console errors):
+- Run code only after the DOM exists: place <script> tags at the END of <body>, or wrap all DOM access in a "DOMContentLoaded" listener. Never read elements before they are rendered.
+- Guard every element lookup: check the result of getElementById/querySelector before using it. Never call methods on a possibly-null element.
+- Wrap parsing and storage in try/catch: JSON.parse, localStorage.getItem/setItem can throw — handle failures gracefully and fall back to seed data.
+- Do NOT reference external image, font, or file URLs that may 404 (no random photo/CDN asset URLs). For graphics use inline SVG, CSS gradients, emoji, or data URIs. Google Fonts <link> tags are allowed.
+- Attach event listeners only to elements that exist; verify selectors match the markup you generated.
+- When regenerating after a fix request, output the COMPLETE corrected files (every file), not a partial patch — files fully replace the previous versions.
 
 OUTPUT FORMAT — output each file as its own block, html first:
 FILE: index.html
@@ -102,21 +130,23 @@ async function persistGeneratedFiles(
   let match;
   FILE_BLOCK_REGEX.lastIndex = 0;
   while ((match = FILE_BLOCK_REGEX.exec(raw)) !== null) {
-    const [, filePath, language, fileContent] = match;
+    const [, filePath, langLine, fenceLang, fileContent] = match;
     const trimmedPath = filePath.trim();
+    if (!trimmedPath) continue;
+    const language = (langLine || fenceLang || "").trim() || inferLanguage(trimmedPath);
     written.push(trimmedPath);
     const existing = existingFiles.find((f) => f.path === trimmedPath);
     if (existing) {
       await db
         .update(projectFiles)
-        .set({ content: fileContent, language: language.trim(), updatedAt: new Date() })
+        .set({ content: fileContent, language, updatedAt: new Date() })
         .where(eq(projectFiles.id, existing.id));
     } else {
       await db.insert(projectFiles).values({
         projectId,
         path: trimmedPath,
         content: fileContent,
-        language: language.trim(),
+        language,
       });
     }
   }
