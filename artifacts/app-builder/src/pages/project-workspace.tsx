@@ -17,7 +17,6 @@ import {
   ChevronLeft,
   Code2,
   MonitorPlay,
-  Sparkles,
   User,
   FolderOpen,
   File as FileIcon,
@@ -273,10 +272,7 @@ export function ProjectWorkspace() {
         {/* Left Panel: Chat */}
         <div className="w-[380px] border-r border-border bg-card/30 flex flex-col shrink-0">
           <div className="p-4 border-b border-border/50 flex justify-between items-center bg-card/50">
-            <h2 className="font-semibold text-sm flex items-center gap-2">
-              <Sparkles className="h-4 w-4 text-primary" />
-              Buildly Assistant
-            </h2>
+            <h2 className="font-semibold text-sm">Buildly Assistant</h2>
           </div>
 
           <ScrollArea className="flex-1 p-4">
@@ -297,8 +293,8 @@ export function ProjectWorkspace() {
                         <User className="h-3.5 w-3.5" />
                       </div>
                     ) : (
-                      <div className="h-7 w-7 rounded-md flex items-center justify-center shrink-0 bg-primary text-primary-foreground">
-                        <Sparkles className="h-3.5 w-3.5" />
+                      <div className="h-7 w-7 rounded-md flex items-center justify-center shrink-0 bg-primary text-primary-foreground text-[10px] font-semibold">
+                        AI
                       </div>
                     )}
                     <div
@@ -329,8 +325,8 @@ export function ProjectWorkspace() {
               {/* Live build steps */}
               {isStreaming && buildSteps.length > 0 && (
                 <div className="flex gap-3">
-                  <div className="h-7 w-7 rounded-md flex items-center justify-center shrink-0 bg-primary text-primary-foreground">
-                    <Sparkles className="h-3.5 w-3.5" />
+                  <div className="h-7 w-7 rounded-md flex items-center justify-center shrink-0 bg-primary text-primary-foreground text-[10px] font-semibold">
+                    AI
                   </div>
                   <div className="flex-1 rounded-lg border border-border bg-secondary/40 p-3 space-y-2">
                     {buildSteps.map((step, i) => (
