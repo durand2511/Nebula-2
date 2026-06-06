@@ -1,3 +1,4 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
 @import "tailwindcss";
 @import "tw-animate-css";
 @plugin "@tailwindcss/typography";
@@ -59,6 +60,7 @@
   --font-sans: var(--app-font-sans);
   --font-serif: var(--app-font-serif);
   --font-mono: var(--app-font-mono);
+  --font-display: var(--app-font-display);
 
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
@@ -73,46 +75,47 @@
   --elevate-1: rgba(255,255,255, .04);
   --elevate-2: rgba(255,255,255, .09);
 
-  --background: 240 10% 4%;
-  --foreground: 0 0% 98%;
-  --card: 240 10% 6%;
-  --card-foreground: 0 0% 98%;
-  --card-border: 240 10% 12%;
-  --popover: 240 10% 6%;
-  --popover-foreground: 0 0% 98%;
-  --popover-border: 240 10% 12%;
-  --primary: 185 100% 50%;
-  --primary-foreground: 240 10% 4%;
-  --secondary: 240 10% 12%;
-  --secondary-foreground: 0 0% 98%;
-  --muted: 240 10% 12%;
-  --muted-foreground: 240 5% 65%;
-  --accent: 240 10% 16%;
-  --accent-foreground: 0 0% 98%;
-  --destructive: 0 62.8% 30.6%;
+  --background: 30 8% 5%;
+  --foreground: 40 12% 96%;
+  --card: 30 8% 7%;
+  --card-foreground: 40 12% 96%;
+  --card-border: 32 7% 14%;
+  --popover: 30 9% 8%;
+  --popover-foreground: 40 12% 96%;
+  --popover-border: 32 7% 14%;
+  --primary: 35 96% 56%;
+  --primary-foreground: 30 40% 8%;
+  --secondary: 32 7% 12%;
+  --secondary-foreground: 40 12% 96%;
+  --muted: 32 7% 12%;
+  --muted-foreground: 38 6% 58%;
+  --accent: 32 8% 15%;
+  --accent-foreground: 40 12% 96%;
+  --destructive: 0 62.8% 42%;
   --destructive-foreground: 0 0% 98%;
-  --border: 240 10% 12%;
-  --input: 240 10% 16%;
-  --ring: 185 100% 50%;
-  --chart-1: 185 100% 50%;
-  --chart-2: 240 10% 60%;
-  --chart-3: 160 100% 50%;
-  --chart-4: 280 100% 60%;
-  --chart-5: 340 100% 60%;
+  --border: 32 7% 14%;
+  --input: 32 8% 16%;
+  --ring: 35 96% 56%;
+  --chart-1: 35 96% 56%;
+  --chart-2: 22 90% 52%;
+  --chart-3: 48 92% 58%;
+  --chart-4: 12 80% 55%;
+  --chart-5: 40 8% 55%;
   
-  --sidebar: 240 10% 6%;
-  --sidebar-foreground: 0 0% 98%;
-  --sidebar-border: 240 10% 12%;
-  --sidebar-primary: 185 100% 50%;
-  --sidebar-primary-foreground: 240 10% 4%;
-  --sidebar-accent: 240 10% 16%;
-  --sidebar-accent-foreground: 0 0% 98%;
-  --sidebar-ring: 185 100% 50%;
+  --sidebar: 30 8% 7%;
+  --sidebar-foreground: 40 12% 96%;
+  --sidebar-border: 32 7% 14%;
+  --sidebar-primary: 35 96% 56%;
+  --sidebar-primary-foreground: 30 40% 8%;
+  --sidebar-accent: 32 8% 15%;
+  --sidebar-accent-foreground: 40 12% 96%;
+  --sidebar-ring: 35 96% 56%;
 
-  --app-font-sans: 'Inter', sans-serif;
+  --app-font-sans: 'Inter', system-ui, sans-serif;
   --app-font-serif: Georgia, serif;
   --app-font-mono: 'JetBrains Mono', 'Fira Code', Menlo, monospace;
-  --radius: 0.5rem;
+  --app-font-display: 'Space Grotesk', 'Inter', sans-serif;
+  --radius: 0.625rem;
   
   --shadow-2xs: 0px 2px 0px 0px hsl(0 0% 0% / 0.5);
   --shadow-xs: 0px 2px 0px 0px hsl(0 0% 0% / 0.5);
@@ -145,5 +148,25 @@
 
   body {
     @apply font-sans antialiased bg-background text-foreground;
+    font-feature-settings: "cv11", "ss01";
+  }
+
+  h1, h2, h3, h4 {
+    @apply font-display;
+    letter-spacing: -0.02em;
+  }
+}
+
+@layer utilities {
+  /* Blueprint grid — the Foundry texture, not a generic glow */
+  .bg-blueprint {
+    background-image:
+      linear-gradient(to right, hsl(var(--border) / 0.5) 1px, transparent 1px),
+      linear-gradient(to bottom, hsl(var(--border) / 0.5) 1px, transparent 1px);
+    background-size: 40px 40px;
+  }
+  .mask-fade-b {
+    -webkit-mask-image: linear-gradient(to bottom, black 0%, transparent 100%);
+    mask-image: linear-gradient(to bottom, black 0%, transparent 100%);
   }
 }

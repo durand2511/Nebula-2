@@ -1,6 +1,7 @@
 import { Link, useLocation } from "wouter";
-import { Terminal, LayoutDashboard, Plus } from "lucide-react";
+import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Logo } from "@/components/logo";
 
 export function Layout({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
@@ -9,22 +10,24 @@ export function Layout({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col flex-1 dark">
       {!isWorkspace && (
-        <header className="sticky top-0 z-50 w-full border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-          <div className="container flex h-14 items-center px-4">
-            <Link href="/" className="mr-6 flex items-center space-x-2 text-primary">
-              <Terminal className="h-5 w-5" />
-              <span className="font-bold hidden sm:inline-block">Buildly</span>
+        <header className="sticky top-0 z-50 w-full border-b border-border/70 bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+          <div className="mx-auto w-full max-w-6xl flex h-16 items-center px-6">
+            <Link href="/" className="mr-8" data-testid="link-home-logo">
+              <Logo />
             </Link>
-            <nav className="flex items-center space-x-6 text-sm font-medium">
-              <Link href="/projects" className={`transition-colors hover:text-foreground/80 ${location === "/projects" ? "text-foreground" : "text-foreground/60"}`}>
+            <nav className="hidden sm:flex items-center gap-7 text-sm font-medium">
+              <Link
+                href="/projects"
+                className={`transition-colors hover:text-foreground ${location === "/projects" ? "text-foreground" : "text-muted-foreground"}`}
+              >
                 Projects
               </Link>
             </nav>
-            <div className="ml-auto flex items-center space-x-4">
+            <div className="ml-auto flex items-center gap-3">
               <Link href="/">
-                <Button variant="secondary" size="sm" className="gap-2" data-testid="button-new-project-nav">
+                <Button size="sm" className="gap-1.5 font-medium" data-testid="button-new-project-nav">
                   <Plus className="h-4 w-4" />
-                  New App
+                  New build
                 </Button>
               </Link>
             </div>
