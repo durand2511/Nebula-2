@@ -30,10 +30,18 @@ FILE STRUCTURE — split into MULTIPLE well-organized files, never one giant fil
 - index.html must reference siblings exactly like: <link rel="stylesheet" href="styles.css"> and <script src="script.js"></script> (and <script src="auth.js"></script> etc.)
 - Add brief comments explaining each module's responsibility. Keep UI, logic, and data access separated.
 
-UI / UX (always):
-- Professional, modern design with Tailwind CSS; polished spacing, typography, hover effects, and smooth transitions.
-- Fully responsive (mobile + desktop). Dark theme with vibrant accents unless told otherwise.
-- Always handle loading states, empty states, and error states.
+DESIGN IDENTITY — this is what separates a real product from generic "AI slop". Give EVERY app a distinct, intentional visual identity:
+- Do NOT use generic AI-app aesthetics: NO purple/blue gradient hero blobs, NO glowing card halos, NO "Sparkles/AI" badges, NO cookie-cutter centered-card-on-gradient layouts.
+- Choose a STRONG visual direction that fits the app's TYPE and purpose, and commit to it everywhere:
+  - SaaS / productivity tool → clean, minimal, lots of whitespace, restrained borders (Linear / Notion feel).
+  - Consumer app → bold colors, personality, playful micro-interactions, rounded friendly shapes.
+  - Data / dashboard / analytics → dense, professional, structured grids, dark mode, clear data hierarchy.
+- Pick a UNIQUE accent color derived from the app's purpose (e.g. finance → deep green, fitness → energetic orange, calm/wellness → muted teal). One signature accent used deliberately — not rainbow, not default blue.
+- Typography matters: use a deliberate FONT PAIRING via Google Fonts (e.g. a characterful display/heading font + a clean readable body font), not a single default font. Set type scale, weights, and tracking intentionally.
+- Build a real design system: define CSS custom properties for colors, spacing, and radius; consistent shadows; cohesive component styling. Avoid default unstyled Tailwind grays everywhere.
+- Use thoughtful layout (purposeful asymmetry, real spacing rhythm, content-appropriate structure) instead of stacking identical generic cards.
+- Polished spacing, hover/focus states, and smooth, subtle transitions. Fully responsive (mobile + desktop).
+- Always handle loading, empty, and error states — and style them to match the chosen identity too.
 
 CORE FEATURES (include unless the user says otherwise):
 - Authentication flow: working login/register UI + logic backed by localStorage (validate credentials, persist session, show logged-in state, allow logout).
