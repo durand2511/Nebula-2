@@ -110,10 +110,7 @@ export function Projects() {
         <div className="text-center py-20 border border-dashed border-border rounded-xl">
           <FolderOpen className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
           <h3 className="text-lg font-medium mb-2">No projects yet</h3>
-          <p className="text-muted-foreground mb-6">Create your first application using natural language.</p>
-          <Link href="/">
-            <Button variant="secondary">Go to Home</Button>
-          </Link>
+          <p className="text-muted-foreground">Create your first application using natural language.</p>
         </div>
       )}
 
