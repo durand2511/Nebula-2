@@ -5,7 +5,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { ArrowRight, Loader2, Clock, Terminal } from "lucide-react";
+import { ArrowRight, Loader2, Clock } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { Link } from "wouter";
 
@@ -104,8 +104,7 @@ export function Home() {
               <Link key={project.id} href={`/projects/${project.id}`}>
                 <Card className="hover:border-primary/50 transition-colors cursor-pointer h-full bg-card hover:bg-card/80">
                   <CardHeader className="pb-2">
-                    <CardTitle className="text-lg flex items-center gap-2">
-                      <Terminal className="w-4 h-4 text-primary" />
+                    <CardTitle className="text-lg">
                       {project.name}
                     </CardTitle>
                     <CardDescription className="line-clamp-2">{project.description || "No description"}</CardDescription>

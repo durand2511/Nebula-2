@@ -10,7 +10,6 @@ import {
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
-  Terminal,
   Send,
   Loader2,
   FileCode,
@@ -281,7 +280,7 @@ export function ProjectWorkspace() {
     return (
       <div className="flex-1 flex items-center justify-center bg-background">
         <div className="text-center">
-          <Terminal className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+          <FolderOpen className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
           <h2 className="text-2xl font-bold">Project not found</h2>
           <Link href="/projects" className="text-primary hover:underline mt-4 inline-block">
             Return to projects
@@ -302,7 +301,6 @@ export function ProjectWorkspace() {
             </Button>
           </Link>
           <div className="flex items-center gap-2 border-l border-border/50 pl-4">
-            <Terminal className="h-4 w-4 text-primary" />
             <h1 className="font-semibold text-sm">{project.name}</h1>
             <Badge variant="outline" className="text-[10px] h-5 ml-2 border-primary/20 text-primary/80">
               {project.fileCount} files
@@ -568,7 +566,7 @@ export function ProjectWorkspace() {
                 </div>
               ) : (
                 <div className="flex-1 flex flex-col items-center justify-center gap-4 text-muted-foreground">
-                  <Terminal className="h-16 w-16 opacity-20" />
+                  <MonitorPlay className="h-16 w-16 opacity-20" />
                   <h3 className="text-xl font-bold text-foreground">No Preview Yet</h3>
                   <p className="text-sm max-w-sm text-center">
                     Chat with Buildly to generate your app. The preview will appear here instantly.

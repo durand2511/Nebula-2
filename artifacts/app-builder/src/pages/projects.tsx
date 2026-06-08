@@ -3,7 +3,7 @@ import { useListProjects, useDeleteProject, getListProjectsQueryKey, getGetRecen
 import { useQueryClient } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { formatDistanceToNow } from "date-fns";
-import { Terminal, FileCode, MessageSquare, Clock, Plus, Trash2, Loader2 } from "lucide-react";
+import { FileCode, MessageSquare, Clock, Plus, Trash2, Loader2, FolderOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/ui/card";
 import {
@@ -38,7 +38,7 @@ export function Projects() {
   };
 
   return (
-    <div className="container py-10">
+    <div className="mx-auto w-full max-w-6xl px-4 py-10">
       <div className="flex justify-between items-center mb-8">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Projects</h1>
@@ -78,8 +78,7 @@ export function Projects() {
               <Link href={`/projects/${project.id}`} data-testid={`link-project-${project.id}`}>
                 <Card className="hover:border-primary/50 transition-colors cursor-pointer h-full flex flex-col">
                   <CardHeader>
-                    <CardTitle className="flex items-center gap-2 pr-8">
-                      <Terminal className="w-5 h-5 text-primary shrink-0" />
+                    <CardTitle className="pr-8">
                       {project.name}
                     </CardTitle>
                     <CardDescription className="line-clamp-2">
@@ -109,7 +108,7 @@ export function Projects() {
         </div>
       ) : (
         <div className="text-center py-20 border border-dashed border-border rounded-xl">
-          <Terminal className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+          <FolderOpen className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
           <h3 className="text-lg font-medium mb-2">No projects yet</h3>
           <p className="text-muted-foreground mb-6">Create your first application using natural language.</p>
           <Link href="/">
