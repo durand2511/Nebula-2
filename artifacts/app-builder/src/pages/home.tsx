@@ -5,7 +5,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { ArrowRight, Loader2, Clock } from "lucide-react";
+import { ArrowRight, Loader2 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { Link } from "wouter";
 import logoUrl from "@assets/JRD_logo_trimmed.png";
@@ -78,11 +78,8 @@ export function Home() {
       </div>
 
       <div className="w-full max-w-3xl">
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="text-2xl font-bold flex items-center gap-2">
-            <Clock className="w-5 h-5 text-muted-foreground" />
-            Recent Projects
-          </h2>
+        <div className="mb-6 flex flex-col items-center gap-2 rounded-xl border border-border bg-card shadow-sm px-6 py-5 text-center">
+          <h2 className="text-2xl font-bold">Recent Projects</h2>
           <Link href="/projects" className="text-sm text-primary hover:underline" data-testid="link-view-all-projects">
             View all
           </Link>
