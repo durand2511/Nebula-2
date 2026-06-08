@@ -1,13 +1,10 @@
 import { useState } from "react";
 import { useLocation } from "wouter";
-import { useCreateProject, useGetRecentProjects, getListProjectsQueryKey, getGetRecentProjectsQueryKey } from "@workspace/api-client-react";
+import { useCreateProject, getListProjectsQueryKey, getGetRecentProjectsQueryKey } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { ArrowRight, Loader2 } from "lucide-react";
-import { formatDistanceToNow } from "date-fns";
-import { Link } from "wouter";
 import logoUrl from "@assets/JRD_logo_trimmed.png";
 
 export function Home() {
@@ -16,7 +13,6 @@ export function Home() {
   const [prompt, setPrompt] = useState("");
   
   const createProject = useCreateProject();
-  const { data: recentProjects, isLoading: isLoadingRecent } = useGetRecentProjects();
 
   const handleCreate = () => {
     if (!prompt.trim()) return;
@@ -75,47 +71,6 @@ export function Home() {
             </Button>
           </div>
         </div>
-      </div>
-
-      <div className="w-full max-w-3xl">
-        <div className="mb-6 flex flex-col items-center gap-2 rounded-xl border border-border bg-card shadow-sm px-6 py-5 text-center">
-          <h2 className="text-2xl font-bold">Recent Projects</h2>
-          <Link href="/projects" className="text-sm text-primary hover:underline" data-testid="link-view-all-projects">
-            View all
-          </Link>
-        </div>
-
-        {isLoadingRecent ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {[1, 2].map(i => (
-              <div key={i} className="h-32 rounded-xl bg-card border border-border animate-pulse" />
-            ))}
-          </div>
-        ) : recentProjects && recentProjects.length > 0 ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {recentProjects.slice(0, 4).map(project => (
-              <Link key={project.id} href={`/projects/${project.id}`}>
-                <Card className="hover:border-primary/50 transition-colors cursor-pointer h-full bg-card hover:bg-card/80">
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-lg">
-                      {project.name}
-                    </CardTitle>
-                    <CardDescription className="line-clamp-2">{project.description || "No description"}</CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="text-xs text-muted-foreground">
-                      Updated {formatDistanceToNow(new Date(project.updatedAt), { addSuffix: true })}
-                    </div>
-                  </CardContent>
-                </Card>
-              </Link>
-            ))}
-          </div>
-        ) : (
-          <div className="text-center p-12 border border-dashed border-border rounded-xl text-muted-foreground">
-            No recent projects. Start by typing a prompt above.
-          </div>
-        )}
       </div>
     </div>
   );
