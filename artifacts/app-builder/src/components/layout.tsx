@@ -1,7 +1,6 @@
 import { Link, useLocation } from "wouter";
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import logoUrl from "@assets/JRD_logo_trimmed.png";
 
 export function Layout({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
@@ -12,10 +11,10 @@ export function Layout({ children }: { children: React.ReactNode }) {
       {!isWorkspace && (
         <header className="sticky top-0 z-50 w-full border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
           <div className="container flex h-14 items-center px-4">
-            <Link href="/" className="mr-6 flex items-center">
-              <img src={logoUrl} alt="Logo" className="h-9 w-auto" />
-            </Link>
             <nav className="flex items-center space-x-6 text-sm font-medium">
+              <Link href="/" className={`transition-colors hover:text-foreground/80 ${location === "/" ? "text-foreground" : "text-foreground/60"}`}>
+                Home
+              </Link>
               <Link href="/projects" className={`transition-colors hover:text-foreground/80 ${location === "/projects" ? "text-foreground" : "text-foreground/60"}`}>
                 Projects
               </Link>

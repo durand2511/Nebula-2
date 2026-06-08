@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { ArrowRight, Loader2, Clock } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { Link } from "wouter";
+import logoUrl from "@assets/JRD_logo_trimmed.png";
 
 export function Home() {
   const [, setLocation] = useLocation();
@@ -39,13 +40,8 @@ export function Home() {
 
   return (
     <div className="flex-1 flex flex-col items-center pt-24 px-4 pb-12 w-full max-w-4xl mx-auto">
-      <div className="text-center space-y-4 mb-12">
-        <h1 className="text-5xl md:text-6xl font-extrabold tracking-tight text-foreground">
-          What do you want to <span className="text-primary">build?</span>
-        </h1>
-        <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
-          Describe your app in natural language. We'll generate the code, set up the database, and deploy it.
-        </p>
+      <div className="flex justify-center mb-12">
+        <img src={logoUrl} alt="JRD" className="h-44 w-auto" />
       </div>
 
       <div className="w-full max-w-3xl relative mb-20">
