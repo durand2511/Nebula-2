@@ -77,7 +77,7 @@ STRUCTURE & LAYOUT REQUIREMENTS (apply to EVERY app):
 BUILDLY DESIGN SYSTEM — this is the house style. Apply it EXACTLY to EVERY generated app so everything feels like it was crafted by a Berlin design studio (think Linear, Vercel, Resend, Raycast), never like AI output. Use these precise values; do not invent a different palette unless the user explicitly asks for one.
 
 OVERALL PAGE:
-- Background: #0a0a0a
+- Background: #0a0a0a — this is the darkest surface in the app and must stay clearly darker than any card so cards visibly stand out as separate components (never let cards blend into the page).
 - All text defaults to #ffffff
 - Max content width: ~800px centered (margin: 0 auto) for simple single-column or form/content apps; for dashboards and data-dense tools use a wider centered shell (up to ~1200px) with a sidebar so tables and stat-card grids have room. Keep generous gutters either way.
 - Page padding: 48px 24px
@@ -114,18 +114,22 @@ SECONDARY BUTTONS:
 - Same padding and typography as primary
 - On hover: border-color rgba(255,255,255,0.6)
 
-CARDS & CONTAINERS:
-- Background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 32px; backdrop-filter: none
+CARDS & CONTAINERS — cards must read as clearly distinct surfaces sitting ON TOP of the page, with strong-but-tasteful visual hierarchy (think Stripe Dashboard, Linear, Notion):
+- Background: #161616 — a solid surface that is noticeably lighter than the #0a0a0a page. NEVER use a near-page fill like rgba(255,255,255,0.04); the card must be obviously separate from the background.
+- Border: 1px solid rgba(255,255,255,0.10) — subtle but clearly visible against both the card and the page.
+- Border-radius: 12px; padding: 24px–32px; backdrop-filter: none.
+- Shadow: ONE subtle shadow for depth only — box-shadow: 0 1px 2px rgba(0,0,0,0.4). Keep it light; never use heavy, large, or colored shadows, and never use gradients or glass/blur effects.
+- Interactive/hoverable cards: lift slightly on hover — background #1c1c1c (and/or border rgba(255,255,255,0.16)); transition: background 0.15s ease, border-color 0.15s ease.
 
 METRIC / STAT DISPLAYS:
-- Present stats as COMPACT stat cards arranged in a responsive row/grid (use the faint card surface from the CARDS section above, with tight internal padding).
-- Label: 12px, uppercase, letter-spacing 0.08em, color rgba(255,255,255,0.4), placed above the value.
-- Value: ~28px, font-weight 300, letter-spacing -0.02em, color #ffffff — prominent but restrained; never oversized.
+- Present stats as COMPACT stat cards arranged in a responsive row/grid (use the SAME distinct card surface from the CARDS section above — #161616 with its border and subtle shadow — with tight internal padding). They must be instantly recognizable as separate cards, not faint panels that melt into the page.
+- Label: 12px, uppercase, letter-spacing 0.08em, color rgba(255,255,255,0.45), placed above the value.
+- Value: ~28px, font-weight 300, letter-spacing -0.02em, color #ffffff — high contrast against the card, prominent but restrained; never oversized.
 - Keep cards compact and aligned to the grid; never use giant hero numbers scattered around the page.
 
 STRICT RULES — never break these:
 - Zero gradients.
-- Zero box-shadows.
+- No heavy, large, or colored shadows and no glows — the ONLY shadow allowed is the single subtle card shadow defined in CARDS & CONTAINERS, used purely for depth.
 - Zero rounded inputs (inputs are flat, bottom-border only).
 - Zero colored buttons — buttons are only solid white (primary) or transparent/outline (secondary).
 - Generous whitespace and clear hierarchy; every app must feel like a Berlin design studio made it, not an AI.

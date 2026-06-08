@@ -20,12 +20,10 @@ import {
   File as FileIcon,
   RefreshCw,
   Check,
-  FileCode2,
   AlertTriangle,
   Wand2,
   X,
   Square,
-  Sparkles,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -33,7 +31,22 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 type ProjectFile = { id: number; path: string; content: string; language: string };
-type BuildStep = { label: string; done: boolean };
+
+/**
+ * Fixed, user-facing build phases shown as a friendly AI activity timeline while
+ * an app is generating. Deliberately non-technical: no filenames or source code
+ * are surfaced — the goal is a sense of an AI agent at work, not a code editor.
+ */
+const BUILD_PHASES: { label: string; description: string }[] = [
+  { label: "Analyse opdracht", description: "De wensen en functionaliteit worden geïnterpreteerd." },
+  { label: "Structuur bepalen", description: "De opbouw en navigatie van de app worden vastgelegd." },
+  { label: "Wireframe ontwerpen", description: "De globale indeling van de schermen wordt geschetst." },
+  { label: "UI ontwerpen", description: "Dashboard-layout en componenten worden samengesteld." },
+  { label: "Functionaliteit bouwen", description: "Formulieren, validatie en opslag worden toegevoegd." },
+  { label: "Gegevensopslag configureren", description: "Gegevens worden lokaal opgeslagen en bewaard." },
+  { label: "Testen", description: "Gebruikersflows en foutafhandeling worden gecontroleerd." },
+  { label: "Optimaliseren", description: "Prestaties en details worden verfijnd." },
+];
 
 /** Strip FILE: ... ``` ... ``` blocks from AI text (safety net — server already cleans). */
 function cleanContent(raw: string): string {
@@ -106,31 +119,6 @@ function buildPreviewHtml(files: ProjectFile[] | undefined): string {
   return html;
 }
 
-function fileLabel(path: string): string {
-  return `Writing ${path}`;
-}
-
-/**
- * From the raw streaming text, pull out the file currently being written and the
- * code produced so far, so the UI can show it live as it's typed.
- */
-function extractLiveFile(raw: string): { path: string; code: string } | null {
-  if (!raw) return null;
-  const idx = raw.lastIndexOf("\nFILE:");
-  const start = idx === -1 ? (raw.startsWith("FILE:") ? 0 : -1) : idx + 1;
-  if (start === -1) return null;
-  const seg = raw.slice(start);
-  const header = seg.match(/^FILE:\s*(.+?)\r?\n/);
-  if (!header) return null;
-  const path = header[1].trim();
-  const fence = seg.match(/```[\w+-]*[^\n]*\r?\n/);
-  if (!fence || fence.index === undefined) return { path, code: "" };
-  const after = seg.slice(fence.index + fence[0].length);
-  const close = after.indexOf("```");
-  const code = close === -1 ? after : after.slice(0, close);
-  return { path, code };
-}
-
 export function ProjectWorkspace() {
   const [, params] = useRoute("/projects/:id");
   const projectId = Number(params?.id);
@@ -138,11 +126,13 @@ export function ProjectWorkspace() {
 
   const [prompt, setPrompt] = useState("");
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"code" | "preview">("code");
+  const [activeTab, setActiveTab] = useState<"code" | "preview">("preview");
+  const [showCode, setShowCode] = useState(false);
   const [previewKey, setPreviewKey] = useState(0);
 
   const [isStreaming, setIsStreaming] = useState(false);
-  const [buildSteps, setBuildSteps] = useState<BuildStep[]>([]);
+  const [phaseIndex, setPhaseIndex] = useState(0);
+  const [buildError, setBuildError] = useState<string | null>(null);
   const [pendingUser, setPendingUser] = useState<string | null>(null);
   const [previewErrors, setPreviewErrors] = useState<string[]>([]);
   const [streamedText, setStreamedText] = useState("");
@@ -151,7 +141,6 @@ export function ProjectWorkspace() {
   const autoSentRef = useRef(false);
   const previewIframeRef = useRef<HTMLIFrameElement>(null);
   const abortRef = useRef<AbortController | null>(null);
-  const codeScrollRef = useRef<HTMLDivElement>(null);
   const messagesLenRef = useRef(0);
   const pendingBaseRef = useRef(0);
   // Raw tokens received so far, and how many we've revealed to the UI. A rAF loop
@@ -175,7 +164,7 @@ export function ProjectWorkspace() {
     if (messagesEndRef.current) {
       messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
     }
-  }, [messages, buildSteps, pendingUser]);
+  }, [messages, phaseIndex, pendingUser]);
 
   // Track the known message count so the optimistic user bubble can be dropped
   // only once the persisted message actually lands (handles repeated prompts).
@@ -208,6 +197,17 @@ export function ProjectWorkspace() {
         setStreamedText(rawStreamRef.current.slice(0, next));
       }
     }, 33);
+    return () => clearInterval(id);
+  }, [isStreaming]);
+
+  // Advance the friendly build timeline at a steady pace while streaming. The
+  // final phase keeps spinning until the real build finishes (see `finally`),
+  // so the timeline never claims completion before the app is actually ready.
+  useEffect(() => {
+    if (!isStreaming) return;
+    const id = setInterval(() => {
+      setPhaseIndex((i) => Math.min(i + 1, BUILD_PHASES.length - 1));
+    }, 3800);
     return () => clearInterval(id);
   }, [isStreaming]);
 
@@ -249,7 +249,9 @@ export function ProjectWorkspace() {
     async (messageContent: string) => {
       if (!projectId) return;
       setIsStreaming(true);
-      setBuildSteps([]);
+      setPhaseIndex(0);
+      setBuildError(null);
+      setShowCode(false);
       setPendingUser(messageContent);
       pendingBaseRef.current = messagesLenRef.current;
       setPreviewErrors([]);
@@ -276,12 +278,6 @@ export function ProjectWorkspace() {
         const decoder = new TextDecoder();
         let buffer = "";
 
-        const pushStep = (label: string) =>
-          setBuildSteps((prev) => [
-            ...prev.map((s) => ({ ...s, done: true })),
-            { label, done: false },
-          ]);
-
         const handleEvent = (line: string) => {
           if (!line.startsWith("data:")) return;
           let event: { type: string; message?: string; path?: string; text?: string };
@@ -291,19 +287,16 @@ export function ProjectWorkspace() {
             return;
           }
           if (event.type === "delta" && typeof event.text === "string") {
-            // Buffer raw tokens; the reveal loop below types them out smoothly so
-            // the model's bursty output still appears as continuous live code.
+            // Buffer raw tokens; the reveal loop types them out smoothly so the
+            // model's bursty output appears as continuous narration in the chat.
             rawStreamRef.current += event.text;
-          } else if (event.type === "status" && event.message) {
-            pushStep(event.message);
           } else if (event.type === "file" && event.path) {
-            pushStep(fileLabel(event.path));
-            // refresh file list as files arrive so the tree fills in live
+            // Refresh the file list as files arrive so the saved app is ready the
+            // moment the build finishes. Filenames are intentionally NOT surfaced
+            // in the UI during generation.
             queryClient.invalidateQueries({ queryKey: getListFilesQueryKey(projectId) });
-          } else if (event.type === "done") {
-            setBuildSteps((prev) => prev.map((s) => ({ ...s, done: true })));
           } else if (event.type === "error") {
-            pushStep(event.message ?? "Something went wrong");
+            setBuildError(event.message ?? "Something went wrong");
           }
         };
 
@@ -320,18 +313,16 @@ export function ProjectWorkspace() {
         if (buffer.trim()) handleEvent(buffer.trim());
       } catch (err) {
         const stopped = err instanceof DOMException && err.name === "AbortError";
-        setBuildSteps((prev) => [
-          ...prev.map((s) => ({ ...s, done: true })),
-          { label: stopped ? "Stopped by you" : "Something went wrong while building", done: true },
-        ]);
+        if (!stopped) setBuildError("Something went wrong while building");
       } finally {
         abortRef.current = null;
-        // Reveal any remaining buffered tail so the final lines aren't cut off
-        // in the brief moment before the view switches to the saved files.
+        // Reveal any remaining buffered tail so the final narration isn't cut off
+        // in the brief moment before the view switches to the finished app.
         shownLenRef.current = rawStreamRef.current.length;
         setStreamedText(rawStreamRef.current);
         setIsStreaming(false);
-        setBuildSteps((prev) => prev.map((s) => ({ ...s, done: true })));
+        // Mark every phase complete the moment the real build finishes.
+        setPhaseIndex(BUILD_PHASES.length);
         setPendingUser(null);
         await Promise.all([
           queryClient.invalidateQueries({ queryKey: getListMessagesQueryKey(projectId) }),
@@ -385,8 +376,6 @@ export function ProjectWorkspace() {
 
   const activeFile = files?.find((f) => f.path === selectedFile);
   const previewHtml = buildPreviewHtml(files);
-  const liveFile = isStreaming ? extractLiveFile(streamedText) : null;
-  const activeStep = buildSteps.find((s) => !s.done)?.label;
 
   // Conversational narration: the model speaks first (before any "FILE:" block),
   // so show that opening text as a live, streaming assistant message in the chat.
@@ -408,13 +397,6 @@ export function ProjectWorkspace() {
     lastMsg?.role === "user" &&
     lastMsg.content === pendingUser;
   const showPendingUser = pendingUser !== null && !persistedArrived;
-
-  // Keep the live code box scrolled to the newest line as tokens stream in.
-  useEffect(() => {
-    if (codeScrollRef.current) {
-      codeScrollRef.current.scrollTop = codeScrollRef.current.scrollHeight;
-    }
-  }, [streamedText]);
 
   if (isLoadingProject) {
     return (
@@ -504,28 +486,11 @@ export function ProjectWorkspace() {
                 </div>
               )}
 
-              {/* Activity log (Replit-style) */}
-              {buildSteps.length > 0 && (
-                <div className="space-y-1.5">
-                  {buildSteps.map((step, i) => {
-                    const isFile = step.label.startsWith("Writing");
-                    return (
-                      <div key={i} className="flex items-center gap-2.5 text-xs">
-                        <span className="flex h-5 w-5 items-center justify-center rounded-md border border-border/60 bg-card/40 shrink-0 text-muted-foreground">
-                          {!step.done ? (
-                            <Loader2 className="h-3 w-3 animate-spin text-foreground" />
-                          ) : isFile ? (
-                            <FileCode2 className="h-3 w-3" />
-                          ) : (
-                            <Check className="h-3 w-3" />
-                          )}
-                        </span>
-                        <span className={step.done ? "text-muted-foreground" : "text-foreground"}>
-                          {step.label}
-                        </span>
-                      </div>
-                    );
-                  })}
+              {/* Build error surfaced inline (no technical detail during the build) */}
+              {buildError && (
+                <div className="flex items-start gap-2.5 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-foreground">
+                  <AlertTriangle className="h-3.5 w-3.5 text-destructive shrink-0 mt-0.5" />
+                  <span>{buildError}</span>
                 </div>
               )}
 
@@ -576,14 +541,12 @@ export function ProjectWorkspace() {
         {/* Center/Right Panel: Code & Preview */}
         <div className="flex-1 flex flex-col min-w-0 min-h-0 bg-background">
           {isStreaming ? (
-            <div className="flex-1 flex flex-col min-h-0">
-              {/* Live build header */}
+            <div className="flex-1 flex flex-col min-h-0 bg-background">
+              {/* Build header */}
               <div className="h-12 border-b border-border bg-card/50 flex items-center gap-3 px-4 shrink-0">
                 <div className="flex items-center gap-2 text-sm font-medium text-foreground min-w-0">
                   <Loader2 className="h-4 w-4 animate-spin text-primary shrink-0" />
-                  <span className="truncate">
-                    {liveFile ? `Writing ${liveFile.path}` : activeStep ?? "Building your app"}
-                  </span>
+                  <span className="truncate">Buildly is building your app…</span>
                 </div>
                 <Button
                   variant="outline"
@@ -597,52 +560,64 @@ export function ProjectWorkspace() {
                 </Button>
               </div>
 
-              {/* Live code box */}
-              <div className="flex-1 min-h-0 p-4">
-                <div className="h-full flex flex-col rounded-xl border border-border bg-[#0d1117] overflow-hidden shadow-xl">
-                  <div className="h-9 flex items-center gap-2 px-4 border-b border-white/10 shrink-0">
-                    <span className="flex gap-1.5">
-                      <span className="h-2.5 w-2.5 rounded-full bg-[#ff5f56]" />
-                      <span className="h-2.5 w-2.5 rounded-full bg-[#ffbd2e]" />
-                      <span className="h-2.5 w-2.5 rounded-full bg-[#27c93f]" />
-                    </span>
-                    <span className="ml-2 text-xs font-mono text-gray-400 truncate">
-                      {liveFile?.path ?? "generating…"}
-                    </span>
-                  </div>
-                  <div ref={codeScrollRef} className="flex-1 overflow-auto p-4">
-                    {liveFile && liveFile.code ? (
-                      <pre className="text-[12.5px] leading-relaxed font-mono text-gray-300 whitespace-pre-wrap break-words">
-                        <code>{liveFile.code}</code>
-                        <span className="inline-block w-2 h-[1.1em] -mb-[0.15em] bg-primary/80 animate-pulse ml-0.5 align-middle" />
-                      </pre>
-                    ) : (
-                      <div className="flex items-center gap-2 text-sm text-gray-500 font-mono">
-                        <Sparkles className="h-4 w-4 text-primary/70" />
-                        {activeStep ?? "Thinking through your request…"}
-                      </div>
-                    )}
-                  </div>
+              {/* AI activity timeline */}
+              <div className="flex-1 min-h-0 overflow-auto p-8">
+                <div className="mx-auto max-w-md">
+                  <ol className="relative">
+                    {BUILD_PHASES.map((phase, i) => {
+                      const done = i < phaseIndex;
+                      const active = i === phaseIndex;
+                      const isLast = i === BUILD_PHASES.length - 1;
+                      return (
+                        <li key={phase.label} className="relative flex gap-4 pb-7 last:pb-0">
+                          {!isLast && (
+                            <span
+                              className={`absolute left-4 top-9 -bottom-1 w-px -translate-x-1/2 ${
+                                done ? "bg-primary/40" : "bg-border"
+                              }`}
+                            />
+                          )}
+                          <span
+                            className={`relative z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border ${
+                              done
+                                ? "border-primary/50 bg-primary/10 text-primary"
+                                : active
+                                ? "border-primary bg-primary/10 text-primary"
+                                : "border-border bg-card/40 text-muted-foreground"
+                            }`}
+                          >
+                            {done ? (
+                              <Check className="h-4 w-4" />
+                            ) : active ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <span className="h-2 w-2 rounded-full bg-current opacity-40" />
+                            )}
+                          </span>
+                          <div className="pt-1.5">
+                            <p
+                              className={`text-sm font-medium leading-none ${
+                                active
+                                  ? "text-foreground"
+                                  : done
+                                  ? "text-foreground/80"
+                                  : "text-muted-foreground"
+                              }`}
+                            >
+                              {phase.label}
+                            </p>
+                            {(active || done) && (
+                              <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
+                                {phase.description}
+                              </p>
+                            )}
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ol>
                 </div>
               </div>
-
-              {/* Activity trail */}
-              {buildSteps.length > 0 && (
-                <div className="border-t border-border bg-card/40 px-4 py-2.5 shrink-0 max-h-24 overflow-auto">
-                  <div className="flex flex-wrap gap-x-4 gap-y-1.5">
-                    {buildSteps.map((step, i) => (
-                      <span key={i} className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                        {step.done ? (
-                          <Check className="h-3 w-3 text-primary shrink-0" />
-                        ) : (
-                          <Loader2 className="h-3 w-3 animate-spin shrink-0" />
-                        )}
-                        {step.label}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
             </div>
           ) : (
           <Tabs
@@ -653,32 +628,64 @@ export function ProjectWorkspace() {
             <div className="h-12 border-b border-border bg-card/50 flex items-center px-4 shrink-0">
               <TabsList className="bg-transparent h-auto p-0 gap-4">
                 <TabsTrigger
-                  value="code"
-                  className="data-[state=active]:bg-transparent data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:shadow-none rounded-none px-2 py-3 h-12 text-muted-foreground data-[state=active]:text-foreground"
-                >
-                  <Code2 className="h-4 w-4 mr-2" />
-                  Code
-                </TabsTrigger>
-                <TabsTrigger
                   value="preview"
                   className="data-[state=active]:bg-transparent data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:shadow-none rounded-none px-2 py-3 h-12 text-muted-foreground data-[state=active]:text-foreground"
                 >
                   <MonitorPlay className="h-4 w-4 mr-2" />
                   Preview
                 </TabsTrigger>
+                {showCode && (
+                  <TabsTrigger
+                    value="code"
+                    className="data-[state=active]:bg-transparent data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:shadow-none rounded-none px-2 py-3 h-12 text-muted-foreground data-[state=active]:text-foreground"
+                  >
+                    <Code2 className="h-4 w-4 mr-2" />
+                    Code
+                  </TabsTrigger>
+                )}
               </TabsList>
 
-              {activeTab === "preview" && previewHtml && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="ml-auto h-8 text-muted-foreground hover:text-foreground"
-                  onClick={() => setPreviewKey((k) => k + 1)}
-                >
-                  <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
-                  Refresh
-                </Button>
-              )}
+              <div className="ml-auto flex items-center gap-1">
+                {activeTab === "preview" && previewHtml && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 text-muted-foreground hover:text-foreground"
+                    onClick={() => setPreviewKey((k) => k + 1)}
+                  >
+                    <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+                    Refresh
+                  </Button>
+                )}
+                {previewHtml &&
+                  (showCode ? (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 text-muted-foreground hover:text-foreground"
+                      onClick={() => {
+                        setShowCode(false);
+                        setActiveTab("preview");
+                      }}
+                    >
+                      <Code2 className="h-3.5 w-3.5 mr-1.5" />
+                      Verberg broncode
+                    </Button>
+                  ) : (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 text-muted-foreground hover:text-foreground"
+                      onClick={() => {
+                        setShowCode(true);
+                        setActiveTab("code");
+                      }}
+                    >
+                      <Code2 className="h-3.5 w-3.5 mr-1.5" />
+                      Bekijk broncode
+                    </Button>
+                  ))}
+              </div>
             </div>
 
             {/* Code Tab */}
@@ -743,18 +750,7 @@ export function ProjectWorkspace() {
 
             {/* Preview Tab */}
             <TabsContent value="preview" className="flex-1 flex flex-col m-0 border-none p-0 outline-none">
-              {isStreaming && !previewHtml ? (
-                <div className="flex-1 flex flex-col items-center justify-center gap-4 bg-white text-gray-500">
-                  <div className="relative">
-                    <FileCode2 className="h-12 w-12 text-primary/40" />
-                    <Loader2 className="h-6 w-6 animate-spin text-primary absolute -bottom-1 -right-1" />
-                  </div>
-                  <p className="text-lg font-semibold text-gray-900">
-                    {buildSteps.find((s) => !s.done)?.label ?? "Building your app"}
-                  </p>
-                  <p className="text-sm">Writing your code file by file…</p>
-                </div>
-              ) : previewHtml ? (
+              {previewHtml ? (
                 <div className="relative flex-1 flex">
                   <iframe
                     key={previewKey}
