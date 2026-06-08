@@ -16,18 +16,29 @@ generated output ("dit moet de ai app builder maken ... geen ai slop").
 
 **How to apply:** Encode design rules in the generation system prompt
 (`buildSystemPrompt` in `artifacts/api-server/src/routes/projects.ts`, the
-MANDATORY DESIGN SYSTEM section), then restart the API server and verify e2e.
+`DESIGN` / `DESIGN PRINCIPLES` section), then restart the API server and verify e2e.
 Only touch Buildly's own UI if the user explicitly says the builder interface itself.
 
-**Current target = a FIXED dark design system the user pasted verbatim** (NOT the
-earlier "default to light theme" guidance, which is superseded). The prompt hard-codes
-an exact dark palette (--bg #0a0a0a, --surface #111111, dark-green --accent #1a3a0f,
-light --text #e8e8e8), Inter font, 900px centered layout, and STRICT rules (no
-gradients, no box shadows, green-only accent). It is explicitly **non-overridable**:
-if the user's per-app request asks for a different look ("make it light", "blue
-buttons"), the prompt tells the model to keep the system and ignore that part.
-Verify e2e by generating with a deliberately conflicting request and grepping the
-output for `#0a0a0a` / `--accent: #1a3a0f` present and white-bg/gradient absent.
+**Current target = "think like a world-class product designer; every app must look
+like a premium $10k product."** This SUPERSEDES the earlier FIXED dark-green design
+system (exact dark palette + STRICT no-gradients/no-shadows/green-only rules), which
+the user rejected as too rigid/flat. The prompt is now PRINCIPLE-driven, not a locked
+theme: cohesive limited palette of the model's choosing (light/dark/branded as fits
+the app), strong type scale, generous spacing, clear hierarchy, tasteful soft shadows
++ subtle gradients allowed, smooth 150-250ms motion, polished components & states,
+pixel-perfect alignment, "would Linear/Stripe/Vercel/Notion ship this?" bar.
+**It now HONORS the brief** — if the user asks for light mode / a brand color / a vibe,
+design to it (the opposite of the old non-overridable rule).
+**Why:** user said the rigid forced theme looked cheap; wanted real design thinking.
+Verify e2e by generating an app and judging polish in the preview screenshot; don't
+grep for a fixed hex anymore.
+
+## Auth only when the user asks
+- The generation prompt must NOT add login / sign-up / accounts / auth by default —
+  apps open straight into their main view. Build an auth flow ONLY when the request
+  explicitly mentions accounts/login/users/sign-in (see `AUTHENTICATION — ONLY WHEN
+  THE USER ASKS` in the prompt).
+- **Why:** user complained every generated app started with a login wall.
 
 # Generation pipeline robustness
 
