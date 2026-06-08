@@ -118,15 +118,15 @@ export function Projects() {
       )}
 
       <AlertDialog open={pendingDelete !== null} onOpenChange={(open) => { if (!open) { setPendingDelete(null); deleteProject.reset(); } }}>
-        <AlertDialogContent className="light">
+        <AlertDialogContent className="light bg-white border-neutral-200">
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete project?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This will permanently delete <span className="font-semibold text-foreground">{pendingDelete?.name}</span> and all of its files and messages. This action cannot be undone.
+            <AlertDialogTitle className="text-xl font-semibold text-neutral-900">Delete project?</AlertDialogTitle>
+            <AlertDialogDescription className="text-base text-neutral-600">
+              This will permanently delete <span className="font-semibold text-neutral-900">{pendingDelete?.name}</span> and all of its files and messages. This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           {deleteProject.isError && (
-            <p className="text-sm text-destructive" data-testid="text-delete-error">
+            <p className="text-sm font-medium text-red-600" data-testid="text-delete-error">
               Couldn't delete the project. Please try again.
             </p>
           )}

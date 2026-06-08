@@ -1,6 +1,4 @@
 import { Link, useLocation } from "wouter";
-import { Plus } from "lucide-react";
-import { Button } from "@/components/ui/button";
 
 export function Layout({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
@@ -19,14 +17,6 @@ export function Layout({ children }: { children: React.ReactNode }) {
                 Projects
               </Link>
             </nav>
-            <div className="ml-auto flex items-center space-x-4">
-              <Link href="/">
-                <Button variant="secondary" size="sm" className="gap-2" data-testid="button-new-project-nav">
-                  <Plus className="h-4 w-4" />
-                  New App
-                </Button>
-              </Link>
-            </div>
           </div>
         </header>
       )}
