@@ -87,13 +87,22 @@ function buildPreviewHtml(files: ProjectFile[] | undefined): string {
     (m, src: string) => (isExternal(src) ? m : ""),
   );
 
+  // The preview runs in a sandbox WITHOUT allow-same-origin (opaque origin) so
+  // generated code can't reach Buildly's storage/cookies. A side effect is that
+  // window.localStorage/sessionStorage THROW a SecurityError on access, which made
+  // every generated app's save flow fail ("could not save"). Install an in-memory
+  // shim (only when native storage is unavailable) so apps work for the session
+  // without weakening the sandbox. Must run before any app code.
+  const storageShim = `<script>(function(){function mk(){var d={};return{getItem:function(k){k=String(k);return Object.prototype.hasOwnProperty.call(d,k)?d[k]:null},setItem:function(k,v){d[String(k)]=String(v)},removeItem:function(k){delete d[String(k)]},clear:function(){d={}},key:function(i){return Object.keys(d)[i]||null},get length(){return Object.keys(d).length}}}function ok(n){try{var s=window[n];if(!s)return false;s.setItem("__b","1");s.removeItem("__b");return true}catch(e){return false}}["localStorage","sessionStorage"].forEach(function(n){if(!ok(n)){var s=mk();try{Object.defineProperty(window,n,{value:s,configurable:true})}catch(e){try{window[n]=s}catch(e2){}}}});})();</script>`;
+
   // Inject a tiny reporter (first thing in the doc) that forwards runtime errors
   // to the parent window so Buildly can surface them and offer an auto-fix.
   const reporter = `<script>(function(){function r(p){try{parent.postMessage({__buildlyError:true,message:String(p.message||"Error"),source:p.source||"",line:p.line||0},"*")}catch(e){}}window.addEventListener("error",function(e){r({message:e.message,source:e.filename,line:e.lineno})});window.addEventListener("unhandledrejection",function(e){var m=e.reason&&e.reason.message?e.reason.message:e.reason;r({message:"Unhandled promise rejection: "+m})});})();</script>`;
+  const inject = storageShim + reporter;
   if (/<head[^>]*>/i.test(html)) {
-    html = html.replace(/<head[^>]*>/i, (m) => m + reporter);
+    html = html.replace(/<head[^>]*>/i, (m) => m + inject);
   } else {
-    html = reporter + html;
+    html = inject + html;
   }
   return html;
 }
@@ -178,11 +187,16 @@ export function ProjectWorkspace() {
   // Smoothly reveal buffered tokens so the live code "types" out continuously,
   // even though the reasoning model emits text in bursts separated by pauses.
   // The pace accelerates with backlog so it never lags far behind real output.
+  // NOTE: driven by setInterval, NOT requestAnimationFrame. Buildly runs inside an
+  // embedded canvas iframe, and browsers heavily throttle/pause rAF callbacks for
+  // iframes — which froze the live reveal for real users (it only animated when the
+  // app was a foreground tab, e.g. during automated testing). A timer keeps the
+  // typewriter advancing regardless of the iframe's paint scheduling.
   useEffect(() => {
     if (!isStreaming) return;
-    let raf = 0;
     let lastT = performance.now();
-    const tick = (now: number) => {
+    const id = setInterval(() => {
+      const now = performance.now();
       const dt = now - lastT;
       lastT = now;
       const target = rawStreamRef.current.length;
@@ -194,10 +208,8 @@ export function ProjectWorkspace() {
         shownLenRef.current = next;
         setStreamedText(rawStreamRef.current.slice(0, next));
       }
-      raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
+    }, 33);
+    return () => clearInterval(id);
   }, [isStreaming]);
 
   useEffect(() => {
