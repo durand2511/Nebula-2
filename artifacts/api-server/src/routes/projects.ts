@@ -95,6 +95,12 @@ ACCESSIBILITY & UX (always):
 - Ensure readable color contrast (WCAG AA) for text and interactive elements in the chosen palette.
 - Provide instant feedback: disable buttons while busy, show inline validation, confirm destructive actions, and use subtle toasts/messages for success/failure.
 
+FINAL SELF-CHECK (verify before you output — a broken app is a failure):
+- Every sibling file you reference in index.html (<link href>, <script src>) is actually generated below, and every file you generate is referenced. No dangling references, no orphan files.
+- All href/src to your own files use relative paths (e.g. "styles.css", "script.js") — never absolute paths or external URLs for local assets.
+- The app runs with ZERO uncaught console errors and every interactive element works.
+- The requested feature is fully implemented end-to-end, with realistic seed data visible on first load.
+
 OUTPUT FORMAT — output each file as its own block, html first:
 FILE: index.html
 LANGUAGE: html
@@ -211,17 +217,72 @@ const MAX_CONTINUATIONS = 2;
 const CONTINUE_PROMPT =
   "Your previous message was cut off. Continue from exactly where you stopped, without repeating anything you already wrote. Resume mid-line if needed.";
 
+// Retry a transient OpenAI failure a couple of times with backoff so a single
+// network blip doesn't turn into a failed generation for the user.
+async function withRetry<T>(fn: () => Promise<T>, label: string): Promise<T> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      if (attempt < 2) {
+        logger.warn({ err, attempt, label }, "OpenAI call failed; retrying");
+        await new Promise((r) => setTimeout(r, 600 * (attempt + 1)));
+      }
+    }
+  }
+  throw lastErr;
+}
+
+// Derive a concise, human project title from the user's first prompt. Runs
+// fire-and-forget after the first build so it never blocks or breaks generation.
+async function generateProjectName(projectId: number, prompt: string): Promise<void> {
+  try {
+    const completion = await withRetry(
+      () =>
+        openai.chat.completions.create({
+          model: "gpt-5.4",
+          max_completion_tokens: 30,
+          messages: [
+            {
+              role: "system",
+              content:
+                "Create a short, catchy product name (2-4 words, Title Case) for the app the user describes. Reply with ONLY the name — no quotes, punctuation, or explanation.",
+            },
+            { role: "user", content: prompt },
+          ],
+        }),
+      "project-name",
+    );
+    const name = (completion.choices[0]?.message?.content ?? "")
+      .replace(/["'`*]/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (name && name.length >= 2 && name.length <= 60) {
+      await db.update(projects).set({ name }).where(eq(projects.id, projectId));
+      logger.info({ projectId, name }, "Auto-named project");
+    }
+  } catch (err) {
+    logger.error({ err, projectId }, "Failed to auto-name project");
+  }
+}
+
 // Generate a full response, transparently continuing when the model truncates
 // (finish_reason === "length") so large multi-file apps don't get saved half-written.
 async function generateWithContinuation(messages: ChatMsg[]): Promise<string> {
   let full = "";
   const msgs = [...messages];
   for (let round = 0; round <= MAX_CONTINUATIONS; round++) {
-    const completion = await openai.chat.completions.create({
-      model: "gpt-5.4",
-      max_completion_tokens: MAX_GENERATION_TOKENS,
-      messages: msgs,
-    });
+    const completion = await withRetry(
+      () =>
+        openai.chat.completions.create({
+          model: "gpt-5.4",
+          max_completion_tokens: MAX_GENERATION_TOKENS,
+          messages: msgs,
+        }),
+      "sync-completion",
+    );
     const choice = completion.choices[0];
     const part = choice?.message?.content ?? "";
     full += part;
@@ -465,7 +526,13 @@ router.post("/projects/:projectId/messages", async (req, res) => {
         ...chatMessages,
       ])) || "I'm sorry, I couldn't generate a response.";
 
-    await persistGeneratedFiles(projectId, aiContent, existingFiles);
+    const written = await persistGeneratedFiles(projectId, aiContent, existingFiles);
+    if (written.length === 0 && existingFiles.length === 0) {
+      res.status(422).json({
+        error: "I couldn't generate valid files. Please try rephrasing your request.",
+      });
+      return;
+    }
     await db.update(projects).set({ updatedAt: new Date() }).where(eq(projects.id, projectId));
 
     const [assistantMsg] = await db
@@ -473,9 +540,12 @@ router.post("/projects/:projectId/messages", async (req, res) => {
       .values({ projectId, role: "assistant", content: extractExplanation(aiContent) })
       .returning();
 
-    // Learn from this adjustment (follow-up on an existing app) without blocking the response.
     if (isAdjustment) {
+      // Learn from this adjustment (follow-up on an existing app) without blocking the response.
       void recordLearning(projectId, content);
+    } else {
+      // Give the project a real name derived from the first prompt.
+      void generateProjectName(projectId, content);
     }
 
     res.status(201).json(assistantMsg);
@@ -555,12 +625,16 @@ router.post("/projects/:projectId/messages/stream", async (req, res) => {
     ];
 
     for (let round = 0; round <= MAX_CONTINUATIONS; round++) {
-      const stream = await openai.chat.completions.create({
-        model: "gpt-5.4",
-        max_completion_tokens: MAX_GENERATION_TOKENS,
-        stream: true,
-        messages: streamMsgs,
-      });
+      const stream = await withRetry(
+        () =>
+          openai.chat.completions.create({
+            model: "gpt-5.4",
+            max_completion_tokens: MAX_GENERATION_TOKENS,
+            stream: true,
+            messages: streamMsgs,
+          }),
+        "stream-completion",
+      );
 
       let part = "";
       let finishReason: string | null = null;
@@ -620,8 +694,11 @@ router.post("/projects/:projectId/messages/stream", async (req, res) => {
     send({ type: "done", files: written });
     res.end();
 
-    // Learn from this adjustment (follow-up on an existing app) so future apps improve.
-    if (!isFirstBuild) {
+    if (isFirstBuild) {
+      // Give the project a real name derived from the first prompt.
+      void generateProjectName(projectId, content);
+    } else {
+      // Learn from this adjustment (follow-up on an existing app) so future apps improve.
       void recordLearning(projectId, content);
     }
   } catch (err) {

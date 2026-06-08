@@ -32,4 +32,13 @@ explicitly says the builder interface itself.
   ("continue where you stopped") up to MAX_CONTINUATIONS so large multi-file apps
   aren't saved half-written (the FILE_BLOCK_REGEX only persists CLOSED blocks, so a
   truncated tail would silently vanish without this). **Keep the two routes in sync.**
+- All OpenAI calls go through `withRetry` (3 attempts, backoff) so transient blips
+  don't fail a generation. On FIRST build (not adjustments) both routes fire-and-forget
+  `generateProjectName` to replace the crude home-page placeholder name with a distilled
+  2-4 word title; the frontend re-fetches the project after `done` to show it.
+- Frontend `buildPreviewHtml` inlines sibling css/js into the srcDoc, then STRIPS any
+  leftover LOCAL `<link rel=stylesheet>`/`<script src>` (external http(s)//data: kept) —
+  in srcDoc there's no base URL so unresolved local refs 404 and silently break the app.
+- **Whenever you add a behavior to one message route, mirror it in the other** (naming,
+  continuation, no-valid-files guard) — they have drifted before.
 

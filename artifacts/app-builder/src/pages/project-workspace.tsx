@@ -71,6 +71,20 @@ function buildPreviewHtml(files: ProjectFile[] | undefined): string {
     }
   }
 
+  // Neutralize any leftover references to LOCAL siblings we couldn't inline
+  // (e.g. a file the AI referenced but didn't generate). In srcDoc there is no
+  // base URL, so these would 404 and silently break the app. External URLs
+  // (http(s)://, //, data:) are left untouched.
+  const isExternal = (url: string) => /^(https?:)?\/\//i.test(url) || url.startsWith("data:");
+  html = html.replace(
+    /<link\b[^>]*\bhref=["']([^"']+)["'][^>]*>/gi,
+    (m, href: string) => (/rel=["']?stylesheet/i.test(m) && !isExternal(href) ? "" : m),
+  );
+  html = html.replace(
+    /<script\b[^>]*\bsrc=["']([^"']+)["'][^>]*>\s*<\/script>/gi,
+    (m, src: string) => (isExternal(src) ? m : ""),
+  );
+
   // Inject a tiny reporter (first thing in the doc) that forwards runtime errors
   // to the parent window so Buildly can surface them and offer an auto-fix.
   const reporter = `<script>(function(){function r(p){try{parent.postMessage({__buildlyError:true,message:String(p.message||"Error"),source:p.source||"",line:p.line||0},"*")}catch(e){}}window.addEventListener("error",function(e){r({message:e.message,source:e.filename,line:e.lineno})});window.addEventListener("unhandledrejection",function(e){var m=e.reason&&e.reason.message?e.reason.message:e.reason;r({message:"Unhandled promise rejection: "+m})});})();</script>`;
