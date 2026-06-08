@@ -31,7 +31,6 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Badge } from "@/components/ui/badge";
 
 type ProjectFile = { id: number; path: string; content: string; language: string };
 type BuildStep = { label: string; done: boolean };
@@ -451,9 +450,6 @@ export function ProjectWorkspace() {
           </Link>
           <div className="flex items-center gap-2 border-l border-border/50 pl-4">
             <h1 className="font-semibold text-sm">{project.name}</h1>
-            <Badge variant="outline" className="text-[10px] h-5 ml-2 border-primary/20 text-primary/80">
-              {project.fileCount} files
-            </Badge>
           </div>
         </div>
       </header>
@@ -462,10 +458,6 @@ export function ProjectWorkspace() {
       <div className="flex-1 flex overflow-hidden">
         {/* Left Panel: Chat */}
         <div className="w-[380px] border-r border-border bg-card/30 flex flex-col shrink-0">
-          <div className="p-4 border-b border-border/50 flex justify-between items-center bg-card/50">
-            <h2 className="font-semibold text-sm">Buildly Assistant</h2>
-          </div>
-
           <ScrollArea className="flex-1 p-4">
             <div className="space-y-5 pb-4">
               {isLoadingMessages ? (
