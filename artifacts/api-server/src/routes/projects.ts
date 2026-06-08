@@ -164,7 +164,8 @@ FINAL SELF-CHECK (verify before you output — a broken app is a failure):
 - The app runs with ZERO uncaught console errors and every interactive element works.
 - The requested feature is fully implemented end-to-end, with realistic seed data visible on first load.
 
-OUTPUT FORMAT — output each file as its own block, html first:
+OUTPUT FORMAT:
+Start with 1-2 warm, conversational sentences (NO code, NO file names) spoken directly to the user, explaining what you're about to build. For a change to an existing app, say specifically what you will change and why. THEN output each file as its own block, html first:
 FILE: index.html
 LANGUAGE: html
 \`\`\`
@@ -181,7 +182,7 @@ LANGUAGE: javascript
 ...full file...
 \`\`\`
 
-After ALL file blocks, write ONE short sentence (max 20 words) describing what you did. NEVER repeat code in that sentence.${fileContext}`;
+Output nothing after the final code block — your opening sentences to the user are the only prose you write.${fileContext}`;
 }
 
 function buildFileContext(files: { path: string; content: string }[]): string {
@@ -362,15 +363,18 @@ async function generateWithContinuation(messages: ChatMsg[]): Promise<string> {
   return full;
 }
 
-function extractExplanation(raw: string): string {
-  const lastFence = raw.lastIndexOf("```");
-  let tail = lastFence >= 0 ? raw.slice(lastFence + 3) : raw;
-  tail = tail
-    .replace(/^[a-zA-Z]*\n/, "")
-    .replace(/FILE:\s*[^\n]+/g, "")
+function extractNarration(raw: string): string {
+  // The model now speaks first, before the first FILE block. Keep that opening
+  // prose as the assistant's chat message and drop everything from FILE: onward.
+  // Match FILE: only at the start of a line, so prose like "update FILE: x" in
+  // the narration itself doesn't prematurely truncate it.
+  const marker = raw.match(/^FILE:/m);
+  const idx = marker?.index ?? -1;
+  const head = (idx >= 0 ? raw.slice(0, idx) : raw)
+    .replace(/```[\s\S]*$/, "")
     .replace(/LANGUAGE:\s*[^\n]+/g, "")
     .trim();
-  return tail || "Done! Your app has been updated.";
+  return head || "Done! Your app has been updated.";
 }
 
 async function persistGeneratedFiles(
@@ -600,7 +604,7 @@ router.post("/projects/:projectId/messages", async (req, res) => {
 
     const [assistantMsg] = await db
       .insert(projectMessages)
-      .values({ projectId, role: "assistant", content: extractExplanation(aiContent) })
+      .values({ projectId, role: "assistant", content: extractNarration(aiContent) })
       .returning();
 
     if (isAdjustment) {
@@ -649,6 +653,19 @@ router.post("/projects/:projectId/messages/stream", async (req, res) => {
   res.on("close", () => {
     if (!res.writableEnded) clientGone = true;
   });
+
+  // Keep the proxied SSE connection from idling out while the model "thinks":
+  // on complex apps there can be a 30s+ gap before the first token, which the
+  // edge proxy would otherwise treat as a dead connection and drop. A comment
+  // line resets idle timers and is ignored by the client's `data:` parser.
+  const heartbeat = setInterval(() => {
+    if (clientGone || res.writableEnded || res.destroyed) return;
+    try {
+      res.write(": ping\n\n");
+    } catch {
+      /* socket already torn down */
+    }
+  }, 10000);
 
   try {
     const projectRows = await db.select().from(projects).where(eq(projects.id, projectId));
@@ -796,7 +813,7 @@ router.post("/projects/:projectId/messages/stream", async (req, res) => {
 
     await db.update(projects).set({ updatedAt: new Date() }).where(eq(projects.id, projectId));
 
-    const explanation = extractExplanation(full);
+    const explanation = extractNarration(full);
     const [assistantMsg] = await db
       .insert(projectMessages)
       .values({ projectId, role: "assistant", content: explanation })
@@ -817,6 +834,8 @@ router.post("/projects/:projectId/messages/stream", async (req, res) => {
     req.log.error({ err }, "Failed to stream message");
     send({ type: "error", message: "Something went wrong while building your app." });
     res.end();
+  } finally {
+    clearInterval(heartbeat);
   }
 });
 

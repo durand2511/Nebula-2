@@ -144,6 +144,8 @@ export function ProjectWorkspace() {
   const previewIframeRef = useRef<HTMLIFrameElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const codeScrollRef = useRef<HTMLDivElement>(null);
+  const messagesLenRef = useRef(0);
+  const pendingBaseRef = useRef(0);
 
   const { data: project, isLoading: isLoadingProject } = useGetProject(projectId, {
     query: { enabled: !!projectId, queryKey: getGetProjectQueryKey(projectId) },
@@ -162,6 +164,12 @@ export function ProjectWorkspace() {
       messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
     }
   }, [messages, buildSteps, pendingUser]);
+
+  // Track the known message count so the optimistic user bubble can be dropped
+  // only once the persisted message actually lands (handles repeated prompts).
+  useEffect(() => {
+    messagesLenRef.current = messages?.length ?? 0;
+  }, [messages]);
 
   useEffect(() => {
     if (files && files.length > 0 && !selectedFile) {
@@ -203,6 +211,7 @@ export function ProjectWorkspace() {
       setIsStreaming(true);
       setBuildSteps([]);
       setPendingUser(messageContent);
+      pendingBaseRef.current = messagesLenRef.current;
       setPreviewErrors([]);
       setStreamedText("");
       setActiveTab("preview");
@@ -331,6 +340,27 @@ export function ProjectWorkspace() {
   const liveFile = isStreaming ? extractLiveFile(streamedText) : null;
   const activeStep = buildSteps.find((s) => !s.done)?.label;
 
+  // Conversational narration: the model speaks first (before any "FILE:" block),
+  // so show that opening text as a live, streaming assistant message in the chat.
+  // Match FILE: only at line start so prose mentioning it doesn't cut narration.
+  const fileMarker = streamedText.match(/^FILE:/m);
+  const fileMarkerIdx = fileMarker?.index ?? -1;
+  const liveNarration =
+    isStreaming && streamedText
+      ? (fileMarkerIdx === -1 ? streamedText : streamedText.slice(0, fileMarkerIdx)).trim()
+      : "";
+
+  // The server persists the user message immediately, so a mid-build refetch of
+  // `messages` can momentarily contain it alongside our optimistic copy. Drop the
+  // optimistic bubble only once a NEW persisted user message has landed (count
+  // grew past the pre-send baseline), so identical re-prompts still show.
+  const lastMsg = messages?.[messages.length - 1];
+  const persistedArrived =
+    (messages?.length ?? 0) > pendingBaseRef.current &&
+    lastMsg?.role === "user" &&
+    lastMsg.content === pendingUser;
+  const showPendingUser = pendingUser !== null && !persistedArrived;
+
   // Keep the live code box scrolled to the newest line as tokens stream in.
   useEffect(() => {
     if (codeScrollRef.current) {
@@ -417,11 +447,19 @@ export function ProjectWorkspace() {
               )}
 
               {/* Optimistic pending user message */}
-              {pendingUser && (
+              {showPendingUser && (
                 <div className="flex justify-end">
                   <div className="text-sm rounded-lg px-3.5 py-2 max-w-[90%] whitespace-pre-wrap bg-primary/10 text-foreground">
                     {pendingUser}
                   </div>
+                </div>
+              )}
+
+              {/* Live assistant narration — what it's doing, streamed token-by-token */}
+              {isStreaming && liveNarration && (
+                <div className="text-sm text-foreground/90 leading-relaxed whitespace-pre-wrap">
+                  {liveNarration}
+                  <span className="inline-block w-1.5 h-[1em] ml-0.5 -mb-[0.1em] bg-primary/70 animate-pulse align-middle" />
                 </div>
               )}
 
