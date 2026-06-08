@@ -570,7 +570,7 @@ export function ProjectWorkspace() {
         </div>
 
         {/* Center/Right Panel: Code & Preview */}
-        <div className="flex-1 flex flex-col min-w-0 bg-background">
+        <div className="flex-1 flex flex-col min-w-0 min-h-0 bg-background">
           {isStreaming ? (
             <div className="flex-1 flex flex-col min-h-0">
               {/* Live build header */}
@@ -644,7 +644,7 @@ export function ProjectWorkspace() {
           <Tabs
             value={activeTab}
             onValueChange={(v) => setActiveTab(v as "code" | "preview")}
-            className="flex-1 flex flex-col"
+            className="flex-1 flex flex-col min-h-0"
           >
             <div className="h-12 border-b border-border bg-card/50 flex items-center px-4 shrink-0">
               <TabsList className="bg-transparent h-auto p-0 gap-4">
@@ -678,13 +678,13 @@ export function ProjectWorkspace() {
             </div>
 
             {/* Code Tab */}
-            <TabsContent value="code" className="flex-1 flex m-0 overflow-hidden border-none p-0 outline-none">
-              <div className="w-[240px] border-r border-border bg-card/20 flex flex-col shrink-0">
+            <TabsContent value="code" className="flex-1 flex m-0 min-h-0 overflow-hidden border-none p-0 outline-none">
+              <div className="w-[240px] border-r border-border bg-card/20 flex flex-col min-h-0 shrink-0">
                 <div className="px-4 py-3 border-b border-border/50 text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
                   <FolderOpen className="h-3 w-3" />
                   Files
                 </div>
-                <ScrollArea className="flex-1">
+                <div className="flex-1 min-h-0 overflow-y-auto">
                   <div className="p-2 space-y-0.5">
                     {isLoadingFiles ? (
                       <div className="flex justify-center p-4">
@@ -711,22 +711,22 @@ export function ProjectWorkspace() {
                       ))
                     )}
                   </div>
-                </ScrollArea>
+                </div>
               </div>
 
-              <div className="flex-1 flex flex-col min-w-0 bg-[#0d1117] relative">
+              <div className="flex-1 flex flex-col min-w-0 min-h-0 bg-[#0d1117] relative">
                 {activeFile ? (
                   <>
                     <div className="h-10 border-b border-white/10 bg-[#0d1117] flex items-center px-4 shrink-0 text-xs text-gray-400 font-mono">
                       {activeFile.path}
                     </div>
-                    <ScrollArea className="flex-1">
+                    <div className="flex-1 min-h-0 overflow-auto">
                       <div className="p-4 min-w-max">
                         <pre className="text-[13px] leading-relaxed font-mono text-gray-300">
                           <code>{activeFile.content}</code>
                         </pre>
                       </div>
-                    </ScrollArea>
+                    </div>
                   </>
                 ) : (
                   <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground">
