@@ -16,11 +16,18 @@ generated output ("dit moet de ai app builder maken ... geen ai slop").
 
 **How to apply:** Encode design rules in the generation system prompt
 (`buildSystemPrompt` in `artifacts/api-server/src/routes/projects.ts`, the
-DESIGN IDENTITY section), then restart the API server and verify e2e: generated
-`styles.css`/`index.html` should show a real font pairing (Google Fonts),
-several CSS custom properties for an accent system, and no purple/blue gradient
-blobs or "Sparkles/AI" badges. Only touch Buildly's own UI if the user
-explicitly says the builder interface itself.
+MANDATORY DESIGN SYSTEM section), then restart the API server and verify e2e.
+Only touch Buildly's own UI if the user explicitly says the builder interface itself.
+
+**Current target = a FIXED dark design system the user pasted verbatim** (NOT the
+earlier "default to light theme" guidance, which is superseded). The prompt hard-codes
+an exact dark palette (--bg #0a0a0a, --surface #111111, dark-green --accent #1a3a0f,
+light --text #e8e8e8), Inter font, 900px centered layout, and STRICT rules (no
+gradients, no box shadows, green-only accent). It is explicitly **non-overridable**:
+if the user's per-app request asks for a different look ("make it light", "blue
+buttons"), the prompt tells the model to keep the system and ignore that part.
+Verify e2e by generating with a deliberately conflicting request and grepping the
+output for `#0a0a0a` / `--accent: #1a3a0f` present and white-bg/gradient absent.
 
 # Generation pipeline robustness
 
