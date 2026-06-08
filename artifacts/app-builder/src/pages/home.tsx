@@ -5,7 +5,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Sparkles, ArrowRight, Loader2, Clock, Terminal } from "lucide-react";
+import { ArrowRight, Loader2, Clock, Terminal } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { Link } from "wouter";
 
@@ -48,9 +48,8 @@ export function Home() {
         </p>
       </div>
 
-      <div className="w-full max-w-3xl relative mb-20 group">
-        <div className="absolute -inset-1 bg-gradient-to-r from-primary/30 to-primary/10 rounded-xl blur opacity-75 group-hover:opacity-100 transition duration-1000 group-hover:duration-200"></div>
-        <div className="relative bg-card rounded-xl border border-border/50 shadow-2xl p-2 flex flex-col">
+      <div className="w-full max-w-3xl relative mb-20">
+        <div className="relative bg-card rounded-xl border border-border shadow-lg p-2 flex flex-col">
           <Textarea
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
@@ -58,11 +57,7 @@ export function Home() {
             className="min-h-[160px] resize-none border-0 bg-transparent text-lg focus-visible:ring-0 p-4"
             data-testid="input-home-prompt"
           />
-          <div className="flex justify-between items-center px-4 pb-2 pt-2 border-t border-border/50">
-            <div className="text-sm text-muted-foreground flex items-center gap-2">
-              <Sparkles className="w-4 h-4 text-primary" />
-              AI is ready
-            </div>
+          <div className="flex justify-end items-center px-4 pb-2 pt-2 border-t border-border/50">
             <Button 
               size="lg" 
               onClick={handleCreate} 

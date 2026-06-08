@@ -1,13 +1,41 @@
-import { useListProjects, getListProjectsQueryKey } from "@workspace/api-client-react";
+import { useState } from "react";
+import { useListProjects, useDeleteProject, getListProjectsQueryKey, getGetRecentProjectsQueryKey } from "@workspace/api-client-react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { formatDistanceToNow } from "date-fns";
-import { Terminal, FileCode, MessageSquare, Clock, Plus } from "lucide-react";
+import { Terminal, FileCode, MessageSquare, Clock, Plus, Trash2, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 export function Projects() {
   const { data: projects, isLoading } = useListProjects();
+  const queryClient = useQueryClient();
+  const deleteProject = useDeleteProject();
+  const [pendingDelete, setPendingDelete] = useState<{ id: number; name: string } | null>(null);
+
+  const confirmDelete = () => {
+    if (!pendingDelete) return;
+    deleteProject.mutate(
+      { projectId: pendingDelete.id },
+      {
+        onSuccess: () => {
+          queryClient.invalidateQueries({ queryKey: getListProjectsQueryKey() });
+          queryClient.invalidateQueries({ queryKey: getGetRecentProjectsQueryKey() });
+          setPendingDelete(null);
+        },
+      }
+    );
+  };
 
   return (
     <div className="container py-10">
@@ -32,35 +60,51 @@ export function Projects() {
       ) : projects && projects.length > 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {projects.map(project => (
-            <Link key={project.id} href={`/projects/${project.id}`} data-testid={`link-project-${project.id}`}>
-              <Card className="hover:border-primary/50 transition-colors cursor-pointer h-full flex flex-col">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Terminal className="w-5 h-5 text-primary" />
-                    {project.name}
-                  </CardTitle>
-                  <CardDescription className="line-clamp-2">
-                    {project.description || "No description"}
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="flex-1">
-                  <div className="flex gap-4 text-sm text-muted-foreground">
-                    <div className="flex items-center gap-1">
-                      <FileCode className="w-4 h-4" />
-                      <span>{project.fileCount} files</span>
+            <div key={project.id} className="relative group">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="absolute top-3 right-3 z-10 h-8 w-8 text-muted-foreground hover:text-destructive opacity-100 md:opacity-0 md:group-hover:opacity-100 focus-visible:opacity-100 transition-opacity"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setPendingDelete({ id: project.id, name: project.name });
+                }}
+                aria-label={`Delete ${project.name}`}
+                data-testid={`button-delete-project-${project.id}`}
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+              <Link href={`/projects/${project.id}`} data-testid={`link-project-${project.id}`}>
+                <Card className="hover:border-primary/50 transition-colors cursor-pointer h-full flex flex-col">
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2 pr-8">
+                      <Terminal className="w-5 h-5 text-primary shrink-0" />
+                      {project.name}
+                    </CardTitle>
+                    <CardDescription className="line-clamp-2">
+                      {project.description || "No description"}
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="flex-1">
+                    <div className="flex gap-4 text-sm text-muted-foreground">
+                      <div className="flex items-center gap-1">
+                        <FileCode className="w-4 h-4" />
+                        <span>{project.fileCount} files</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <MessageSquare className="w-4 h-4" />
+                        <span>{project.messageCount} msgs</span>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-1">
-                      <MessageSquare className="w-4 h-4" />
-                      <span>{project.messageCount} msgs</span>
-                    </div>
-                  </div>
-                </CardContent>
-                <CardFooter className="pt-4 border-t border-border/50 text-xs text-muted-foreground flex items-center gap-1">
-                  <Clock className="w-3 h-3" />
-                  Updated {formatDistanceToNow(new Date(project.updatedAt), { addSuffix: true })}
-                </CardFooter>
-              </Card>
-            </Link>
+                  </CardContent>
+                  <CardFooter className="pt-4 border-t border-border/50 text-xs text-muted-foreground flex items-center gap-1">
+                    <Clock className="w-3 h-3" />
+                    Updated {formatDistanceToNow(new Date(project.updatedAt), { addSuffix: true })}
+                  </CardFooter>
+                </Card>
+              </Link>
+            </div>
           ))}
         </div>
       ) : (
@@ -73,6 +117,43 @@ export function Projects() {
           </Link>
         </div>
       )}
+
+      <AlertDialog open={pendingDelete !== null} onOpenChange={(open) => { if (!open) { setPendingDelete(null); deleteProject.reset(); } }}>
+        <AlertDialogContent className="light">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete project?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete <span className="font-semibold text-foreground">{pendingDelete?.name}</span> and all of its files and messages. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {deleteProject.isError && (
+            <p className="text-sm text-destructive" data-testid="text-delete-error">
+              Couldn't delete the project. Please try again.
+            </p>
+          )}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteProject.isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                confirmDelete();
+              }}
+              disabled={deleteProject.isPending}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              data-testid="button-confirm-delete"
+            >
+              {deleteProject.isPending ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                "Delete"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
