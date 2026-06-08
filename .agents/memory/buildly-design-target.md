@@ -19,19 +19,26 @@ generated output ("dit moet de ai app builder maken ... geen ai slop").
 `DESIGN` / `DESIGN PRINCIPLES` section), then restart the API server and verify e2e.
 Only touch Buildly's own UI if the user explicitly says the builder interface itself.
 
-**Current target = "think like a world-class product designer; every app must look
-like a premium $10k product."** This SUPERSEDES the earlier FIXED dark-green design
-system (exact dark palette + STRICT no-gradients/no-shadows/green-only rules), which
-the user rejected as too rigid/flat. The prompt is now PRINCIPLE-driven, not a locked
-theme: cohesive limited palette of the model's choosing (light/dark/branded as fits
-the app), strong type scale, generous spacing, clear hierarchy, tasteful soft shadows
-+ subtle gradients allowed, smooth 150-250ms motion, polished components & states,
-pixel-perfect alignment, "would Linear/Stripe/Vercel/Notion ship this?" bar.
-**It now HONORS the brief** — if the user asks for light mode / a brand color / a vibe,
-design to it (the opposite of the old non-overridable rule).
-**Why:** user said the rigid forced theme looked cheap; wanted real design thinking.
-Verify e2e by generating an app and judging polish in the preview screenshot; don't
-grep for a fixed hex anymore.
+**Current target = a FIXED "Berlin design studio" house style (Linear/Vercel/Resend/
+Raycast), under a "think like a world-class designer / premium $10k product" framing.**
+The user pasted an EXACT spec the prompt now encodes verbatim as `BUILDLY DESIGN
+SYSTEM`: page bg #0a0a0a, default text #ffffff, 800px centered, 48px 24px padding,
+Inter. Inputs are FLAT (transparent, NO border except a 2px rgba(255,255,255,0.15)
+bottom border, radius 0, focus -> white bottom border, no glow/shadow). Tiny uppercase
+dim labels (11px/0.1em/rgba .4). Primary button = solid white bg + black uppercase
+text, radius 4px, hover opacity .85. Secondary = transparent + thin white outline.
+Cards = rgba(255,255,255,0.04) bg, 1px rgba .08 border, radius 12px, 32px pad. Metric
+= 48px/300 number + tiny uppercase label, no card. STRICT: zero gradients, zero
+box-shadows, zero rounded inputs, zero colored buttons.
+**Honors explicit per-app override:** prompt says "do not invent a different palette
+unless the user explicitly asks." (This locked spec superseded the brief, principle-
+driven 'pick your own palette' phase, which itself superseded an earlier dark-green
+system — the user keeps tightening toward this exact minimal look.)
+**Why:** user said default inputs/forms looked "generic and cheap"; wants the exact
+flat-minimal aesthetic, not AI-generic.
+**How to verify:** generate an app, then read the saved styles.css from the
+`project_files` table (cols: project_id, path, content, language) and confirm the
+exact values; the preview screenshot also shows the dark flat look.
 
 ## Auth only when the user asks
 - The generation prompt must NOT add login / sign-up / accounts / auth by default —

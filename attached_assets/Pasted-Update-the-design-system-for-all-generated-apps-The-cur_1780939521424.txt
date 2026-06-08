@@ -1,0 +1,91 @@
+Update the design system for all generated apps. 
+The current inputs and forms look generic and cheap. 
+Replace everything with this exact styling:
+
+INPUTS & FORM FIELDS:
+- Background: transparent
+- Border: none
+- Border-bottom only: 2px solid rgba(255,255,255,0.15)
+- Border-radius: 0px (flat, no rounded corners)
+- Color: #ffffff
+- Font-size: 16px
+- Font-weight: 400
+- Padding: 16px 0px
+- Placeholder color: rgba(255,255,255,0.3)
+- On focus: border-bottom color changes to #ffffff, 
+  no outline, no glow, no box-shadow
+- Transition: border-color 0.2s ease
+- Width: 100%
+
+LABELS:
+- Font-size: 11px
+- Font-weight: 500
+- Letter-spacing: 0.1em
+- Text-transform: uppercase
+- Color: rgba(255,255,255,0.4)
+- Margin-bottom: 8px
+- Display: block
+
+FORM GROUPS:
+- Margin-bottom: 32px
+- Position: relative
+
+PRIMARY BUTTONS:
+- Background: #ffffff
+- Color: #000000
+- Border: none
+- Border-radius: 4px
+- Padding: 16px 32px
+- Font-size: 13px
+- Font-weight: 600
+- Letter-spacing: 0.08em
+- Text-transform: uppercase
+- Cursor: pointer
+- Transition: opacity 0.15s
+- On hover: opacity 0.85
+- No box-shadow, no gradient
+
+SECONDARY BUTTONS:
+- Background: transparent
+- Color: rgba(255,255,255,0.6)
+- Border: 1px solid rgba(255,255,255,0.2)
+- Same padding and typography as primary
+- On hover: border-color rgba(255,255,255,0.6)
+
+CARDS & CONTAINERS:
+- Background: rgba(255,255,255,0.04)
+- Border: 1px solid rgba(255,255,255,0.08)
+- Border-radius: 12px
+- Padding: 32px
+- Backdrop-filter: none
+
+METRIC/STAT DISPLAYS:
+- Large number: 48px, font-weight 300, 
+  letter-spacing -0.02em, color #ffffff
+- Label below: 12px, uppercase, 
+  letter-spacing 0.08em, color rgba(255,255,255,0.4)
+- No background, no card wrapper, just raw typography
+
+OVERALL PAGE:
+- Background: #0a0a0a
+- All text defaults to #ffffff
+- Max-width: 800px centered
+- Page padding: 48px 24px
+- Font: Inter from Google Fonts
+
+TYPOGRAPHY HIERARCHY:
+- H1: 32px, weight 300, letter-spacing -0.02em
+- H2: 20px, weight 400, letter-spacing -0.01em  
+- Body: 15px, weight 400, line-height 1.7, 
+  color rgba(255,255,255,0.7)
+- Caption: 12px, uppercase, letter-spacing 0.08em,
+  color rgba(255,255,255,0.4)
+
+STRICT RULES:
+- Zero gradients
+- Zero box-shadows
+- Zero rounded inputs
+- Zero colored buttons (only white or transparent)
+- Every app must feel like it was designed 
+  by a Berlin design studio, not an AI
+- Inspired by: Linear, Vercel, Resend, Raycast
