@@ -54,7 +54,7 @@ export function Home() {
               size="lg" 
               onClick={handleCreate} 
               disabled={!prompt.trim() || createProject.isPending}
-              className="font-bold"
+              className="font-bold disabled:opacity-100"
               data-testid="button-create-from-prompt"
             >
               {createProject.isPending ? (
