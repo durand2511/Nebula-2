@@ -84,6 +84,17 @@ RUNTIME ROBUSTNESS (critical — the app MUST run with ZERO uncaught console err
 - Attach event listeners only to elements that exist; verify selectors match the markup you generated.
 - When regenerating after a fix request, output the COMPLETE corrected files (every file), not a partial patch — files fully replace the previous versions.
 
+CONSISTENCY ON EDITS (when current project files already exist below):
+- This is an EDIT to an existing app, not a fresh build. Preserve the established design system: keep the same color palette, fonts, spacing, radius, and component styling unless the user explicitly asks to change them.
+- Make the SMALLEST change that satisfies the request. Do not redesign, rename, or restructure unrelated parts of the app, and do not drop existing features or seeded data.
+- Keep all existing files and their working behavior intact; only change what the request requires.
+
+ACCESSIBILITY & UX (always):
+- Every input has an associated <label>; every icon-only button has an aria-label; images have meaningful alt text.
+- Fully keyboard operable: logical tab order, visible focus states, Enter/Escape work in dialogs and forms. Use semantic elements (button, nav, main, header) — never click handlers on bare <div>s.
+- Ensure readable color contrast (WCAG AA) for text and interactive elements in the chosen palette.
+- Provide instant feedback: disable buttons while busy, show inline validation, confirm destructive actions, and use subtle toasts/messages for success/failure.
+
 OUTPUT FORMAT — output each file as its own block, html first:
 FILE: index.html
 LANGUAGE: html
@@ -191,6 +202,40 @@ async function recordLearning(
     // Learning is best-effort; never let it affect the user's generation.
     logger.error({ err, projectId }, "Failed to record learning");
   }
+}
+
+type ChatMsg = { role: "system" | "user" | "assistant"; content: string };
+
+const MAX_GENERATION_TOKENS = 32768;
+const MAX_CONTINUATIONS = 2;
+const CONTINUE_PROMPT =
+  "Your previous message was cut off. Continue from exactly where you stopped, without repeating anything you already wrote. Resume mid-line if needed.";
+
+// Generate a full response, transparently continuing when the model truncates
+// (finish_reason === "length") so large multi-file apps don't get saved half-written.
+async function generateWithContinuation(messages: ChatMsg[]): Promise<string> {
+  let full = "";
+  const msgs = [...messages];
+  for (let round = 0; round <= MAX_CONTINUATIONS; round++) {
+    const completion = await openai.chat.completions.create({
+      model: "gpt-5.4",
+      max_completion_tokens: MAX_GENERATION_TOKENS,
+      messages: msgs,
+    });
+    const choice = completion.choices[0];
+    const part = choice?.message?.content ?? "";
+    full += part;
+    if (choice?.finish_reason !== "length") break;
+    if (round === MAX_CONTINUATIONS) {
+      logger.warn(
+        "Generation still truncated after continuation budget; last file may be incomplete",
+      );
+      break;
+    }
+    msgs.push({ role: "assistant", content: part });
+    msgs.push({ role: "user", content: CONTINUE_PROMPT });
+  }
+  return full;
 }
 
 function extractExplanation(raw: string): string {
@@ -414,16 +459,11 @@ router.post("/projects/:projectId/messages", async (req, res) => {
       learningsContext,
     );
 
-    const completion = await openai.chat.completions.create({
-      model: "gpt-5.4",
-      max_completion_tokens: 32768,
-      messages: [
+    const aiContent =
+      (await generateWithContinuation([
         { role: "system", content: systemPrompt },
         ...chatMessages,
-      ],
-    });
-
-    const aiContent = completion.choices[0]?.message?.content ?? "I'm sorry, I couldn't generate a response.";
+      ])) || "I'm sorry, I couldn't generate a response.";
 
     await persistGeneratedFiles(projectId, aiContent, existingFiles);
     await db.update(projects).set({ updatedAt: new Date() }).where(eq(projects.id, projectId));
@@ -507,28 +547,52 @@ router.post("/projects/:projectId/messages/stream", async (req, res) => {
       message: isFirstBuild ? "Planning your app" : "Reviewing your request",
     });
 
-    const stream = await openai.chat.completions.create({
-      model: "gpt-5.4",
-      max_completion_tokens: 32768,
-      stream: true,
-      messages: [{ role: "system", content: systemPrompt }, ...chatMessages],
-    });
-
     let full = "";
     const seenFiles = new Set<string>();
-    for await (const chunk of stream) {
-      const delta = chunk.choices[0]?.delta?.content ?? "";
-      if (!delta) continue;
-      full += delta;
-      const re = /FILE:\s*([^\n]+)\n/g;
-      let m;
-      while ((m = re.exec(full)) !== null) {
-        const path = m[1].trim();
-        if (!seenFiles.has(path)) {
-          seenFiles.add(path);
-          send({ type: "file", path });
+    const streamMsgs: ChatMsg[] = [
+      { role: "system", content: systemPrompt },
+      ...chatMessages,
+    ];
+
+    for (let round = 0; round <= MAX_CONTINUATIONS; round++) {
+      const stream = await openai.chat.completions.create({
+        model: "gpt-5.4",
+        max_completion_tokens: MAX_GENERATION_TOKENS,
+        stream: true,
+        messages: streamMsgs,
+      });
+
+      let part = "";
+      let finishReason: string | null = null;
+      for await (const chunk of stream) {
+        finishReason = chunk.choices[0]?.finish_reason ?? finishReason;
+        const delta = chunk.choices[0]?.delta?.content ?? "";
+        if (!delta) continue;
+        part += delta;
+        full += delta;
+        const re = /FILE:\s*([^\n]+)\n/g;
+        let m;
+        while ((m = re.exec(full)) !== null) {
+          const path = m[1].trim();
+          if (!seenFiles.has(path)) {
+            seenFiles.add(path);
+            send({ type: "file", path });
+          }
         }
       }
+
+      // Stop unless the model ran out of room mid-output.
+      if (finishReason !== "length") break;
+      if (round === MAX_CONTINUATIONS) {
+        logger.warn(
+          { projectId },
+          "Streamed generation still truncated after continuation budget; last file may be incomplete",
+        );
+        break;
+      }
+      send({ type: "status", message: "Finishing a large app" });
+      streamMsgs.push({ role: "assistant", content: part });
+      streamMsgs.push({ role: "user", content: CONTINUE_PROMPT });
     }
 
     send({ type: "status", message: "Saving files" });

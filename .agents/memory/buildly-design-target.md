@@ -21,3 +21,15 @@ DESIGN IDENTITY section), then restart the API server and verify e2e: generated
 several CSS custom properties for an accent system, and no purple/blue gradient
 blobs or "Sparkles/AI" badges. Only touch Buildly's own UI if the user
 explicitly says the builder interface itself.
+
+# Generation pipeline robustness
+
+- `buildSystemPrompt` also carries CONSISTENCY-ON-EDITS (preserve design system,
+  smallest diff, keep existing files) and ACCESSIBILITY/UX rules. Apply quality
+  directives here, not in Buildly's chrome.
+- Both message routes (sync `/messages` and streaming `/messages/stream`) wrap the
+  OpenAI call in a continuation loop: when `finish_reason === "length"` they re-ask
+  ("continue where you stopped") up to MAX_CONTINUATIONS so large multi-file apps
+  aren't saved half-written (the FILE_BLOCK_REGEX only persists CLOSED blocks, so a
+  truncated tail would silently vanish without this). **Keep the two routes in sync.**
+
