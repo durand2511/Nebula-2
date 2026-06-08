@@ -30,7 +30,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 
 type ProjectFile = { id: number; path: string; content: string; language: string };
@@ -139,7 +138,6 @@ export function ProjectWorkspace() {
 
   const [prompt, setPrompt] = useState("");
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"code" | "preview">("code");
   const [previewKey, setPreviewKey] = useState(0);
 
   const [isStreaming, setIsStreaming] = useState(false);
@@ -257,7 +255,6 @@ export function ProjectWorkspace() {
       rawStreamRef.current = "";
       shownLenRef.current = 0;
       setStreamedText("");
-      setActiveTab("preview");
 
       const ac = new AbortController();
       abortRef.current = ac;
@@ -389,6 +386,14 @@ export function ProjectWorkspace() {
   const liveFile = isStreaming ? extractLiveFile(streamedText) : null;
   const activeStep = buildSteps.find((s) => !s.done)?.label;
 
+  // Files to show as tabs in the right-hand Code panel. While streaming we also
+  // surface the file currently being written even before it has been persisted.
+  const savedFilePaths = files?.map((f) => f.path) ?? [];
+  const codePanelFiles =
+    isStreaming && liveFile && !savedFilePaths.includes(liveFile.path)
+      ? [...savedFilePaths, liveFile.path]
+      : savedFilePaths;
+
   // Conversational narration: the model speaks first (before any "FILE:" block),
   // so show that opening text as a live, streaming assistant message in the chat.
   // Match FILE: only at line start so prose mentioning it doesn't cut narration.
@@ -412,10 +417,10 @@ export function ProjectWorkspace() {
 
   // Keep the live code box scrolled to the newest line as tokens stream in.
   useEffect(() => {
-    if (codeScrollRef.current) {
+    if (isStreaming && codeScrollRef.current) {
       codeScrollRef.current.scrollTop = codeScrollRef.current.scrollHeight;
     }
-  }, [streamedText]);
+  }, [streamedText, isStreaming]);
 
   if (isLoadingProject) {
     return (
@@ -581,240 +586,185 @@ export function ProjectWorkspace() {
           </div>
         </div>
 
-        {/* Center/Right Panel: Code & Preview */}
+        {/* Middle Panel: Live Preview */}
         <div className="flex-1 flex flex-col min-w-0 min-h-0 bg-background">
-          {isStreaming ? (
-            <div className="flex-1 flex flex-col min-h-0">
-              {/* Live build header */}
-              <div className="h-12 border-b border-border bg-card/50 flex items-center gap-3 px-4 shrink-0">
-                <div className="flex items-center gap-2 text-sm font-medium text-foreground min-w-0">
-                  <Loader2 className="h-4 w-4 animate-spin text-primary shrink-0" />
-                  <span className="truncate">
-                    {liveFile ? `Writing ${liveFile.path}` : activeStep ?? "Building your app"}
-                  </span>
-                </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleStop}
-                  className="ml-auto h-8 gap-1.5 shrink-0"
-                  data-testid="button-stop-center"
-                >
-                  <Square className="h-3.5 w-3.5 fill-current" />
-                  Stop
-                </Button>
-              </div>
+          <div className="h-12 border-b border-border bg-card/50 flex items-center px-4 shrink-0">
+            <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+              <MonitorPlay className="h-4 w-4 text-primary" />
+              Preview
+            </div>
+            {previewHtml && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="ml-auto h-8 text-muted-foreground hover:text-foreground"
+                onClick={() => setPreviewKey((k) => k + 1)}
+              >
+                <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+                Refresh
+              </Button>
+            )}
+          </div>
 
-              {/* Live code box */}
-              <div className="flex-1 min-h-0 p-4">
-                <div className="h-full flex flex-col rounded-xl border border-border bg-[#0d1117] overflow-hidden shadow-xl">
-                  <div className="h-9 flex items-center gap-2 px-4 border-b border-white/10 shrink-0">
-                    <span className="flex gap-1.5">
-                      <span className="h-2.5 w-2.5 rounded-full bg-[#ff5f56]" />
-                      <span className="h-2.5 w-2.5 rounded-full bg-[#ffbd2e]" />
-                      <span className="h-2.5 w-2.5 rounded-full bg-[#27c93f]" />
-                    </span>
-                    <span className="ml-2 text-xs font-mono text-gray-400 truncate">
-                      {liveFile?.path ?? "generating…"}
-                    </span>
-                  </div>
-                  <div ref={codeScrollRef} className="flex-1 overflow-auto p-4">
-                    {liveFile && liveFile.code ? (
-                      <pre className="text-[12.5px] leading-relaxed font-mono text-gray-300 whitespace-pre-wrap break-words">
-                        <code>{liveFile.code}</code>
-                        <span className="inline-block w-2 h-[1.1em] -mb-[0.15em] bg-primary/80 animate-pulse ml-0.5 align-middle" />
-                      </pre>
-                    ) : (
-                      <div className="flex items-center gap-2 text-sm text-gray-500 font-mono">
-                        <Sparkles className="h-4 w-4 text-primary/70" />
-                        {activeStep ?? "Thinking through your request…"}
-                      </div>
-                    )}
-                  </div>
+          {previewHtml ? (
+            <div className="relative flex-1 flex min-h-0">
+              <iframe
+                key={previewKey}
+                ref={previewIframeRef}
+                srcDoc={previewHtml}
+                className="flex-1 w-full border-0 bg-white"
+                sandbox="allow-scripts allow-forms allow-modals allow-popups"
+                title="App Preview"
+              />
+              {isStreaming && (
+                <div className="absolute top-3 left-3 z-10 flex items-center gap-2 rounded-full bg-black/70 backdrop-blur px-3 py-1.5 text-xs font-medium text-white">
+                  <Loader2 className="h-3 w-3 animate-spin text-primary" />
+                  Updating…
                 </div>
-              </div>
-
-              {/* Activity trail */}
-              {buildSteps.length > 0 && (
-                <div className="border-t border-border bg-card/40 px-4 py-2.5 shrink-0 max-h-24 overflow-auto">
-                  <div className="flex flex-wrap gap-x-4 gap-y-1.5">
-                    {buildSteps.map((step, i) => (
-                      <span key={i} className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                        {step.done ? (
-                          <Check className="h-3 w-3 text-primary shrink-0" />
-                        ) : (
-                          <Loader2 className="h-3 w-3 animate-spin shrink-0" />
-                        )}
-                        {step.label}
-                      </span>
-                    ))}
+              )}
+              {previewErrors.length > 0 && !isStreaming && (
+                <div className="absolute bottom-4 left-4 right-4 z-10">
+                  <div className="flex items-start gap-3 rounded-lg border border-destructive/40 bg-destructive/10 backdrop-blur px-4 py-3 shadow-lg">
+                    <AlertTriangle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-foreground">
+                        Runtime error detected
+                      </p>
+                      <p className="text-xs text-muted-foreground truncate font-mono">
+                        {previewErrors[previewErrors.length - 1]}
+                      </p>
+                    </div>
+                    <Button
+                      size="sm"
+                      className="h-8 shrink-0"
+                      onClick={handleAutoFix}
+                      data-testid="button-auto-fix"
+                    >
+                      <Wand2 className="h-3.5 w-3.5 mr-1.5" />
+                      Fix automatically
+                    </Button>
+                    <button
+                      onClick={() => setPreviewErrors([])}
+                      className="text-muted-foreground hover:text-foreground shrink-0"
+                      aria-label="Dismiss"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
                   </div>
                 </div>
               )}
+            </div>
+          ) : isStreaming ? (
+            <div className="flex-1 flex flex-col items-center justify-center gap-4 bg-white text-gray-500">
+              <div className="relative">
+                <FileCode2 className="h-12 w-12 text-primary/40" />
+                <Loader2 className="h-6 w-6 animate-spin text-primary absolute -bottom-1 -right-1" />
+              </div>
+              <p className="text-lg font-semibold text-gray-900">
+                {buildSteps.find((s) => !s.done)?.label ?? "Building your app"}
+              </p>
+              <p className="text-sm">Writing your code file by file — watch it live on the right.</p>
             </div>
           ) : (
-          <Tabs
-            value={activeTab}
-            onValueChange={(v) => setActiveTab(v as "code" | "preview")}
-            className="flex-1 flex flex-col min-h-0"
-          >
-            <div className="h-12 border-b border-border bg-card/50 flex items-center px-4 shrink-0">
-              <TabsList className="bg-transparent h-auto p-0 gap-4">
-                <TabsTrigger
-                  value="code"
-                  className="data-[state=active]:bg-transparent data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:shadow-none rounded-none px-2 py-3 h-12 text-muted-foreground data-[state=active]:text-foreground"
-                >
-                  <Code2 className="h-4 w-4 mr-2" />
-                  Code
-                </TabsTrigger>
-                <TabsTrigger
-                  value="preview"
-                  className="data-[state=active]:bg-transparent data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:shadow-none rounded-none px-2 py-3 h-12 text-muted-foreground data-[state=active]:text-foreground"
-                >
-                  <MonitorPlay className="h-4 w-4 mr-2" />
-                  Preview
-                </TabsTrigger>
-              </TabsList>
-
-              {activeTab === "preview" && previewHtml && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="ml-auto h-8 text-muted-foreground hover:text-foreground"
-                  onClick={() => setPreviewKey((k) => k + 1)}
-                >
-                  <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
-                  Refresh
-                </Button>
-              )}
+            <div className="flex-1 flex flex-col items-center justify-center gap-4 text-muted-foreground">
+              <MonitorPlay className="h-16 w-16 opacity-20" />
+              <h3 className="text-xl font-bold text-foreground">No Preview Yet</h3>
+              <p className="text-sm max-w-sm text-center">
+                Chat with Buildly to generate your app. The preview will appear here instantly.
+              </p>
             </div>
+          )}
+        </div>
 
-            {/* Code Tab */}
-            <TabsContent value="code" className="flex-1 flex m-0 min-h-0 overflow-hidden border-none p-0 outline-none">
-              <div className="w-[240px] border-r border-border bg-card/20 flex flex-col min-h-0 shrink-0">
-                <div className="px-4 py-3 border-b border-border/50 text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
-                  <FolderOpen className="h-3 w-3" />
-                  Files
-                </div>
-                <div className="flex-1 min-h-0 overflow-y-auto">
-                  <div className="p-2 space-y-0.5">
-                    {isLoadingFiles ? (
-                      <div className="flex justify-center p-4">
-                        <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-                      </div>
-                    ) : files?.length === 0 ? (
-                      <div className="text-xs text-muted-foreground p-3 italic">
-                        No files yet — chat to generate your app
-                      </div>
+        {/* Right Panel: Code (always visible — live during generation) */}
+        <div className="w-[460px] border-l border-border bg-[#0d1117] flex flex-col min-h-0 shrink-0">
+          <div className="h-12 border-b border-white/10 flex items-center gap-2 px-4 shrink-0">
+            <Code2 className="h-4 w-4 text-primary shrink-0" />
+            <span className="text-sm font-medium text-gray-100">Code</span>
+            {isStreaming && (
+              <span className="ml-auto flex items-center gap-1.5 text-xs text-gray-400 min-w-0">
+                <Loader2 className="h-3 w-3 animate-spin shrink-0" />
+                <span className="truncate">
+                  {liveFile ? `Writing ${liveFile.path}` : "Generating…"}
+                </span>
+              </span>
+            )}
+          </div>
+
+          {codePanelFiles.length > 0 && (
+            <div className="flex items-center gap-1 px-2 py-1.5 border-b border-white/10 overflow-x-auto shrink-0">
+              {codePanelFiles.map((path) => {
+                const isActive = isStreaming ? liveFile?.path === path : selectedFile === path;
+                const isWriting = isStreaming && liveFile?.path === path;
+                return (
+                  <button
+                    key={path}
+                    onClick={() => {
+                      if (!isStreaming) setSelectedFile(path);
+                    }}
+                    disabled={isStreaming}
+                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-mono whitespace-nowrap transition-colors disabled:cursor-default ${
+                      isActive
+                        ? "bg-primary/15 text-primary"
+                        : "text-gray-400 hover:bg-white/5 hover:text-gray-200"
+                    }`}
+                  >
+                    {isWriting ? (
+                      <Loader2 className="h-3 w-3 animate-spin shrink-0" />
                     ) : (
-                      files?.map((file) => (
-                        <button
-                          key={file.id}
-                          onClick={() => setSelectedFile(file.path)}
-                          className={`w-full flex items-center gap-2 px-3 py-1.5 text-sm rounded-md transition-colors text-left ${
-                            selectedFile === file.path
-                              ? "bg-primary/10 text-primary font-medium"
-                              : "text-muted-foreground hover:bg-secondary/80 hover:text-foreground"
-                          }`}
-                        >
-                          <FileIcon className="h-3.5 w-3.5 shrink-0 opacity-70" />
-                          <span className="truncate">{file.path}</span>
-                        </button>
-                      ))
+                      <FileIcon className="h-3 w-3 shrink-0 opacity-70" />
                     )}
-                  </div>
-                </div>
-              </div>
+                    {path}
+                  </button>
+                );
+              })}
+            </div>
+          )}
 
-              <div className="flex-1 flex flex-col min-w-0 min-h-0 bg-[#0d1117] relative">
-                {activeFile ? (
-                  <>
-                    <div className="h-10 border-b border-white/10 bg-[#0d1117] flex items-center px-4 shrink-0 text-xs text-gray-400 font-mono">
-                      {activeFile.path}
-                    </div>
-                    <div className="flex-1 min-h-0 overflow-auto">
-                      <div className="p-4 min-w-max">
-                        <pre className="text-[13px] leading-relaxed font-mono text-gray-300">
-                          <code>{activeFile.content}</code>
-                        </pre>
-                      </div>
-                    </div>
-                  </>
-                ) : (
-                  <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground">
-                    <FileCode className="h-12 w-12 mb-4 opacity-20" />
-                    <p className="text-sm">Select a file to view its contents</p>
-                  </div>
-                )}
-              </div>
-            </TabsContent>
-
-            {/* Preview Tab */}
-            <TabsContent value="preview" className="flex-1 flex flex-col m-0 border-none p-0 outline-none">
-              {isStreaming && !previewHtml ? (
-                <div className="flex-1 flex flex-col items-center justify-center gap-4 bg-white text-gray-500">
-                  <div className="relative">
-                    <FileCode2 className="h-12 w-12 text-primary/40" />
-                    <Loader2 className="h-6 w-6 animate-spin text-primary absolute -bottom-1 -right-1" />
-                  </div>
-                  <p className="text-lg font-semibold text-gray-900">
-                    {buildSteps.find((s) => !s.done)?.label ?? "Building your app"}
-                  </p>
-                  <p className="text-sm">Writing your code file by file…</p>
-                </div>
-              ) : previewHtml ? (
-                <div className="relative flex-1 flex">
-                  <iframe
-                    key={previewKey}
-                    ref={previewIframeRef}
-                    srcDoc={previewHtml}
-                    className="flex-1 w-full border-0 bg-white"
-                    sandbox="allow-scripts allow-forms allow-modals allow-popups"
-                    title="App Preview"
-                  />
-                  {previewErrors.length > 0 && !isStreaming && (
-                    <div className="absolute bottom-4 left-4 right-4 z-10">
-                      <div className="flex items-start gap-3 rounded-lg border border-destructive/40 bg-destructive/10 backdrop-blur px-4 py-3 shadow-lg">
-                        <AlertTriangle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-semibold text-foreground">
-                            Runtime error detected
-                          </p>
-                          <p className="text-xs text-muted-foreground truncate font-mono">
-                            {previewErrors[previewErrors.length - 1]}
-                          </p>
-                        </div>
-                        <Button
-                          size="sm"
-                          className="h-8 shrink-0"
-                          onClick={handleAutoFix}
-                          data-testid="button-auto-fix"
-                        >
-                          <Wand2 className="h-3.5 w-3.5 mr-1.5" />
-                          Fix automatically
-                        </Button>
-                        <button
-                          onClick={() => setPreviewErrors([])}
-                          className="text-muted-foreground hover:text-foreground shrink-0"
-                          aria-label="Dismiss"
-                        >
-                          <X className="h-4 w-4" />
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
+          <div ref={codeScrollRef} className="flex-1 min-h-0 overflow-auto p-4">
+            {isStreaming ? (
+              liveFile && liveFile.code ? (
+                <pre className="text-[12.5px] leading-relaxed font-mono text-gray-300 whitespace-pre-wrap break-words">
+                  <code>{liveFile.code}</code>
+                  <span className="inline-block w-2 h-[1.1em] -mb-[0.15em] bg-primary/80 animate-pulse ml-0.5 align-middle" />
+                </pre>
               ) : (
-                <div className="flex-1 flex flex-col items-center justify-center gap-4 text-muted-foreground">
-                  <MonitorPlay className="h-16 w-16 opacity-20" />
-                  <h3 className="text-xl font-bold text-foreground">No Preview Yet</h3>
-                  <p className="text-sm max-w-sm text-center">
-                    Chat with Buildly to generate your app. The preview will appear here instantly.
-                  </p>
+                <div className="flex items-center gap-2 text-sm text-gray-500 font-mono">
+                  <Sparkles className="h-4 w-4 text-primary/70" />
+                  {activeStep ?? "Thinking through your request…"}
                 </div>
-              )}
-            </TabsContent>
-          </Tabs>
+              )
+            ) : activeFile ? (
+              <pre className="text-[13px] leading-relaxed font-mono text-gray-300 whitespace-pre-wrap break-words">
+                <code>{activeFile.content}</code>
+              </pre>
+            ) : isLoadingFiles ? (
+              <div className="flex justify-center p-4">
+                <Loader2 className="h-4 w-4 animate-spin text-gray-500" />
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center h-full text-gray-600">
+                <FileCode className="h-12 w-12 mb-4 opacity-20" />
+                <p className="text-sm">Generated code will appear here</p>
+              </div>
+            )}
+          </div>
+
+          {isStreaming && buildSteps.length > 0 && (
+            <div className="border-t border-white/10 bg-black/30 px-4 py-2.5 shrink-0 max-h-28 overflow-auto">
+              <div className="space-y-1.5">
+                {buildSteps.map((step, i) => (
+                  <div key={i} className="flex items-center gap-2 text-xs text-gray-400">
+                    {step.done ? (
+                      <Check className="h-3 w-3 text-primary shrink-0" />
+                    ) : (
+                      <Loader2 className="h-3 w-3 animate-spin shrink-0" />
+                    )}
+                    <span className="truncate">{step.label}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
           )}
         </div>
       </div>
