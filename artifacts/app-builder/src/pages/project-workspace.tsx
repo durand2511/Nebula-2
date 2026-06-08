@@ -526,12 +526,12 @@ export function ProjectWorkspace() {
             {/* Preview Tab */}
             <TabsContent value="preview" className="flex-1 flex flex-col m-0 border-none p-0 outline-none">
               {isStreaming && !previewHtml ? (
-                <div className="flex-1 flex flex-col items-center justify-center gap-4 text-muted-foreground">
+                <div className="flex-1 flex flex-col items-center justify-center gap-4 bg-white text-gray-500">
                   <div className="relative">
                     <FileCode2 className="h-12 w-12 text-primary/40" />
                     <Loader2 className="h-6 w-6 animate-spin text-primary absolute -bottom-1 -right-1" />
                   </div>
-                  <p className="text-lg font-semibold text-foreground">
+                  <p className="text-lg font-semibold text-gray-900">
                     {buildSteps.find((s) => !s.done)?.label ?? "Building your app"}
                   </p>
                   <p className="text-sm">Writing your code file by file…</p>
