@@ -131,7 +131,7 @@ export function Projects() {
             </p>
           )}
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={deleteProject.isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={deleteProject.isPending} className="border border-neutral-300 bg-white text-neutral-900 hover:bg-neutral-100">Cancel</AlertDialogCancel>
             <AlertDialogAction
               onClick={(e) => {
                 e.preventDefault();

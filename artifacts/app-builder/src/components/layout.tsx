@@ -7,17 +7,15 @@ export function Layout({ children }: { children: React.ReactNode }) {
   return (
     <div className={`min-h-screen bg-background text-foreground flex flex-col flex-1 ${isWorkspace ? "dark" : "light"}`}>
       {!isWorkspace && (
-        <header className="sticky top-0 z-50 w-full border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-          <div className="container flex h-14 items-center px-4">
-            <nav className="flex items-center space-x-6 text-sm font-medium">
-              <Link href="/" className={`transition-colors hover:text-foreground/80 ${location === "/" ? "text-foreground" : "text-foreground/60"}`}>
-                Home
-              </Link>
-              <Link href="/projects" className={`transition-colors hover:text-foreground/80 ${location === "/projects" ? "text-foreground" : "text-foreground/60"}`}>
-                Projects
-              </Link>
-            </nav>
-          </div>
+        <header className="sticky top-0 z-50 w-full flex justify-center pt-6 pb-3">
+          <nav className="flex items-center gap-1 rounded-full border border-border bg-card/90 backdrop-blur px-2 py-1.5 shadow-lg">
+            <Link href="/" className={`rounded-full px-5 py-1.5 text-sm font-medium transition-colors ${location === "/" ? "bg-foreground text-background" : "text-foreground/60 hover:text-foreground hover:bg-foreground/5"}`}>
+              Home
+            </Link>
+            <Link href="/projects" className={`rounded-full px-5 py-1.5 text-sm font-medium transition-colors ${location === "/projects" ? "bg-foreground text-background" : "text-foreground/60 hover:text-foreground hover:bg-foreground/5"}`}>
+              Projects
+            </Link>
+          </nav>
         </header>
       )}
       <main className="flex-1 flex flex-col">{children}</main>
