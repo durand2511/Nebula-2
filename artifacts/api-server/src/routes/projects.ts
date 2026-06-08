@@ -1,12 +1,13 @@
 import { Router } from "express";
 import { eq, desc, sql } from "drizzle-orm";
-import { db, projects, projectMessages, projectFiles } from "@workspace/db";
+import { db, projects, projectMessages, projectFiles, learnings } from "@workspace/db";
 import {
   CreateProjectBody,
   GetProjectParams,
   DeleteProjectParams,
 } from "@workspace/api-zod";
 import { openai } from "@workspace/integrations-openai-ai-server";
+import { logger } from "../lib/logger";
 
 const router = Router();
 
@@ -32,8 +33,8 @@ function inferLanguage(path: string): string {
   return map[ext] ?? "plaintext";
 }
 
-function buildSystemPrompt(projectName: string, fileContext: string): string {
-  return `You are Buildly, an expert AI web app builder. Generate beautiful, fully-functional web apps for a project called "${projectName}", with clean, well-structured, modular code.
+function buildSystemPrompt(projectName: string, fileContext: string, learningsContext: string): string {
+  return `You are Buildly, an expert AI web app builder. Generate beautiful, fully-functional web apps for a project called "${projectName}", with clean, well-structured, modular code.${learningsContext}
 
 You build COMPLETE, production-ready web apps — never demos, prototypes, or placeholders.
 
@@ -108,6 +109,88 @@ function buildFileContext(files: { path: string; content: string }[]): string {
   return `\n\nCurrent project files (modify these as needed):\n${files
     .map((f) => `--- ${f.path} ---\n${f.content}`)
     .join("\n\n")}`;
+}
+
+// Pulls the accumulated lessons learned from past user feedback so every new
+// generation benefits from corrections made on earlier apps.
+async function buildLearningsContext(): Promise<string> {
+  try {
+    const rows = await db
+      .select({ content: learnings.content })
+      .from(learnings)
+      .orderBy(desc(learnings.createdAt))
+      .limit(40);
+    if (rows.length === 0) return "";
+    const list = rows
+      .reverse()
+      .map((r) => `- ${r.content}`)
+      .join("\n");
+    return `\n\nLESSONS LEARNED FROM PAST USER FEEDBACK (apply these proactively to every app you build so you don't repeat past mistakes):\n${list}`;
+  } catch {
+    return "";
+  }
+}
+
+// After a user adjusts a generated app, distill a single generalizable, reusable
+// lesson from their request and store it so future generations improve.
+async function recordLearning(
+  projectId: number,
+  userAdjustment: string,
+): Promise<void> {
+  try {
+    const completion = await openai.chat.completions.create({
+      model: "gpt-5.4",
+      max_completion_tokens: 200,
+      messages: [
+        {
+          role: "system",
+          content:
+            "You analyze a user's correction/adjustment request for an AI-generated web app and extract ONE short, GENERALIZABLE design or engineering rule that would help build better apps in the future. " +
+            "Write it as a single imperative sentence (max 25 words) that applies to apps in general, NOT to this specific app's content. " +
+            "Ignore one-off, app-specific content changes (e.g. 'rename this button to X', 'change this text'). " +
+            "If there is no generalizable lesson, reply with exactly NONE.",
+        },
+        { role: "user", content: userAdjustment },
+      ],
+    });
+    const lesson = completion.choices[0]?.message?.content?.trim() ?? "";
+    if (!lesson || lesson.toUpperCase() === "NONE" || lesson.length < 8 || lesson.length > 300) {
+      return;
+    }
+
+    // Safety gate: reject distilled "lessons" that look like prompt-injection /
+    // meta-instructions, since they get injected into every future system prompt.
+    const lower = lesson.toLowerCase();
+    const injectionMarkers = [
+      "ignore previous",
+      "ignore the previous",
+      "ignore all",
+      "disregard",
+      "system prompt",
+      "you are now",
+      "forget everything",
+      "override",
+      "jailbreak",
+    ];
+    if (injectionMarkers.some((m) => lower.includes(m))) {
+      logger.warn({ projectId }, "Rejected potential prompt-injection learning");
+      return;
+    }
+
+    // Dedupe: skip if we already stored an identical lesson.
+    const existing = await db
+      .select({ id: learnings.id })
+      .from(learnings)
+      .where(eq(learnings.content, lesson))
+      .limit(1);
+    if (existing.length > 0) return;
+
+    await db.insert(learnings).values({ content: lesson, sourceProjectId: projectId });
+    logger.info({ projectId }, "Recorded new learning from user adjustment");
+  } catch (err) {
+    // Learning is best-effort; never let it affect the user's generation.
+    logger.error({ err, projectId }, "Failed to record learning");
+  }
 }
 
 function extractExplanation(raw: string): string {
@@ -323,7 +406,13 @@ router.post("/projects/:projectId/messages", async (req, res) => {
       .from(projectFiles)
       .where(eq(projectFiles.projectId, projectId));
 
-    const systemPrompt = buildSystemPrompt(projectRows[0].name, buildFileContext(existingFiles));
+    const isAdjustment = existingFiles.length > 0;
+    const learningsContext = await buildLearningsContext();
+    const systemPrompt = buildSystemPrompt(
+      projectRows[0].name,
+      buildFileContext(existingFiles),
+      learningsContext,
+    );
 
     const completion = await openai.chat.completions.create({
       model: "gpt-5.4",
@@ -343,6 +432,11 @@ router.post("/projects/:projectId/messages", async (req, res) => {
       .insert(projectMessages)
       .values({ projectId, role: "assistant", content: extractExplanation(aiContent) })
       .returning();
+
+    // Learn from this adjustment (follow-up on an existing app) without blocking the response.
+    if (isAdjustment) {
+      void recordLearning(projectId, content);
+    }
 
     res.status(201).json(assistantMsg);
   } catch (err) {
@@ -401,7 +495,12 @@ router.post("/projects/:projectId/messages/stream", async (req, res) => {
       .where(eq(projectFiles.projectId, projectId));
 
     const isFirstBuild = existingFiles.length === 0;
-    const systemPrompt = buildSystemPrompt(projectRows[0].name, buildFileContext(existingFiles));
+    const learningsContext = await buildLearningsContext();
+    const systemPrompt = buildSystemPrompt(
+      projectRows[0].name,
+      buildFileContext(existingFiles),
+      learningsContext,
+    );
 
     send({
       type: "status",
@@ -456,6 +555,11 @@ router.post("/projects/:projectId/messages/stream", async (req, res) => {
     send({ type: "message", id: assistantMsg.id, content: explanation });
     send({ type: "done", files: written });
     res.end();
+
+    // Learn from this adjustment (follow-up on an existing app) so future apps improve.
+    if (!isFirstBuild) {
+      void recordLearning(projectId, content);
+    }
   } catch (err) {
     req.log.error({ err }, "Failed to stream message");
     send({ type: "error", message: "Something went wrong while building your app." });
