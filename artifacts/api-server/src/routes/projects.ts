@@ -56,7 +56,9 @@ DESIGN IDENTITY — this is what separates a real product from generic "AI slop"
 - Choose a STRONG visual direction that fits the app's TYPE and purpose, and commit to it everywhere:
   - SaaS / productivity tool → clean, minimal, lots of whitespace, restrained borders (Linear / Notion feel).
   - Consumer app → bold colors, personality, playful micro-interactions, rounded friendly shapes.
-  - Data / dashboard / analytics → dense, professional, structured grids, dark mode, clear data hierarchy.
+  - Data / dashboard / analytics → dense, professional, structured grids, clear data hierarchy.
+- DEFAULT TO A LIGHT THEME: use a WHITE or near-white background (#ffffff / very light neutral) with dark, high-contrast text (near-black). This is the default for EVERY app. ONLY use a dark/black background when the user EXPLICITLY asks for "dark mode" or a "dark theme".
+- Set this explicitly in CSS — e.g. \`body { background: #ffffff; color: #111827; }\` — so the app never renders as black-on-black or relies on the browser default.
 - Pick a UNIQUE accent color derived from the app's purpose (e.g. finance → deep green, fitness → energetic orange, calm/wellness → muted teal). One signature accent used deliberately — not rainbow, not default blue.
 - Typography matters: use a deliberate FONT PAIRING via Google Fonts (e.g. a characterful display/heading font + a clean readable body font), not a single default font. Set type scale, weights, and tracking intentionally.
 - Build a real design system: define CSS custom properties for colors, spacing, and radius; consistent shadows; cohesive component styling. Avoid default unstyled Tailwind grays everywhere.
