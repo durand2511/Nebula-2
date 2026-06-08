@@ -42,3 +42,8 @@ explicitly says the builder interface itself.
 - **Whenever you add a behavior to one message route, mirror it in the other** (naming,
   continuation, no-valid-files guard) — they have drifted before.
 
+
+## app-builder (Buildly chrome) theme is inverted
+- In `artifacts/app-builder/src/index.css`, `:root` holds the DARK palette (background ~4%) and `.light` holds the WHITE palette (background 100%); `.dark` is empty ("force dark"). So which class is on the wrapper decides the theme.
+- `artifacts/app-builder/src/components/layout.tsx` sets that wrapper class. It now always uses `light` so the whole Buildly UI (home, projects, AND the project workspace) is white. The code-viewer pane stays intentionally dark (`bg-[#0d1117]`).
+- **Why:** user repeatedly asked for white backgrounds + black text across Buildly; the workspace route previously forced `dark`, making the chat panel/header black.

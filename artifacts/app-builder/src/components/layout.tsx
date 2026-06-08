@@ -5,7 +5,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const isWorkspace = location.startsWith("/projects/") && location !== "/projects";
 
   return (
-    <div className={`min-h-screen bg-background text-foreground flex flex-col flex-1 ${isWorkspace ? "dark" : "light"}`}>
+    <div className={`min-h-screen bg-background text-foreground flex flex-col flex-1 light`}>
       {!isWorkspace && (
         <header className="sticky top-0 z-50 w-full flex justify-center pt-6 pb-3">
           <nav className="flex items-center gap-1 rounded-full border border-border bg-card/90 backdrop-blur px-2 py-1.5 shadow-lg">
