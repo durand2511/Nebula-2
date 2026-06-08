@@ -47,3 +47,9 @@ explicitly says the builder interface itself.
 - In `artifacts/app-builder/src/index.css`, `:root` holds the DARK palette (background ~4%) and `.light` holds the WHITE palette (background 100%); `.dark` is empty ("force dark"). So which class is on the wrapper decides the theme.
 - `artifacts/app-builder/src/components/layout.tsx` sets that wrapper class. It now always uses `light` so the whole Buildly UI (home, projects, AND the project workspace) is white. The code-viewer pane stays intentionally dark (`bg-[#0d1117]`).
 - **Why:** user repeatedly asked for white backgrounds + black text across Buildly; the workspace route previously forced `dark`, making the chat panel/header black.
+
+## SSE stop/abort: listen on res, not req
+- In the `/messages/stream` route, detect client disconnect (the Stop button) with `res.on("close", ...)` guarded by `!res.writableEnded` — NOT `req.on("close")`.
+- **Why:** for a POST, `req` ("close") fires the instant the request body is fully read (right after `express.json()` parses it), long before any disconnect. Using it falsely flags an abort immediately, so `send()` is suppressed and nothing ever streams (0 bytes, request hangs to max-time). This cost two debugging rounds.
+- On real disconnect: set a `clientGone` flag, call `stream.controller.abort()` to stop the OpenAI call, break the generation loop, and still persist any COMPLETE files already in `full` (incomplete trailing file has no closing ``` so it's skipped by FILE_BLOCK_REGEX — safe).
+- The stream route also emits `{ type: "delta", text }` per token so the client can render code being written live (client parses the current FILE block via `extractLiveFile`).

@@ -24,6 +24,8 @@ import {
   AlertTriangle,
   Wand2,
   X,
+  Square,
+  Sparkles,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -100,6 +102,27 @@ function fileLabel(path: string): string {
   return `Writing ${path}`;
 }
 
+/**
+ * From the raw streaming text, pull out the file currently being written and the
+ * code produced so far, so the UI can show it live as it's typed.
+ */
+function extractLiveFile(raw: string): { path: string; code: string } | null {
+  if (!raw) return null;
+  const idx = raw.lastIndexOf("\nFILE:");
+  const start = idx === -1 ? (raw.startsWith("FILE:") ? 0 : -1) : idx + 1;
+  if (start === -1) return null;
+  const seg = raw.slice(start);
+  const header = seg.match(/^FILE:\s*(.+?)\r?\n/);
+  if (!header) return null;
+  const path = header[1].trim();
+  const fence = seg.match(/```[\w+-]*[^\n]*\r?\n/);
+  if (!fence || fence.index === undefined) return { path, code: "" };
+  const after = seg.slice(fence.index + fence[0].length);
+  const close = after.indexOf("```");
+  const code = close === -1 ? after : after.slice(0, close);
+  return { path, code };
+}
+
 export function ProjectWorkspace() {
   const [, params] = useRoute("/projects/:id");
   const projectId = Number(params?.id);
@@ -114,10 +137,13 @@ export function ProjectWorkspace() {
   const [buildSteps, setBuildSteps] = useState<BuildStep[]>([]);
   const [pendingUser, setPendingUser] = useState<string | null>(null);
   const [previewErrors, setPreviewErrors] = useState<string[]>([]);
+  const [streamedText, setStreamedText] = useState("");
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const autoSentRef = useRef(false);
   const previewIframeRef = useRef<HTMLIFrameElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const codeScrollRef = useRef<HTMLDivElement>(null);
 
   const { data: project, isLoading: isLoadingProject } = useGetProject(projectId, {
     query: { enabled: !!projectId, queryKey: getGetProjectQueryKey(projectId) },
@@ -163,6 +189,14 @@ export function ProjectWorkspace() {
     setPreviewErrors([]);
   }, [previewKey]);
 
+  // Abort any in-flight build if the user navigates away / the page unmounts,
+  // so generation doesn't keep running (and billing) in the background.
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+    };
+  }, []);
+
   const streamMessage = useCallback(
     async (messageContent: string) => {
       if (!projectId) return;
@@ -170,13 +204,18 @@ export function ProjectWorkspace() {
       setBuildSteps([]);
       setPendingUser(messageContent);
       setPreviewErrors([]);
+      setStreamedText("");
       setActiveTab("preview");
+
+      const ac = new AbortController();
+      abortRef.current = ac;
 
       try {
         const res = await fetch(`/api/projects/${projectId}/messages/stream`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ content: messageContent }),
+          signal: ac.signal,
         });
         if (!res.ok || !res.body) {
           throw new Error(`Request failed (${res.status})`);
@@ -194,13 +233,15 @@ export function ProjectWorkspace() {
 
         const handleEvent = (line: string) => {
           if (!line.startsWith("data:")) return;
-          let event: { type: string; message?: string; path?: string };
+          let event: { type: string; message?: string; path?: string; text?: string };
           try {
             event = JSON.parse(line.slice(5).trim());
           } catch {
             return;
           }
-          if (event.type === "status" && event.message) {
+          if (event.type === "delta" && typeof event.text === "string") {
+            setStreamedText((t) => t + event.text);
+          } else if (event.type === "status" && event.message) {
             pushStep(event.message);
           } else if (event.type === "file" && event.path) {
             pushStep(fileLabel(event.path));
@@ -224,12 +265,14 @@ export function ProjectWorkspace() {
         }
         // Flush any trailing event left in the buffer when the stream ends.
         if (buffer.trim()) handleEvent(buffer.trim());
-      } catch {
+      } catch (err) {
+        const stopped = err instanceof DOMException && err.name === "AbortError";
         setBuildSteps((prev) => [
           ...prev.map((s) => ({ ...s, done: true })),
-          { label: "Something went wrong while building", done: true },
+          { label: stopped ? "Stopped by you" : "Something went wrong while building", done: true },
         ]);
       } finally {
+        abortRef.current = null;
         setIsStreaming(false);
         setBuildSteps((prev) => prev.map((s) => ({ ...s, done: true })));
         setPendingUser(null);
@@ -279,8 +322,21 @@ export function ProjectWorkspace() {
     );
   };
 
+  const handleStop = () => {
+    abortRef.current?.abort();
+  };
+
   const activeFile = files?.find((f) => f.path === selectedFile);
   const previewHtml = buildPreviewHtml(files);
+  const liveFile = isStreaming ? extractLiveFile(streamedText) : null;
+  const activeStep = buildSteps.find((s) => !s.done)?.label;
+
+  // Keep the live code box scrolled to the newest line as tokens stream in.
+  useEffect(() => {
+    if (codeScrollRef.current) {
+      codeScrollRef.current.scrollTop = codeScrollRef.current.scrollHeight;
+    }
+  }, [streamedText]);
 
   if (isLoadingProject) {
     return (
@@ -409,15 +465,28 @@ export function ProjectWorkspace() {
                 disabled={isStreaming}
                 data-testid="input-chat-prompt"
               />
-              <Button
-                size="icon"
-                className="absolute bottom-3 right-3 h-8 w-8"
-                onClick={handleSendMessage}
-                disabled={!prompt.trim() || isStreaming}
-                data-testid="button-send-message"
-              >
-                <Send className="h-4 w-4" />
-              </Button>
+              {isStreaming ? (
+                <Button
+                  size="icon"
+                  variant="destructive"
+                  className="absolute bottom-3 right-3 h-8 w-8"
+                  onClick={handleStop}
+                  data-testid="button-stop"
+                  title="Stop building"
+                >
+                  <Square className="h-3.5 w-3.5 fill-current" />
+                </Button>
+              ) : (
+                <Button
+                  size="icon"
+                  className="absolute bottom-3 right-3 h-8 w-8"
+                  onClick={handleSendMessage}
+                  disabled={!prompt.trim()}
+                  data-testid="button-send-message"
+                >
+                  <Send className="h-4 w-4" />
+                </Button>
+              )}
             </div>
             <div className="text-[10px] text-center text-muted-foreground mt-2">
               Enter to send · Shift+Enter for new line
@@ -427,6 +496,76 @@ export function ProjectWorkspace() {
 
         {/* Center/Right Panel: Code & Preview */}
         <div className="flex-1 flex flex-col min-w-0 bg-background">
+          {isStreaming ? (
+            <div className="flex-1 flex flex-col min-h-0">
+              {/* Live build header */}
+              <div className="h-12 border-b border-border bg-card/50 flex items-center gap-3 px-4 shrink-0">
+                <div className="flex items-center gap-2 text-sm font-medium text-foreground min-w-0">
+                  <Loader2 className="h-4 w-4 animate-spin text-primary shrink-0" />
+                  <span className="truncate">
+                    {liveFile ? `Writing ${liveFile.path}` : activeStep ?? "Building your app"}
+                  </span>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleStop}
+                  className="ml-auto h-8 gap-1.5 shrink-0"
+                  data-testid="button-stop-center"
+                >
+                  <Square className="h-3.5 w-3.5 fill-current" />
+                  Stop
+                </Button>
+              </div>
+
+              {/* Live code box */}
+              <div className="flex-1 min-h-0 p-4">
+                <div className="h-full flex flex-col rounded-xl border border-border bg-[#0d1117] overflow-hidden shadow-xl">
+                  <div className="h-9 flex items-center gap-2 px-4 border-b border-white/10 shrink-0">
+                    <span className="flex gap-1.5">
+                      <span className="h-2.5 w-2.5 rounded-full bg-[#ff5f56]" />
+                      <span className="h-2.5 w-2.5 rounded-full bg-[#ffbd2e]" />
+                      <span className="h-2.5 w-2.5 rounded-full bg-[#27c93f]" />
+                    </span>
+                    <span className="ml-2 text-xs font-mono text-gray-400 truncate">
+                      {liveFile?.path ?? "generating…"}
+                    </span>
+                  </div>
+                  <div ref={codeScrollRef} className="flex-1 overflow-auto p-4">
+                    {liveFile && liveFile.code ? (
+                      <pre className="text-[12.5px] leading-relaxed font-mono text-gray-300 whitespace-pre-wrap break-words">
+                        <code>{liveFile.code}</code>
+                        <span className="inline-block w-2 h-[1.1em] -mb-[0.15em] bg-primary/80 animate-pulse ml-0.5 align-middle" />
+                      </pre>
+                    ) : (
+                      <div className="flex items-center gap-2 text-sm text-gray-500 font-mono">
+                        <Sparkles className="h-4 w-4 text-primary/70" />
+                        {activeStep ?? "Thinking through your request…"}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Activity trail */}
+              {buildSteps.length > 0 && (
+                <div className="border-t border-border bg-card/40 px-4 py-2.5 shrink-0 max-h-24 overflow-auto">
+                  <div className="flex flex-wrap gap-x-4 gap-y-1.5">
+                    {buildSteps.map((step, i) => (
+                      <span key={i} className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                        {step.done ? (
+                          <Check className="h-3 w-3 text-primary shrink-0" />
+                        ) : (
+                          <Loader2 className="h-3 w-3 animate-spin shrink-0" />
+                        )}
+                        {step.label}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
           <Tabs
             value={activeTab}
             onValueChange={(v) => setActiveTab(v as "code" | "preview")}
@@ -589,6 +728,7 @@ export function ProjectWorkspace() {
               )}
             </TabsContent>
           </Tabs>
+          )}
         </div>
       </div>
     </div>

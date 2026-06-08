@@ -576,9 +576,18 @@ router.post("/projects/:projectId/messages/stream", async (req, res) => {
   res.setHeader("X-Accel-Buffering", "no");
   res.flushHeaders?.();
 
+  let clientGone = false;
   const send = (event: Record<string, unknown>) => {
+    if (clientGone || res.writableEnded) return;
     res.write(`data: ${JSON.stringify(event)}\n\n`);
   };
+
+  // Detect a real client disconnect (e.g. the user pressed "Stop"). We listen on
+  // the RESPONSE, not the request: req "close" fires as soon as the POST body is
+  // read, which would falsely look like an abort before we've sent anything.
+  res.on("close", () => {
+    if (!res.writableEnded) clientGone = true;
+  });
 
   try {
     const projectRows = await db.select().from(projects).where(eq(projects.id, projectId));
@@ -626,7 +635,10 @@ router.post("/projects/:projectId/messages/stream", async (req, res) => {
       ...chatMessages,
     ];
 
-    for (let round = 0; round <= MAX_CONTINUATIONS; round++) {
+    outer: for (let round = 0; round <= MAX_CONTINUATIONS; round++) {
+      // Don't kick off (or pay for) another round if the user already bailed.
+      if (clientGone) break;
+
       const stream = await withRetry(
         () =>
           openai.chat.completions.create({
@@ -638,25 +650,54 @@ router.post("/projects/:projectId/messages/stream", async (req, res) => {
         "stream-completion",
       );
 
-      let part = "";
-      let finishReason: string | null = null;
-      for await (const chunk of stream) {
-        finishReason = chunk.choices[0]?.finish_reason ?? finishReason;
-        const delta = chunk.choices[0]?.delta?.content ?? "";
-        if (!delta) continue;
-        part += delta;
-        full += delta;
-        const re = /FILE:\s*([^\n]+)\n/g;
-        let m;
-        while ((m = re.exec(full)) !== null) {
-          const path = m[1].trim();
-          if (!seenFiles.has(path)) {
-            seenFiles.add(path);
-            send({ type: "file", path });
-          }
+      // Tear down the upstream OpenAI request the moment the client hangs up.
+      const onClose = () => {
+        if (res.writableEnded) return;
+        clientGone = true;
+        try {
+          stream.controller.abort();
+        } catch {
+          /* already settled */
         }
+      };
+      res.on("close", onClose);
+
+      // The client may have disconnected while the request was in flight.
+      if (clientGone) {
+        onClose();
+        res.off("close", onClose);
+        break;
       }
 
+      let part = "";
+      let finishReason: string | null = null;
+      try {
+        for await (const chunk of stream) {
+          if (clientGone) break;
+          finishReason = chunk.choices[0]?.finish_reason ?? finishReason;
+          const delta = chunk.choices[0]?.delta?.content ?? "";
+          if (!delta) continue;
+          part += delta;
+          full += delta;
+          // Stream raw tokens so the UI can show the code being written live.
+          send({ type: "delta", text: delta });
+          const re = /FILE:\s*([^\n]+)\n/g;
+          let m;
+          while ((m = re.exec(full)) !== null) {
+            const path = m[1].trim();
+            if (!seenFiles.has(path)) {
+              seenFiles.add(path);
+              send({ type: "file", path });
+            }
+          }
+        }
+      } catch (streamErr) {
+        if (!clientGone) throw streamErr;
+      } finally {
+        res.off("close", onClose);
+      }
+
+      if (clientGone) break outer;
       // Stop unless the model ran out of room mid-output.
       if (finishReason !== "length") break;
       if (round === MAX_CONTINUATIONS) {
@@ -669,6 +710,14 @@ router.post("/projects/:projectId/messages/stream", async (req, res) => {
       send({ type: "status", message: "Finishing a large app" });
       streamMsgs.push({ role: "assistant", content: part });
       streamMsgs.push({ role: "user", content: CONTINUE_PROMPT });
+    }
+
+    if (clientGone) {
+      // User pressed Stop — keep any fully-formed files already generated so the
+      // work isn't lost, but skip the SSE replies (the connection is gone).
+      await persistGeneratedFiles(projectId, full, existingFiles);
+      await db.update(projects).set({ updatedAt: new Date() }).where(eq(projects.id, projectId));
+      return;
     }
 
     send({ type: "status", message: "Saving files" });
