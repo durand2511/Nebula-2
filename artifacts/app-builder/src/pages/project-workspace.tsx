@@ -146,6 +146,10 @@ export function ProjectWorkspace() {
   const codeScrollRef = useRef<HTMLDivElement>(null);
   const messagesLenRef = useRef(0);
   const pendingBaseRef = useRef(0);
+  // Raw tokens received so far, and how many we've revealed to the UI. A rAF loop
+  // closes the gap at a steady pace so bursty model output still types out live.
+  const rawStreamRef = useRef("");
+  const shownLenRef = useRef(0);
 
   const { data: project, isLoading: isLoadingProject } = useGetProject(projectId, {
     query: { enabled: !!projectId, queryKey: getGetProjectQueryKey(projectId) },
@@ -170,6 +174,31 @@ export function ProjectWorkspace() {
   useEffect(() => {
     messagesLenRef.current = messages?.length ?? 0;
   }, [messages]);
+
+  // Smoothly reveal buffered tokens so the live code "types" out continuously,
+  // even though the reasoning model emits text in bursts separated by pauses.
+  // The pace accelerates with backlog so it never lags far behind real output.
+  useEffect(() => {
+    if (!isStreaming) return;
+    let raf = 0;
+    let lastT = performance.now();
+    const tick = (now: number) => {
+      const dt = now - lastT;
+      lastT = now;
+      const target = rawStreamRef.current.length;
+      const shown = shownLenRef.current;
+      if (shown < target) {
+        const backlog = target - shown;
+        const cps = Math.max(600, backlog * 2);
+        const next = Math.min(target, shown + Math.ceil((cps * dt) / 1000));
+        shownLenRef.current = next;
+        setStreamedText(rawStreamRef.current.slice(0, next));
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [isStreaming]);
 
   useEffect(() => {
     if (files && files.length > 0 && !selectedFile) {
@@ -213,6 +242,8 @@ export function ProjectWorkspace() {
       setPendingUser(messageContent);
       pendingBaseRef.current = messagesLenRef.current;
       setPreviewErrors([]);
+      rawStreamRef.current = "";
+      shownLenRef.current = 0;
       setStreamedText("");
       setActiveTab("preview");
 
@@ -249,7 +280,9 @@ export function ProjectWorkspace() {
             return;
           }
           if (event.type === "delta" && typeof event.text === "string") {
-            setStreamedText((t) => t + event.text);
+            // Buffer raw tokens; the reveal loop below types them out smoothly so
+            // the model's bursty output still appears as continuous live code.
+            rawStreamRef.current += event.text;
           } else if (event.type === "status" && event.message) {
             pushStep(event.message);
           } else if (event.type === "file" && event.path) {
@@ -282,6 +315,10 @@ export function ProjectWorkspace() {
         ]);
       } finally {
         abortRef.current = null;
+        // Reveal any remaining buffered tail so the final lines aren't cut off
+        // in the brief moment before the view switches to the saved files.
+        shownLenRef.current = rawStreamRef.current.length;
+        setStreamedText(rawStreamRef.current);
         setIsStreaming(false);
         setBuildSteps((prev) => prev.map((s) => ({ ...s, done: true })));
         setPendingUser(null);
