@@ -3,7 +3,7 @@ import { useListProjects, useDeleteProject, getListProjectsQueryKey, getGetRecen
 import { useQueryClient } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { formatDistanceToNow } from "date-fns";
-import { FileCode, MessageSquare, Clock, Plus, Trash2, Loader2, FolderOpen } from "lucide-react";
+import { FileCode, MessageSquare, Clock, Trash2, Loader2, FolderOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/ui/card";
 import {
@@ -39,16 +39,9 @@ export function Projects() {
 
   return (
     <div className="mx-auto w-full max-w-6xl px-4 py-10">
-      <div className="flex justify-between items-center mb-8">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Projects</h1>
-          <p className="text-muted-foreground mt-1">All your generated applications</p>
-        </div>
-        <Link href="/">
-          <Button data-testid="button-new-project">
-            <Plus className="mr-2 h-4 w-4" /> New Project
-          </Button>
-        </Link>
+      <div className="mb-8">
+        <h1 className="text-3xl font-bold tracking-tight">Projects</h1>
+        <p className="text-muted-foreground mt-1">All your generated applications</p>
       </div>
 
       {isLoading ? (
