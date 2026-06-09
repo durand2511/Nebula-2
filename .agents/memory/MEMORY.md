@@ -3,4 +3,5 @@
 - [app-builder preview](app-builder-preview.md) — generated apps render in a no-same-origin sandboxed iframe; validate postMessage by e.source (origin is opaque), self-healing error banner.
 - [app-builder theme is force-dark](app-builder-theme.md) — tokens are dark on :root, .dark is a no-op; use the .light scope class to make a surface light (incl. portaled dialogs).
 - [Buildly learning loop](buildly-learning-loop.md) — distills global lessons from user adjustments (not first build), injects into every future generation's system prompt; fire-and-forget + injection-safety gate.
+- [Buildly reference images](buildly-reference-images.md) — attach images as vision style brief; not persisted/re-sent, image-only allowed via synced fallback prompt, body limit scoped to stream route only.
 - [Buildly URL import](buildly-url-import.md) — AI Editor imports a site by URL; must rewrite assets absolute, block SSRF rebinding at connect-time (undici dispatcher), and strip on*/javascript: for the allow-scripts iframe.

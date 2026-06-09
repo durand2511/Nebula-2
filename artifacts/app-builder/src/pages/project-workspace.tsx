@@ -24,11 +24,18 @@ import {
   Wand2,
   X,
   Square,
+  ImagePlus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  fileToReferenceImage,
+  MAX_ATTACHED_IMAGES,
+  REFERENCE_IMAGE_PROMPT,
+  type AttachedImage,
+} from "@/lib/image";
 
 type ProjectFile = { id: number; path: string; content: string; language: string };
 
@@ -136,8 +143,11 @@ export function ProjectWorkspace() {
   const [pendingUser, setPendingUser] = useState<string | null>(null);
   const [previewErrors, setPreviewErrors] = useState<string[]>([]);
   const [streamedText, setStreamedText] = useState("");
+  const [attachedImages, setAttachedImages] = useState<AttachedImage[]>([]);
+  const [pendingImages, setPendingImages] = useState<string[]>([]);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const autoSentRef = useRef(false);
   const previewIframeRef = useRef<HTMLIFrameElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -246,13 +256,14 @@ export function ProjectWorkspace() {
   }, []);
 
   const streamMessage = useCallback(
-    async (messageContent: string) => {
+    async (messageContent: string, images: string[] = []) => {
       if (!projectId) return;
       setIsStreaming(true);
       setPhaseIndex(0);
       setBuildError(null);
       setShowCode(false);
       setPendingUser(messageContent);
+      setPendingImages(images);
       pendingBaseRef.current = messagesLenRef.current;
       setPreviewErrors([]);
       rawStreamRef.current = "";
@@ -267,7 +278,11 @@ export function ProjectWorkspace() {
         const res = await fetch(`/api/projects/${projectId}/messages/stream`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ content: messageContent }),
+          body: JSON.stringify(
+            images.length > 0
+              ? { content: messageContent, images }
+              : { content: messageContent }
+          ),
           signal: ac.signal,
         });
         if (!res.ok || !res.body) {
@@ -324,6 +339,7 @@ export function ProjectWorkspace() {
         // Mark every phase complete the moment the real build finishes.
         setPhaseIndex(BUILD_PHASES.length);
         setPendingUser(null);
+        setPendingImages([]);
         await Promise.all([
           queryClient.invalidateQueries({ queryKey: getListMessagesQueryKey(projectId) }),
           queryClient.invalidateQueries({ queryKey: getListFilesQueryKey(projectId) }),
@@ -338,20 +354,64 @@ export function ProjectWorkspace() {
   // Auto-send initial prompt from the home page (stored in sessionStorage)
   useEffect(() => {
     if (!projectId || messages === undefined || isStreaming || autoSentRef.current) return;
+    if (messages.length !== 0) return;
     const key = `initial-prompt-${projectId}`;
-    const initialPrompt = sessionStorage.getItem(key);
-    if (initialPrompt && messages.length === 0) {
-      autoSentRef.current = true;
-      sessionStorage.removeItem(key);
-      void streamMessage(initialPrompt);
+    const imgKey = `initial-images-${projectId}`;
+    const initialPrompt = sessionStorage.getItem(key) ?? "";
+    let initialImages: string[] = [];
+    try {
+      const raw = sessionStorage.getItem(imgKey);
+      if (raw) initialImages = JSON.parse(raw) as string[];
+    } catch {
+      initialImages = [];
     }
+    const text = initialPrompt.trim()
+      ? initialPrompt
+      : initialImages.length > 0
+        ? REFERENCE_IMAGE_PROMPT
+        : "";
+    if (!text) return;
+    autoSentRef.current = true;
+    sessionStorage.removeItem(key);
+    sessionStorage.removeItem(imgKey);
+    void streamMessage(text, initialImages);
   }, [messages, projectId, isStreaming, streamMessage]);
 
   const handleSendMessage = () => {
-    if (!prompt.trim() || !projectId || isStreaming) return;
-    const content = prompt;
+    if ((!prompt.trim() && attachedImages.length === 0) || !projectId || isStreaming) return;
+    const images = attachedImages.map((img) => img.dataUrl);
+    const content = prompt.trim()
+      ? prompt
+      : images.length > 0
+        ? REFERENCE_IMAGE_PROMPT
+        : "";
     setPrompt("");
-    void streamMessage(content);
+    setAttachedImages([]);
+    void streamMessage(content, images);
+  };
+
+  const addImageFiles = useCallback(async (files: File[]) => {
+    const imageFiles = files.filter((f) => f.type.startsWith("image/"));
+    if (imageFiles.length === 0) return;
+    const processed = await Promise.all(imageFiles.map(fileToReferenceImage));
+    setAttachedImages((prev) => [...prev, ...processed].slice(0, MAX_ATTACHED_IMAGES));
+  }, []);
+
+  const handleImageInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files ? Array.from(e.target.files) : [];
+    void addImageFiles(files);
+    e.target.value = "";
+  };
+
+  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const files = Array.from(e.clipboardData.files ?? []);
+    if (files.some((f) => f.type.startsWith("image/"))) {
+      void addImageFiles(files);
+    }
+  };
+
+  const removeAttachedImage = (id: string) => {
+    setAttachedImages((prev) => prev.filter((img) => img.id !== id));
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -471,10 +531,24 @@ export function ProjectWorkspace() {
 
               {/* Optimistic pending user message */}
               {showPendingUser && (
-                <div className="flex justify-end">
-                  <div className="text-sm rounded-lg px-3.5 py-2 max-w-[90%] whitespace-pre-wrap bg-primary/10 text-foreground">
-                    {pendingUser}
-                  </div>
+                <div className="flex flex-col items-end gap-1.5">
+                  {pendingImages.length > 0 && (
+                    <div className="flex flex-wrap justify-end gap-1.5 max-w-[90%]">
+                      {pendingImages.map((src, i) => (
+                        <img
+                          key={i}
+                          src={src}
+                          alt="attached reference"
+                          className="h-16 w-16 rounded-md object-cover border border-border"
+                        />
+                      ))}
+                    </div>
+                  )}
+                  {pendingUser && (
+                    <div className="text-sm rounded-lg px-3.5 py-2 max-w-[90%] whitespace-pre-wrap bg-primary/10 text-foreground">
+                      {pendingUser}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -499,16 +573,62 @@ export function ProjectWorkspace() {
           </ScrollArea>
 
           <div className="p-4 bg-card border-t border-border">
+            {attachedImages.length > 0 && (
+              <div className="flex flex-wrap gap-2 mb-2">
+                {attachedImages.map((img) => (
+                  <div
+                    key={img.id}
+                    className="relative h-16 w-16 rounded-md overflow-hidden border border-border group"
+                  >
+                    <img
+                      src={img.dataUrl}
+                      alt={img.name}
+                      className="h-full w-full object-cover"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removeAttachedImage(img.id)}
+                      className="absolute top-0.5 right-0.5 h-4 w-4 rounded-full bg-background/80 text-foreground flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                      title="Remove image"
+                      data-testid={`button-remove-image-${img.id}`}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
             <div className="relative">
               <Textarea
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
                 onKeyDown={handleKeyDown}
+                onPaste={handlePaste}
                 placeholder="Ask Buildly to make changes..."
-                className="pr-12 min-h-[80px] max-h-[200px] resize-none bg-background border-border focus-visible:ring-1 focus-visible:ring-primary/50"
+                className="pr-12 pl-11 min-h-[80px] max-h-[200px] resize-none bg-background border-border focus-visible:ring-1 focus-visible:ring-primary/50"
                 disabled={isStreaming}
                 data-testid="input-chat-prompt"
               />
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                className="hidden"
+                onChange={handleImageInput}
+                data-testid="input-image-file"
+              />
+              <Button
+                size="icon"
+                variant="ghost"
+                className="absolute bottom-3 left-3 h-8 w-8 text-muted-foreground hover:text-foreground"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isStreaming || attachedImages.length >= MAX_ATTACHED_IMAGES}
+                title="Attach reference image"
+                data-testid="button-attach-image"
+              >
+                <ImagePlus className="h-4 w-4" />
+              </Button>
               {isStreaming ? (
                 <Button
                   size="icon"
@@ -525,7 +645,7 @@ export function ProjectWorkspace() {
                   size="icon"
                   className="absolute bottom-3 right-3 h-8 w-8"
                   onClick={handleSendMessage}
-                  disabled={!prompt.trim()}
+                  disabled={!prompt.trim() && attachedImages.length === 0}
                   data-testid="button-send-message"
                 >
                   <Send className="h-4 w-4" />
@@ -533,7 +653,7 @@ export function ProjectWorkspace() {
               )}
             </div>
             <div className="text-[10px] text-center text-muted-foreground mt-2">
-              Enter to send · Shift+Enter for new line
+              Enter to send · Shift+Enter for new line · attach or paste an image to match its style
             </div>
           </div>
         </div>

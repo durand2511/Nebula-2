@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, json } from "express";
 import { eq, desc, sql } from "drizzle-orm";
 import { lookup as dnsLookup } from "node:dns/promises";
 import { isIP } from "node:net";
@@ -345,6 +345,13 @@ function buildSystemPrompt(projectName: string, fileContext: string, learningsCo
 
 You build COMPLETE, production-ready web apps — never demos, prototypes, or placeholders.
 
+REFERENCE IMAGES (when the user attaches one or more images):
+- Treat the attached image(s) as the PRIMARY visual brief — read them carefully and study the layout structure, color palette, typography, spacing/density, imagery style, button and component shapes, and overall mood.
+- Build whatever the user asks, but styled to match the reference as closely as you can: reproduce its look and feel (colors, fonts, proportions, section structure, navigation pattern) so the result clearly belongs to the same brand/design language.
+- The reference shows VISUAL direction only. Still build a real, fully-functional app per the runtime constraints below — every button, tab, menu, and link must actually work (do NOT produce a static, non-interactive mockup of the image).
+- If the reference's palette/typography conflicts with the BUILDLY DESIGN SYSTEM defaults below, the REFERENCE WINS for palette, type, and overall styling (the user is explicitly asking for that look); still keep the execution-quality, layout-discipline, and runtime-robustness rules.
+- Recreate the design from scratch in your own clean code; never hotlink the reference image or any external asset URLs from it.
+
 RUNTIME CONSTRAINTS (the app runs sandboxed in a browser iframe — respect these exactly):
 - Vanilla JavaScript only (ES modules / plain JS). NO npm, NO build step, NO JSX/TSX, NO frameworks that need compiling.
 - Load libraries via CDN only (Tailwind, Chart.js, etc.).
@@ -615,7 +622,55 @@ async function recordLearning(
   }
 }
 
-type ChatMsg = { role: "system" | "user" | "assistant"; content: string };
+type ContentPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string } };
+type ChatMsg = {
+  role: "system" | "user" | "assistant";
+  content: string | ContentPart[];
+};
+
+// The OpenAI SDK's message param type, derived from the client so we don't need
+// a direct `openai` dependency just for types. Our ChatMsg is structurally a
+// subset; cast at the call sites where we hand messages to the SDK.
+type SdkMessages = Parameters<typeof openai.chat.completions.create>[0]["messages"];
+
+// Accepts the optional `images` field from a chat request and returns a safe,
+// bounded list of data: image URLs to forward to the model as a visual brief.
+const MAX_IMAGES = 4;
+const MAX_IMAGE_DATA_URL_LEN = 8_000_000; // ~6MB decoded; vision input cap.
+function sanitizeImageDataUrls(input: unknown): string[] {
+  if (!Array.isArray(input)) return [];
+  const out: string[] = [];
+  for (const item of input) {
+    if (typeof item !== "string") continue;
+    if (!/^data:image\/(png|jpe?g|webp|gif);base64,/i.test(item)) continue;
+    if (item.length > MAX_IMAGE_DATA_URL_LEN) continue;
+    out.push(item);
+    if (out.length >= MAX_IMAGES) break;
+  }
+  return out;
+}
+
+// Attach reference images to the most recent user turn so the model treats them
+// as the visual brief for THIS request. History images aren't re-sent (the built
+// code already reflects them), which keeps token usage bounded.
+function attachImagesToLastUser(messages: ChatMsg[], images: string[]): void {
+  if (images.length === 0) return;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role !== "user") continue;
+    const existing = messages[i].content;
+    const text = typeof existing === "string" ? existing : "";
+    messages[i] = {
+      role: "user",
+      content: [
+        { type: "text", text },
+        ...images.map((url) => ({ type: "image_url" as const, image_url: { url } })),
+      ],
+    };
+    return;
+  }
+}
 
 const MAX_GENERATION_TOKENS = 32768;
 const MAX_CONTINUATIONS = 2;
@@ -684,7 +739,7 @@ async function generateWithContinuation(messages: ChatMsg[]): Promise<string> {
         openai.chat.completions.create({
           model: "gpt-5.4",
           max_completion_tokens: MAX_GENERATION_TOKENS,
-          messages: msgs,
+          messages: msgs as SdkMessages,
         }),
       "sync-completion",
     );
@@ -1029,15 +1084,30 @@ router.post("/projects/:projectId/messages", async (req, res) => {
   }
 });
 
-router.post("/projects/:projectId/messages/stream", async (req, res) => {
+// Default prompt used when the user sends only reference image(s) with no text,
+// so the model always receives a concrete textual instruction.
+const REFERENCE_ONLY_PROMPT =
+  "Build an app that matches the attached reference image(s) as closely as possible.";
+
+// This route opts in to a larger body limit (skipped by the global parser) so it
+// can accept base64-encoded reference images.
+router.post("/projects/:projectId/messages/stream", json({ limit: "25mb" }), async (req, res) => {
   const projectId = Number(req.params.projectId);
   if (isNaN(projectId)) {
     res.status(400).json({ error: "Invalid project ID" });
     return;
   }
 
-  const content = req.body?.content;
-  if (!content || typeof content !== "string") {
+  const images = sanitizeImageDataUrls(req.body?.images);
+  const rawContent = typeof req.body?.content === "string" ? req.body.content : "";
+  // Allow image-only requests: fall back to a default instruction when the user
+  // attached reference image(s) without any text.
+  const content = rawContent.trim()
+    ? rawContent
+    : images.length > 0
+      ? REFERENCE_ONLY_PROMPT
+      : "";
+  if (!content) {
     res.status(400).json({ error: "content is required" });
     return;
   }
@@ -1119,6 +1189,7 @@ router.post("/projects/:projectId/messages/stream", async (req, res) => {
       { role: "system", content: systemPrompt },
       ...chatMessages,
     ];
+    attachImagesToLastUser(streamMsgs, images);
 
     outer: for (let round = 0; round <= MAX_CONTINUATIONS; round++) {
       // Don't kick off (or pay for) another round if the user already bailed.
@@ -1130,7 +1201,7 @@ router.post("/projects/:projectId/messages/stream", async (req, res) => {
             model: "gpt-5.4",
             max_completion_tokens: MAX_GENERATION_TOKENS,
             stream: true,
-            messages: streamMsgs,
+            messages: streamMsgs as SdkMessages,
           }),
         "stream-completion",
       );

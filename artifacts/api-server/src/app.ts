@@ -26,8 +26,16 @@ app.use(
   }),
 );
 app.use(cors());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+// Modest default body limit for the general API surface. The chat stream route
+// needs a much larger ceiling for base64 reference images, so it opts in to its
+// own parser (see routes/projects.ts) and is skipped here — keeping the larger
+// payload surface scoped to a single endpoint rather than the whole API.
+const standardJson = express.json({ limit: "1mb" });
+app.use((req, res, next) => {
+  if (req.path.endsWith("/messages/stream")) return next();
+  return standardJson(req, res, next);
+});
+app.use(express.urlencoded({ extended: true, limit: "1mb" }));
 
 app.use("/api", router);
 
