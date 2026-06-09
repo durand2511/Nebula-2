@@ -1156,7 +1156,8 @@ router.post("/projects/import-url", async (req, res) => {
       error:
         "Deze website kon niet geïmporteerd worden — hij gaf een lege pagina terug. " +
         "Sites die geautomatiseerde toegang blokkeren of hun inhoud met JavaScript laden, " +
-        "kunnen niet geïmporteerd worden. Probeer een andere website, of beschrijf wat je wilt bouwen.",
+        "kunnen niet geïmporteerd worden. Dit is vaak tijdelijk: probeer het later opnieuw, " +
+        "kies een andere website, of beschrijf wat je wilt bouwen.",
     });
     return;
   }
