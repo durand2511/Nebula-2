@@ -86,7 +86,7 @@ export function Projects() {
                       }`}
                       data-testid={`badge-source-${project.id}`}
                     >
-                      {project.source === "yogilates" ? "Yogilates" : "Jordy"}
+                      {project.source === "yogilates" ? "Yogilates" : "Home"}
                     </span>
                     <CardTitle className="pr-8">
                       {project.name}

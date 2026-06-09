@@ -5,7 +5,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ArrowRight, Loader2, ImagePlus, X } from "lucide-react";
-import logoUrl from "@assets/JRD_logo_trimmed.png";
+import logoUrl from "@assets/yogilates_logo.png";
 import {
   fileToReferenceImage,
   MAX_ATTACHED_IMAGES,
@@ -75,7 +75,7 @@ export function Home() {
   return (
     <div className="flex-1 flex flex-col items-center pt-24 px-4 pb-12 w-full max-w-4xl mx-auto">
       <div className="flex justify-center mb-12">
-        <img src={logoUrl} alt="JRD" className="h-44 w-auto" />
+        <img src={logoUrl} alt="Yogilates" className="h-28 w-auto" />
       </div>
 
       <div className="w-full max-w-3xl relative mb-20">

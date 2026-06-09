@@ -737,7 +737,7 @@ export function ProjectWorkspace() {
                 onChange={(e) => setPrompt(e.target.value)}
                 onKeyDown={handleKeyDown}
                 onPaste={handlePaste}
-                placeholder="Ask Buildly to make changes..."
+                placeholder="Ask Yogilates to make changes..."
                 className="pr-12 pl-11 min-h-[80px] max-h-[200px] resize-none bg-background border-border focus-visible:ring-1 focus-visible:ring-primary/50"
                 disabled={isStreaming}
                 data-testid="input-chat-prompt"
@@ -799,7 +799,7 @@ export function ProjectWorkspace() {
               <div className="h-12 border-b border-border bg-card/50 flex items-center gap-3 px-4 shrink-0">
                 <div className="flex items-center gap-2 text-sm font-medium text-foreground min-w-0">
                   <Loader2 className="h-4 w-4 animate-spin text-primary shrink-0" />
-                  <span className="truncate">Buildly is building your app…</span>
+                  <span className="truncate">Yogilates is building your app…</span>
                 </div>
                 <Button
                   variant="outline"
@@ -1050,7 +1050,7 @@ export function ProjectWorkspace() {
                   <MonitorPlay className="h-16 w-16 opacity-20" />
                   <h3 className="text-xl font-bold text-foreground">No Preview Yet</h3>
                   <p className="text-sm max-w-sm text-center">
-                    Chat with Buildly to generate your app. The preview will appear here instantly.
+                    Chat with Yogilates to generate your app. The preview will appear here instantly.
                   </p>
                 </div>
               )}
