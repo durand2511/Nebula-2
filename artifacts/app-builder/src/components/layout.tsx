@@ -1,11 +1,22 @@
 import { Link, useLocation } from "wouter";
+import bgUrl from "@assets/ChatGPT_Image_9_jun_2026,_19_53_49_1781027652886.png";
 
 export function Layout({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
   const isWorkspace = location.startsWith("/projects/") && location !== "/projects";
 
   return (
-    <div className={`min-h-screen bg-background text-foreground flex flex-col flex-1 light`}>
+    <div className={`relative min-h-screen text-foreground flex flex-col flex-1 light ${isWorkspace ? "bg-background" : ""}`}>
+      {!isWorkspace && (
+        <>
+          <div
+            className="fixed inset-0 -z-10 bg-cover bg-center bg-no-repeat"
+            style={{ backgroundImage: `url(${bgUrl})` }}
+            aria-hidden="true"
+          />
+          <div className="fixed inset-0 -z-10 bg-white/55" aria-hidden="true" />
+        </>
+      )}
       {!isWorkspace && (
         <header className="sticky top-0 z-50 w-full flex justify-center pt-6 pb-3">
           <nav className="flex items-center gap-1 rounded-full border border-border bg-card/90 backdrop-blur px-2 py-1.5 shadow-lg">
