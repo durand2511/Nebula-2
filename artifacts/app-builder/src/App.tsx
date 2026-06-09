@@ -5,6 +5,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { Layout } from "@/components/layout";
 import { Home } from "@/pages/home";
 import { Projects } from "@/pages/projects";
+import { AiEditor } from "@/pages/ai-editor";
 import { ProjectWorkspace } from "@/pages/project-workspace";
 import NotFound from "@/pages/not-found";
 
@@ -15,6 +16,7 @@ function Router() {
     <Switch>
       <Route path="/" component={Home} />
       <Route path="/projects" component={Projects} />
+      <Route path="/ai-editor" component={AiEditor} />
       <Route path="/projects/:id" component={ProjectWorkspace} />
       <Route component={NotFound} />
     </Switch>

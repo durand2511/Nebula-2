@@ -15,6 +15,9 @@ export function Layout({ children }: { children: React.ReactNode }) {
             <Link href="/projects" className={`rounded-full px-5 py-1.5 text-sm font-medium transition-colors ${location === "/projects" ? "bg-foreground text-background" : "text-foreground/60 hover:text-foreground hover:bg-foreground/5"}`}>
               Projects
             </Link>
+            <Link href="/ai-editor" className={`rounded-full px-5 py-1.5 text-sm font-medium transition-colors ${location === "/ai-editor" ? "bg-foreground text-background" : "text-foreground/60 hover:text-foreground hover:bg-foreground/5"}`}>
+              AI Editor
+            </Link>
           </nav>
         </header>
       )}

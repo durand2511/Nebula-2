@@ -60,6 +60,17 @@ export const GetRecentProjectsResponse = zod.array(GetRecentProjectsResponseItem
 
 
 /**
+ * @summary Import a live website by URL into a new editable project
+ */
+
+
+
+export const ImportProjectFromUrlBody = zod.object({
+  "url": zod.string().min(1)
+})
+
+
+/**
  * @summary Get a project by ID
  */
 export const GetProjectParams = zod.object({

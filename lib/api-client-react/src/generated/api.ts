@@ -22,6 +22,7 @@ import type {
 import type {
   FileInput,
   HealthStatus,
+  ImportUrlInput,
   Message,
   MessageInput,
   Project,
@@ -343,6 +344,77 @@ export function useGetRecentProjects<TData = Awaited<ReturnType<typeof getRecent
 
 
 
+
+export const getImportProjectFromUrlUrl = () => {
+
+
+
+
+  return `/api/projects/import-url`
+}
+
+/**
+ * @summary Import a live website by URL into a new editable project
+ */
+export const importProjectFromUrl = async (importUrlInput: ImportUrlInput, options?: RequestInit): Promise<Project> => {
+
+  return customFetch<Project>(getImportProjectFromUrlUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      importUrlInput,)
+  }
+);}
+
+
+
+
+export const getImportProjectFromUrlMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof importProjectFromUrl>>, TError,{data: BodyType<ImportUrlInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof importProjectFromUrl>>, TError,{data: BodyType<ImportUrlInput>}, TContext> => {
+
+const mutationKey = ['importProjectFromUrl'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof importProjectFromUrl>>, {data: BodyType<ImportUrlInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  importProjectFromUrl(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ImportProjectFromUrlMutationResult = NonNullable<Awaited<ReturnType<typeof importProjectFromUrl>>>
+    export type ImportProjectFromUrlMutationBody = BodyType<ImportUrlInput>
+    export type ImportProjectFromUrlMutationError = ErrorType<void>
+
+    /**
+ * @summary Import a live website by URL into a new editable project
+ */
+export const useImportProjectFromUrl = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof importProjectFromUrl>>, TError,{data: BodyType<ImportUrlInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof importProjectFromUrl>>,
+        TError,
+        {data: BodyType<ImportUrlInput>},
+        TContext
+      > => {
+      return useMutation(getImportProjectFromUrlMutationOptions(options));
+    }
 
 export const getGetProjectUrl = (projectId: number,) => {
 

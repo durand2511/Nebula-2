@@ -1,10 +1,15 @@
 import { Router } from "express";
 import { eq, desc, sql } from "drizzle-orm";
+import { lookup as dnsLookup } from "node:dns/promises";
+import { isIP } from "node:net";
+import { Agent, fetch as safeFetch } from "undici";
+import { load as cheerioLoad } from "cheerio";
 import { db, projects, projectMessages, projectFiles, learnings } from "@workspace/db";
 import {
   CreateProjectBody,
   GetProjectParams,
   DeleteProjectParams,
+  ImportProjectFromUrlBody,
 } from "@workspace/api-zod";
 import { openai } from "@workspace/integrations-openai-ai-server";
 import { logger } from "../lib/logger";
@@ -31,6 +36,303 @@ function inferLanguage(path: string): string {
     md: "markdown",
   };
   return map[ext] ?? "plaintext";
+}
+
+// --- Website import (AI Editor) ---------------------------------------------
+
+const IMPORT_FETCH_TIMEOUT_MS = 12000;
+const IMPORT_MAX_BYTES = 1_500_000; // cap so a huge page can't blow the model's context
+const IMPORT_MAX_REDIRECTS = 4;
+
+// Block requests that resolve to loopback / private / link-local ranges so a
+// user-supplied URL can't be used to reach internal services (SSRF).
+
+// Expand an IPv6 string (handling "::" compression and a dotted-quad tail) into
+// its 8 16-bit hextets, or null if it isn't parseable.
+function expandIpv6(ip: string): number[] | null {
+  let s = ip.split("%")[0];
+  const dm = s.match(/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/);
+  if (dm && dm.index !== undefined) {
+    const p = dm[1].split(".").map(Number);
+    if (p.some((n) => n > 255)) return null;
+    const h1 = ((p[0] << 8) | p[1]).toString(16);
+    const h2 = ((p[2] << 8) | p[3]).toString(16);
+    s = s.slice(0, dm.index) + h1 + ":" + h2;
+  }
+  const parts = s.split("::");
+  if (parts.length > 2) return null;
+  const head = parts[0] ? parts[0].split(":") : [];
+  const tail = parts.length === 2 && parts[1] ? parts[1].split(":") : [];
+  let all: string[];
+  if (parts.length === 1) {
+    all = head;
+  } else {
+    const missing = 8 - (head.length + tail.length);
+    if (missing < 0) return null;
+    all = [...head, ...new Array(missing).fill("0"), ...tail];
+  }
+  if (all.length !== 8) return null;
+  const nums = all.map((h) => (h === "" ? 0 : parseInt(h, 16)));
+  if (nums.some((n) => Number.isNaN(n) || n < 0 || n > 0xffff)) return null;
+  return nums;
+}
+
+// If an IPv6 address embeds an IPv4 (mapped `::ffff:x` or compatible `::x`),
+// return that IPv4 in dotted form so it can be range-checked. This closes SSRF
+// bypasses where an internal IPv4 (e.g. 127.0.0.1) is encoded as IPv6.
+function embeddedIpv4(ip6: string): string | null {
+  const h = expandIpv6(ip6);
+  if (!h) return null;
+  const isMapped = h.slice(0, 5).every((x) => x === 0) && h[5] === 0xffff;
+  const isCompat =
+    h.slice(0, 6).every((x) => x === 0) && !(h[6] === 0 && h[7] <= 1);
+  if (!isMapped && !isCompat) return null;
+  return `${(h[6] >> 8) & 0xff}.${h[6] & 0xff}.${(h[7] >> 8) & 0xff}.${h[7] & 0xff}`;
+}
+
+function isPrivateIp(ip: string): boolean {
+  const kind = isIP(ip);
+  if (kind === 4) {
+    const p = ip.split(".").map(Number);
+    if (p[0] === 10) return true;
+    if (p[0] === 127) return true;
+    if (p[0] === 0) return true;
+    if (p[0] === 169 && p[1] === 254) return true; // link-local incl. cloud metadata
+    if (p[0] === 172 && p[1] >= 16 && p[1] <= 31) return true;
+    if (p[0] === 192 && p[1] === 168) return true;
+    if (p[0] === 100 && p[1] >= 64 && p[1] <= 127) return true; // CGNAT
+    return false;
+  }
+  if (kind === 6) {
+    const lower = ip.toLowerCase();
+    const h = expandIpv6(lower);
+    if (!h) return true; // valid-but-unparseable → treat as unsafe
+    if (h.every((x) => x === 0)) return true; // :: unspecified
+    if (h.slice(0, 7).every((x) => x === 0) && h[7] === 1) return true; // ::1 loopback
+    if ((h[0] & 0xffc0) === 0xfe80) return true; // fe80::/10 link-local
+    if ((h[0] & 0xffc0) === 0xfec0) return true; // fec0::/10 site-local (deprecated)
+    if ((h[0] & 0xfe00) === 0xfc00) return true; // fc00::/7 unique local
+    const v4 = embeddedIpv4(lower); // IPv4-mapped/compatible → check the IPv4
+    if (v4) return isPrivateIp(v4);
+    return false;
+  }
+  return true; // unknown format → treat as unsafe
+}
+
+async function assertSafeUrl(rawUrl: string): Promise<URL> {
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    throw new Error("That doesn't look like a valid URL.");
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error("Only http and https URLs are supported.");
+  }
+  const host = url.hostname.toLowerCase();
+  if (host === "localhost" || host.endsWith(".localhost") || host === "0.0.0.0") {
+    throw new Error("That host isn't allowed.");
+  }
+  // If the host is a literal IP, validate it directly; otherwise resolve DNS.
+  const literal = isIP(host);
+  const ips = literal
+    ? [host]
+    : (await dnsLookup(host, { all: true })).map((r) => r.address);
+  if (ips.length === 0 || ips.some((ip) => isPrivateIp(ip))) {
+    throw new Error("That host isn't allowed.");
+  }
+  return url;
+}
+
+// Hardened dispatcher: re-resolves and re-validates the host at actual connect
+// time. assertSafeUrl alone is vulnerable to DNS rebinding (a host can resolve
+// to a public IP during validation and a private IP at connect time); this
+// closes that gap because the connection only ever uses an IP we just checked.
+const importDispatcher = new Agent({
+  connect: {
+    lookup(hostname, options, callback) {
+      dnsLookup(hostname, { all: true })
+        .then((records) => {
+          if (records.length === 0 || records.some((r) => isPrivateIp(r.address))) {
+            callback(new Error("That host isn't allowed."), null as never, 0);
+            return;
+          }
+          if (options && (options as { all?: boolean }).all) {
+            callback(null, records as never, 0);
+          } else {
+            callback(null, records[0].address, records[0].family);
+          }
+        })
+        .catch((err: Error) => callback(err, null as never, 0));
+    },
+  },
+});
+
+// Fetch HTML while following redirects manually, re-validating every hop so a
+// redirect can't bounce us to an internal address.
+async function fetchWebsiteHtml(rawUrl: string): Promise<{ html: string; finalUrl: string }> {
+  let current = rawUrl;
+  for (let hop = 0; hop <= IMPORT_MAX_REDIRECTS; hop++) {
+    const safe = await assertSafeUrl(current);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), IMPORT_FETCH_TIMEOUT_MS);
+    let res: Awaited<ReturnType<typeof safeFetch>>;
+    try {
+      res = await safeFetch(safe.toString(), {
+        redirect: "manual",
+        dispatcher: importDispatcher,
+        signal: controller.signal,
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (compatible; BuildlyImporter/1.0; +https://buildly.app)",
+          Accept: "text/html,application/xhtml+xml",
+        },
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+
+    if (res.status >= 300 && res.status < 400) {
+      const location = res.headers.get("location");
+      if (!location) throw new Error("The website returned an invalid redirect.");
+      current = new URL(location, safe).toString();
+      continue;
+    }
+    if (!res.ok) {
+      throw new Error(`The website responded with status ${res.status}.`);
+    }
+    const contentType = res.headers.get("content-type") ?? "";
+    if (contentType && !contentType.includes("html")) {
+      throw new Error("That URL doesn't point to a web page.");
+    }
+
+    const reader = res.body?.getReader();
+    if (!reader) throw new Error("Couldn't read the website's content.");
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value) {
+        total += value.length;
+        if (total > IMPORT_MAX_BYTES) {
+          await reader.cancel();
+          throw new Error("That page is too large to import.");
+        }
+        chunks.push(value);
+      }
+    }
+    const html = Buffer.concat(chunks).toString("utf-8");
+    return { html, finalUrl: safe.toString() };
+  }
+  throw new Error("The website redirected too many times.");
+}
+
+// URL-bearing attributes we rewrite to absolute and scrub for script schemes.
+const URL_ATTRS = [
+  "href",
+  "src",
+  "poster",
+  "background",
+  "action",
+  "formaction",
+  "data",
+  "xlink:href",
+];
+
+// Attributes that carry a comma-separated list of candidate URLs.
+const SRCSET_ATTRS = ["srcset", "imagesrcset"];
+
+// Decode HTML entities then normalize whitespace/control chars so an obfuscated
+// scheme (e.g. `java\tscript:` or `javascript&#58;`) can't slip past the check.
+function normalizeUrlValue(value: string): string {
+  return value.replace(/[\u0000-\u0020\u00a0]+/g, "").toLowerCase();
+}
+
+function isDangerousScheme(value: string): boolean {
+  const v = normalizeUrlValue(value);
+  return (
+    v.startsWith("javascript:") ||
+    v.startsWith("vbscript:") ||
+    v.startsWith("data:text/html")
+  );
+}
+
+function absolutizeUrl(rawValue: string, baseUrl: string): string {
+  const value = rawValue.trim();
+  if (isDangerousScheme(value)) return "#";
+  if (
+    !value ||
+    value.startsWith("#") ||
+    value.startsWith("data:") ||
+    value.startsWith("mailto:") ||
+    value.startsWith("tel:") ||
+    /^[a-z][a-z0-9+.-]*:\/\//i.test(value)
+  ) {
+    return value;
+  }
+  try {
+    return new URL(value, baseUrl).toString();
+  } catch {
+    return value;
+  }
+}
+
+// Turn a fetched live page into a self-contained, preview-safe single HTML file.
+// Parsing into a real DOM (cheerio) — rather than regex — is deliberate: it
+// handles quoted/unquoted/entity-encoded attributes uniformly so script vectors
+// can't survive via an edge case the preview iframe (allow-scripts) would run.
+// We strip all scripts and JS event handlers, neutralize script-scheme URLs, and
+// rewrite asset URLs to absolute so the sandboxed iframe can still load CSS/images.
+function prepareImportedHtml(html: string, baseUrl: string): string {
+  const $ = cheerioLoad(html);
+
+  // Remove scripts and any element that can load/execute an embedded document
+  // (these would run JS inside the allow-scripts preview sandbox).
+  $("script, base, iframe, frame, frameset, object, embed, portal, applet").remove();
+  // Drop meta-refresh redirects — they can navigate the sandboxed preview to a
+  // script-bearing document (e.g. content="0;url=javascript:..." / data:text/html).
+  $("meta").each((_, el) => {
+    if (($(el).attr("http-equiv") ?? "").trim().toLowerCase() === "refresh") {
+      $(el).remove();
+    }
+  });
+  // Keep noscript content visible but drop the wrapper.
+  $("noscript").each((_, el) => {
+    $(el).replaceWith($(el).contents());
+  });
+
+  $("*").each((_, node) => {
+    const el = node as { attribs?: Record<string, string> };
+    const attribs = el.attribs;
+    if (!attribs) return;
+    const $el = $(node);
+    for (const name of Object.keys(attribs)) {
+      const lname = name.toLowerCase();
+      // Drop inline event handlers (onclick, onload, onerror, ...) and srcdoc,
+      // which embeds a whole document that would run scripts in the iframe.
+      if (lname.startsWith("on") || lname === "srcdoc") {
+        $el.removeAttr(name);
+        continue;
+      }
+      if (URL_ATTRS.includes(lname)) {
+        $el.attr(name, absolutizeUrl(attribs[name], baseUrl));
+      } else if (SRCSET_ATTRS.includes(lname)) {
+        const rewritten = attribs[name]
+          .split(",")
+          .map((part) => {
+            const seg = part.trim();
+            if (!seg) return seg;
+            const [u, ...rest] = seg.split(/\s+/);
+            return [absolutizeUrl(u, baseUrl), ...rest].join(" ");
+          })
+          .join(", ");
+        $el.attr(name, rewritten);
+      }
+    }
+  });
+
+  return $.html();
 }
 
 function buildSystemPrompt(projectName: string, fileContext: string, learningsContext: string): string {
@@ -507,6 +809,72 @@ router.post("/projects", async (req, res) => {
     });
   } catch (err) {
     req.log.error({ err }, "Failed to create project");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Import a live website by URL and seed a new project with it so the user can
+// edit it with AI. Registered before "/projects/:projectId" — though that route
+// is GET/DELETE only, this keeps the more specific path unambiguous.
+router.post("/projects/import-url", async (req, res) => {
+  const parsed = ImportProjectFromUrlBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "A url is required." });
+    return;
+  }
+
+  // Allow users to paste a bare domain (e.g. "stripe.com").
+  let rawUrl = parsed.data.url.trim();
+  if (!/^https?:\/\//i.test(rawUrl)) {
+    rawUrl = `https://${rawUrl}`;
+  }
+
+  let imported: { html: string; finalUrl: string };
+  try {
+    imported = await fetchWebsiteHtml(rawUrl);
+  } catch (err) {
+    const message =
+      err instanceof Error && err.name === "AbortError"
+        ? "The website took too long to respond."
+        : err instanceof Error
+          ? err.message
+          : "Couldn't fetch that website.";
+    req.log.warn({ err, rawUrl }, "Website import failed");
+    res.status(400).json({ error: message });
+    return;
+  }
+
+  try {
+    const preparedHtml = prepareImportedHtml(imported.html, imported.finalUrl);
+    let hostname = "Imported Site";
+    try {
+      hostname = new URL(imported.finalUrl).hostname.replace(/^www\./, "");
+    } catch {
+      /* keep fallback */
+    }
+
+    const [project] = await db
+      .insert(projects)
+      .values({
+        name: hostname,
+        description: `Imported from ${imported.finalUrl}`,
+      })
+      .returning();
+
+    await db.insert(projectFiles).values({
+      projectId: project.id,
+      path: "index.html",
+      content: preparedHtml,
+      language: "html",
+    });
+
+    res.status(201).json({
+      ...project,
+      messageCount: 0,
+      fileCount: 1,
+    });
+  } catch (err) {
+    req.log.error({ err }, "Failed to create imported project");
     res.status(500).json({ error: "Internal server error" });
   }
 });

@@ -46,6 +46,11 @@ export interface MessageInput {
   content: string;
 }
 
+export interface ImportUrlInput {
+  /** @minLength 1 */
+  url: string;
+}
+
 export interface ProjectFile {
   id: number;
   projectId: number;
