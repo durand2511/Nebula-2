@@ -68,7 +68,7 @@ function escapeRegExp(s: string): string {
 }
 
 /** Combine separate files into one self-contained HTML doc so the iframe preview works. */
-function buildPreviewHtml(files: ProjectFile[] | undefined): string {
+function buildPreviewHtml(files: ProjectFile[] | undefined, isImported: boolean): string {
   if (!files || files.length === 0) return "";
   const index =
     files.find((f) => f.path === "index.html") ??
@@ -184,7 +184,22 @@ function buildPreviewHtml(files: ProjectFile[] | undefined): string {
   // to render inside a frame (X-Frame-Options/CSP) and would otherwise appear dead.
   // In-page anchors (#...) and non-web schemes (mailto/tel) keep their default behavior.
   const linkHandler = `<script>(function(){var HOST=${JSON.stringify(primaryHost)};function norm(h){return h.replace(/^www\\./,"")}document.addEventListener("click",function(e){var t=e.target,a=t&&t.closest?t.closest("a[href]"):null;if(!a)return;var raw=(a.getAttribute("href")||"").trim();if(!raw||raw.charAt(0)==="#")return;var u;try{u=new URL(a.href)}catch(err){return}if(u.protocol!=="http:"&&u.protocol!=="https:")return;var internal=HOST&&norm(u.hostname.toLowerCase())===norm(HOST);if(!internal){e.preventDefault();try{window.open(a.href,"_blank","noopener")}catch(err){}}},true);})();</script>`;
-  const inject = baseStyle + storageShim + reporter + linkHandler;
+
+  // Mobile hamburger toggle — IMPORTED SITES ONLY. Imported themes render a hamburger
+  // + a hidden dropdown <nav>/<ul> of internal pages, but their toggle JS (Elementor,
+  // etc.) was stripped on import, so tapping it does nothing. We re-implement a toggle:
+  // on a hamburger click, find its menu (aria-controls -> Elementor dropdown nav in the
+  // same widget -> nearest nav/menu) and FORCE it open/closed with inline !important
+  // styles, beating whatever CSS hid it. The menu's page links stay <a> tags, so the
+  // link handler above keeps same-site navigation INSIDE the preview.
+  // Gated to imports (generated apps ship their own working menu JS — we must NOT
+  // intercept it). Selectors are limited to real hamburger classes, the resolved
+  // target must be a nav/menu, and we never stopPropagation, so we can't swallow a
+  // working control's own click logic.
+  const menuToggle = isImported
+    ? `<script>(function(){function isMenu(el){if(!el)return false;var tag=el.tagName;if(tag==="NAV"||tag==="UL")return true;var c=el.className&&el.className.toString?el.className.toString():"";return /menu|nav/i.test(c)}function force(el,open){if(open){el.style.setProperty("display","block","important");el.style.setProperty("visibility","visible","important");el.style.setProperty("opacity","1","important");el.style.setProperty("max-height","none","important");el.style.setProperty("overflow","visible","important");el.setAttribute("aria-hidden","false")}else{["display","visibility","opacity","max-height","overflow"].forEach(function(p){el.style.removeProperty(p)});el.setAttribute("aria-hidden","true")}}function findMenu(t){var ac=t.getAttribute&&t.getAttribute("aria-controls");if(ac){var byId=document.getElementById(ac);if(byId&&isMenu(byId))return byId}var w=t.closest(".elementor-widget-nav-menu,.elementor-element");if(w){var dd=w.querySelector("nav.elementor-nav-menu--dropdown");if(dd)return dd}var p=t.parentElement,hops=0;while(p&&hops<6){var m=p.querySelector('nav,ul.menu,ul[class*="menu"],[class*="nav-menu"]');if(m&&isMenu(m)&&!m.contains(t)&&!t.contains(m))return m;p=p.parentElement;hops++}return null}var SEL='.elementor-menu-toggle,.menu-toggle,[class*="menu-toggle"],.menu-toggle-button,.navbar-toggler,.navbar-toggle,[class*="hamburger"],[class*="burger-menu"]';var CONT='.elementor-menu-toggle,.menu-toggle,.menu-toggle-button,.navbar-toggler,.navbar-toggle,[class*="hamburger"],[class*="burger-menu"]';document.addEventListener("click",function(e){var hit=e.target&&e.target.closest?e.target.closest(SEL):null;if(!hit)return;var t=hit.closest(CONT)||hit;var menu=findMenu(t);if(!menu)return;e.preventDefault();var open=t.getAttribute("aria-expanded")!=="true";t.setAttribute("aria-expanded",open?"true":"false");if(t.classList){t.classList.toggle("elementor-active",open);t.classList.toggle("buildly-menu-open",open)}force(menu,open)},true)})();</script>`
+    : "";
+  const inject = baseStyle + storageShim + reporter + linkHandler + menuToggle;
   if (/<head[^>]*>/i.test(html)) {
     html = html.replace(/<head[^>]*>/i, (m) => m + inject);
   } else {
@@ -502,7 +517,8 @@ export function ProjectWorkspace() {
   };
 
   const activeFile = files?.find((f) => f.path === selectedFile);
-  const previewHtml = buildPreviewHtml(files);
+  const isImported = (project?.description ?? "").startsWith("Imported from");
+  const previewHtml = buildPreviewHtml(files, isImported);
 
   // Conversational narration: the model speaks first (before any "FILE:" block),
   // so show that opening text as a live, streaming assistant message in the chat.
