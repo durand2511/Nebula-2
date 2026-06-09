@@ -156,14 +156,24 @@ function buildPreviewHtml(files: ProjectFile[] | undefined): string {
   // hidden robustly neutralizes that bug class (beats normal app CSS via
   // !important; a hostile `display:... !important` could still override it).
   const baseStyle = `<style>[hidden]{display:none !important}img.lazyload,img.lazyloading,.lazyload,.lazyloading{opacity:1 !important}</style>`;
-  // Make the preview behave like a real browser for links. The iframe is sandboxed
-  // (opaque origin), so an external link that navigates the frame in-place gets
-  // blocked by the target site's X-Frame-Options/CSP (WhatsApp, Momoyoga booking,
-  // etc.) and appears "dead". Intercept clicks on absolute http(s)/mailto/tel links
-  // and open them in a real new tab via window.open (allowed by allow-popups +
-  // allow-popups-to-escape-sandbox). In-page anchors (#...) and relative links keep
-  // their normal in-frame behavior.
-  const linkHandler = `<script>(function(){document.addEventListener("click",function(e){var t=e.target,a=t&&t.closest?t.closest("a[href]"):null;if(!a)return;var h=(a.getAttribute("href")||"").trim();if(!h||h.charAt(0)==="#")return;var ext=/^(https?:|mailto:|tel:)/i.test(h)||h.indexOf("//")===0;if(ext){e.preventDefault();try{window.open(a.href,"_blank","noopener")}catch(err){}}},true);})();</script>`;
+  // Detect the imported site's primary host (the domain most of its own links point
+  // to) so the preview can tell "internal" navigation apart from truly external links.
+  const hostCounts: Record<string, number> = {};
+  const hostRe = /\bhref=["']https?:\/\/([^/"'?#]+)/gi;
+  for (let mm = hostRe.exec(html); mm; mm = hostRe.exec(html)) {
+    const hh = mm[1].toLowerCase().replace(/^www\./, "");
+    hostCounts[hh] = (hostCounts[hh] || 0) + 1;
+  }
+  let primaryHost = "";
+  for (const k in hostCounts)
+    if (hostCounts[k] > (hostCounts[primaryHost] || 0)) primaryHost = k;
+
+  // Browser-like link handling. Links to the SAME site navigate INSIDE the preview
+  // (so it behaves like a single browser tab); links to OTHER sites (WhatsApp,
+  // Momoyoga booking, socials) open in a real new tab, because external sites refuse
+  // to render inside a frame (X-Frame-Options/CSP) and would otherwise appear dead.
+  // In-page anchors (#...) and non-web schemes (mailto/tel) keep their default behavior.
+  const linkHandler = `<script>(function(){var HOST=${JSON.stringify(primaryHost)};function norm(h){return h.replace(/^www\\./,"")}document.addEventListener("click",function(e){var t=e.target,a=t&&t.closest?t.closest("a[href]"):null;if(!a)return;var raw=(a.getAttribute("href")||"").trim();if(!raw||raw.charAt(0)==="#")return;var u;try{u=new URL(a.href)}catch(err){return}if(u.protocol!=="http:"&&u.protocol!=="https:")return;var internal=HOST&&norm(u.hostname.toLowerCase())===norm(HOST);if(!internal){e.preventDefault();try{window.open(a.href,"_blank","noopener")}catch(err){}}},true);})();</script>`;
   const inject = baseStyle + storageShim + reporter + linkHandler;
   if (/<head[^>]*>/i.test(html)) {
     html = html.replace(/<head[^>]*>/i, (m) => m + inject);
