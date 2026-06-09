@@ -679,11 +679,70 @@ LANGUAGE: javascript
 Output nothing after the final code block — your opening sentences to the user are the only prose you write.${fileContext}`;
 }
 
-function buildFileContext(files: { path: string; content: string }[]): string {
-  if (files.length === 0) return "";
-  return `\n\nCurrent project files (modify these as needed):\n${files
-    .map((f) => `--- ${f.path} ---\n${f.content}`)
-    .join("\n\n")}`;
+// The model has a hard input-token limit. A large multi-page imported site can
+// be several MB of HTML (well past that limit), so we include files under a
+// character budget instead of dumping everything. Roughly ~3.4 chars/token for
+// dense HTML, so ~2M chars stays comfortably under the limit while leaving room
+// for the system prompt, conversation history, and the response.
+const MAX_FILE_CONTEXT_CHARS = 2_000_000;
+
+function buildFileContext(files: { path: string; content: string }[]): {
+  context: string;
+  omitted: string[];
+} {
+  if (files.length === 0) return { context: "", omitted: [] };
+
+  // Priority: the entry page first, then stylesheets/scripts, then remaining
+  // pages smallest-first so we fit as many whole pages as possible.
+  const rank = (p: string): number => {
+    const lower = p.toLowerCase();
+    if (lower === "index.html") return 0;
+    if (lower.endsWith(".css")) return 1;
+    if (lower.endsWith(".js")) return 2;
+    return 3;
+  };
+  const ordered = [...files].sort((a, b) => {
+    const r = rank(a.path) - rank(b.path);
+    if (r !== 0) return r;
+    return a.content.length - b.content.length;
+  });
+
+  const included: string[] = [];
+  const omitted: string[] = [];
+  let used = 0;
+  for (const f of ordered) {
+    const header = `--- ${f.path} ---\n`;
+    const block = `${header}${f.content}`;
+    if (used + block.length + 2 <= MAX_FILE_CONTEXT_CHARS) {
+      included.push(block);
+      used += block.length + 2; // account for the "\n\n" join
+    } else if (included.length === 0) {
+      // A single file already exceeds the budget: include a truncated head so
+      // the model still has something to work with. Reserve space for the
+      // (longer) header and join so the total never exceeds the budget.
+      const truncHeader = `--- ${f.path} (truncated to fit context) ---\n`;
+      const room = Math.max(0, MAX_FILE_CONTEXT_CHARS - truncHeader.length - 2);
+      const head = f.content.slice(0, room);
+      included.push(`${truncHeader}${head}`);
+      used += truncHeader.length + head.length + 2;
+      omitted.push(f.path);
+    } else {
+      omitted.push(f.path);
+    }
+  }
+
+  let note = "";
+  if (omitted.length > 0) {
+    note =
+      `\n\nNOTE: This project is too large to include every file in full. ` +
+      `The following pages were omitted to stay within limits — do NOT output, recreate, delete, or reference them, and only edit the files shown above unless the user explicitly asks about an omitted page:\n` +
+      omitted.map((p) => `- ${p}`).join("\n");
+  }
+
+  return {
+    context: `\n\nCurrent project files (modify these as needed):\n${included.join("\n\n")}${note}`,
+    omitted,
+  };
 }
 
 // Pulls the accumulated lessons learned from past user feedback so every new
@@ -923,6 +982,7 @@ async function persistGeneratedFiles(
   projectId: number,
   raw: string,
   existingFiles: { id: number; path: string }[],
+  protectedPaths: Set<string> = new Set(),
 ): Promise<string[]> {
   const written: string[] = [];
   let match;
@@ -931,6 +991,10 @@ async function persistGeneratedFiles(
     const [, filePath, langLine, fenceLang, fileContent] = match;
     const trimmedPath = filePath.trim();
     if (!trimmedPath) continue;
+    // Never overwrite a page that was omitted from the model's context: it
+    // couldn't have seen the real content, so any output for it would be a
+    // guess that corrupts the existing file.
+    if (protectedPaths.has(trimmedPath)) continue;
     const language = (langLine || fenceLang || "").trim() || inferLanguage(trimmedPath);
     written.push(trimmedPath);
     const existing = existingFiles.find((f) => f.path === trimmedPath);
@@ -1200,9 +1264,10 @@ router.post("/projects/:projectId/messages", async (req, res) => {
 
     const isAdjustment = existingFiles.length > 0;
     const learningsContext = await buildLearningsContext();
+    const fileCtx = buildFileContext(existingFiles);
     const systemPrompt = buildSystemPrompt(
       projectRows[0].name,
-      buildFileContext(existingFiles),
+      fileCtx.context,
       learningsContext,
     );
 
@@ -1212,7 +1277,12 @@ router.post("/projects/:projectId/messages", async (req, res) => {
         ...chatMessages,
       ])) || "I'm sorry, I couldn't generate a response.";
 
-    const written = await persistGeneratedFiles(projectId, aiContent, existingFiles);
+    const written = await persistGeneratedFiles(
+      projectId,
+      aiContent,
+      existingFiles,
+      new Set(fileCtx.omitted),
+    );
     if (written.length === 0 && existingFiles.length === 0) {
       res.status(422).json({
         error: "I couldn't generate valid files. Please try rephrasing your request.",
@@ -1329,9 +1399,11 @@ router.post("/projects/:projectId/messages/stream", json({ limit: "25mb" }), asy
 
     const isFirstBuild = existingFiles.length === 0;
     const learningsContext = await buildLearningsContext();
+    const fileCtx = buildFileContext(existingFiles);
+    const omittedPaths = new Set(fileCtx.omitted);
     const systemPrompt = buildSystemPrompt(
       projectRows[0].name,
-      buildFileContext(existingFiles),
+      fileCtx.context,
       learningsContext,
     );
 
@@ -1428,14 +1500,14 @@ router.post("/projects/:projectId/messages/stream", json({ limit: "25mb" }), asy
     if (clientGone) {
       // User pressed Stop — keep any fully-formed files already generated so the
       // work isn't lost, but skip the SSE replies (the connection is gone).
-      await persistGeneratedFiles(projectId, full, existingFiles);
+      await persistGeneratedFiles(projectId, full, existingFiles, omittedPaths);
       await db.update(projects).set({ updatedAt: new Date() }).where(eq(projects.id, projectId));
       return;
     }
 
     send({ type: "status", message: "Saving files" });
 
-    const written = await persistGeneratedFiles(projectId, full, existingFiles);
+    const written = await persistGeneratedFiles(projectId, full, existingFiles, omittedPaths);
 
     if (written.length === 0 && existingFiles.length === 0) {
       send({
