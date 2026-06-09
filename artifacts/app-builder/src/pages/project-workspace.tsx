@@ -106,6 +106,28 @@ function buildPreviewHtml(files: ProjectFile[] | undefined): string {
     (m, src: string) => (isExternal(src) ? m : ""),
   );
 
+  // Imported static sites (e.g. WordPress / Elementor) ship lazy-loaded images:
+  // the real URL lives in data-src / data-srcset while `src` holds a 1x1 placeholder,
+  // and a `.lazyload` class keeps the image at opacity:0 until the site's own
+  // lazy-loader JS swaps it in. That script usually doesn't run in our sandbox, so
+  // the images never appear (blank heroes, missing logo, empty quote cards). Promote
+  // the real URLs — only on elements that actually carry them — so images render
+  // without the original JS. (No-op for generated apps, which don't use data-src.)
+  const delazy = (tag: string) => {
+    if (!/\bdata-src=/i.test(tag) && !/\bdata-srcset=/i.test(tag)) return tag;
+    // Strip the existing placeholder src/srcset (quoted OR unquoted) BEFORE
+    // promoting data-src/data-srcset, otherwise a duplicate attribute would
+    // survive and the browser keeps the first (placeholder) one.
+    return tag
+      .replace(/\ssrc=(?:"[^"]*"|'[^']*'|[^\s>]+)/i, "")
+      .replace(/\ssrcset=(?:"[^"]*"|'[^']*'|[^\s>]+)/i, "")
+      .replace(/\bdata-srcset=/i, "srcset=")
+      .replace(/\bdata-src=/i, "src=")
+      .replace(/\sloading=(?:"lazy"|'lazy'|lazy)(?=[\s>])/gi, "");
+  };
+  html = html.replace(/<img\b[^>]*>/gi, delazy);
+  html = html.replace(/<source\b[^>]*>/gi, delazy);
+
   // The preview runs in a sandbox WITHOUT allow-same-origin (opaque origin) so
   // generated code can't reach Buildly's storage/cookies. A side effect is that
   // window.localStorage/sessionStorage THROW a SecurityError on access, which made
@@ -124,7 +146,7 @@ function buildPreviewHtml(files: ProjectFile[] | undefined): string {
   // every click and making the whole app feel "dead". Forcing [hidden] to stay
   // hidden robustly neutralizes that bug class (beats normal app CSS via
   // !important; a hostile `display:... !important` could still override it).
-  const baseStyle = `<style>[hidden]{display:none !important}</style>`;
+  const baseStyle = `<style>[hidden]{display:none !important}img.lazyload,img.lazyloading,.lazyload,.lazyloading{opacity:1 !important}</style>`;
   const inject = baseStyle + storageShim + reporter;
   if (/<head[^>]*>/i.test(html)) {
     html = html.replace(/<head[^>]*>/i, (m) => m + inject);
