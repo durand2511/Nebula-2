@@ -1389,6 +1389,15 @@ router.post("/projects/:projectId/messages/stream", json({ limit: "25mb" }), asy
   res.setHeader("Connection", "keep-alive");
   res.setHeader("X-Accel-Buffering", "no");
   res.flushHeaders?.();
+  // Emit a first body byte IMMEDIATELY, before any DB/context work. On a large
+  // imported project the pre-stream work (reading every file, building the prompt)
+  // can take several seconds; without an early byte the edge proxy sees an idle
+  // connection and drops it (observed ~3.8s aborts) before the model ever replies.
+  try {
+    res.write(": open\n\n");
+  } catch {
+    /* socket already gone before we started */
+  }
 
   let clientGone = false;
   const send = (event: Record<string, unknown>) => {
@@ -1414,7 +1423,7 @@ router.post("/projects/:projectId/messages/stream", json({ limit: "25mb" }), asy
     } catch {
       /* socket already torn down */
     }
-  }, 10000);
+  }, 3000);
 
   try {
     const projectRows = await db.select().from(projects).where(eq(projects.id, projectId));
