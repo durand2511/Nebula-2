@@ -1,5 +1,5 @@
 import { Link, useLocation } from "wouter";
-import bgUrl from "@assets/ChatGPT_Image_9_jun_2026,_19_53_49_1781027652886.png";
+import bgUrl from "@assets/AdobeStock_352407837_1781027880746.jpeg";
 
 export function Layout({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
@@ -14,7 +14,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
             style={{ backgroundImage: `url(${bgUrl})` }}
             aria-hidden="true"
           />
-          <div className="fixed inset-0 -z-10 bg-white/55" aria-hidden="true" />
+          <div className="fixed inset-0 -z-10 bg-white/30" aria-hidden="true" />
         </>
       )}
       {!isWorkspace && (
