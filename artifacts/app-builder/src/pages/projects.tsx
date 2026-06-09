@@ -78,16 +78,6 @@ export function Projects() {
               <Link href={`/projects/${project.id}`} data-testid={`link-project-${project.id}`}>
                 <Card className="hover:border-primary/50 transition-colors cursor-pointer h-full flex flex-col">
                   <CardHeader>
-                    <span
-                      className={`mb-2 inline-flex w-fit items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                        project.source === "yogilates"
-                          ? "bg-foreground text-background"
-                          : "bg-foreground/10 text-foreground"
-                      }`}
-                      data-testid={`badge-source-${project.id}`}
-                    >
-                      {project.source === "yogilates" ? "Yogilates" : "Home"}
-                    </span>
                     <CardTitle className="pr-8">
                       {project.name}
                     </CardTitle>
