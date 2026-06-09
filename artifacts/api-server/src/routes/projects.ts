@@ -343,6 +343,24 @@ function prepareImportedHtml(html: string, baseUrl: string): string {
   return $.html();
 }
 
+// Measure how much real, renderable content a prepared HTML page has. Bot-protection
+// challenges, JS-only SPAs, and blocked responses return a shell with an empty (or
+// near-empty) <body>, which would import as a project that previews as a blank page.
+// We count visible text length plus media/structural elements so we can refuse such
+// imports with a clear message instead of silently creating an empty project.
+function meaningfulContentScore(html: string): number {
+  const $ = cheerioLoad(html);
+  const text = ($("body").text() ?? "").replace(/\s+/g, " ").trim();
+  const media = $("body img, body picture, body svg, body video, body canvas").length;
+  const structural = $(
+    "body p, body h1, body h2, body h3, body li, body section, body article, body table, body form",
+  ).length;
+  return text.length + media * 50 + structural * 25;
+}
+
+// Below this score a page is treated as effectively empty (blocked / JS-only).
+const MIN_IMPORT_CONTENT_SCORE = 80;
+
 // Max number of pages we crawl+store for an imported site. Keeps import time and
 // project size bounded while still capturing a typical brochure site in full
 // (most have well under this many pages); huge blogs get the first N pages.
@@ -1118,6 +1136,28 @@ router.post("/projects/import-url", async (req, res) => {
           : "Couldn't fetch that website.";
     req.log.warn({ err, rawUrl }, "Website import failed");
     res.status(400).json({ error: message });
+    return;
+  }
+
+  // Refuse imports that returned no real content. Bot-protection challenges and
+  // JS-only sites hand back an empty <body>, which would otherwise become a project
+  // that previews as a blank page with no explanation.
+  const homepage = crawled.pages.find((p) => p.key === "index.html") ?? crawled.pages[0];
+  const bestScore = crawled.pages.reduce(
+    (max, p) => Math.max(max, meaningfulContentScore(prepareImportedHtml(p.html, p.url))),
+    0,
+  );
+  if (!homepage || bestScore < MIN_IMPORT_CONTENT_SCORE) {
+    req.log.warn(
+      { rawUrl, finalUrl: crawled.finalUrl, pageCount: crawled.pages.length, bestScore },
+      "Website import returned no usable content",
+    );
+    res.status(422).json({
+      error:
+        "Deze website kon niet geïmporteerd worden — hij gaf een lege pagina terug. " +
+        "Sites die geautomatiseerde toegang blokkeren of hun inhoud met JavaScript laden, " +
+        "kunnen niet geïmporteerd worden. Probeer een andere website, of beschrijf wat je wilt bouwen.",
+    });
     return;
   }
 
