@@ -1,5 +1,3 @@
-import { Link } from "wouter";
-import { Button } from "@/components/ui/button";
 import logoUrl from "@assets/yogilates_logo.png";
 
 export function Home() {
@@ -15,20 +13,6 @@ export function Home() {
       >
         Een app in je eigen website, gebouwd met AI
       </h1>
-      <p
-        className="text-muted-foreground text-xl leading-relaxed max-w-xl mb-12"
-        style={{ fontFamily: '"Fraunces", serif' }}
-      >
-        Plak de link van je website. Yogilates bouwt er met AI een complete app
-        bij en integreert die naadloos in je site. Zo heb je in een paar klikken
-        een werkende app in je website.
-      </p>
-
-      <Link href="/ai-editor">
-        <Button size="lg" className="h-12 px-8 font-bold" data-testid="button-start">
-          Begin nu
-        </Button>
-      </Link>
     </div>
   );
 }
