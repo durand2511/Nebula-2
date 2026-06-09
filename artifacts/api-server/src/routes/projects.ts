@@ -343,6 +343,136 @@ function prepareImportedHtml(html: string, baseUrl: string): string {
   return $.html();
 }
 
+// Max number of pages we crawl+store for an imported site. Keeps import time and
+// project size bounded while still capturing a typical brochure site in full
+// (most have well under this many pages); huge blogs get the first N pages.
+const IMPORT_MAX_PAGES = 30;
+const IMPORT_CRAWL_CONCURRENCY = 5;
+
+// File-extensions / paths that are never standalone HTML pages worth crawling.
+const SKIP_LINK_EXT =
+  /\.(jpe?g|png|gif|webp|avif|svg|ico|css|js|mjs|json|xml|rss|txt|pdf|zip|gz|tar|rar|7z|mp4|webm|mov|mp3|wav|ogg|woff2?|ttf|otf|eot|doc|docx|xls|xlsx|ppt|pptx|csv)$/i;
+const SKIP_LINK_PATH =
+  /\/wp-(admin|login|json|content|includes)\b|\/feed\/?$|\/cart\/?$|\/checkout\/?$|\/my-account\b|\/wp-login\.php/i;
+
+// Map a URL pathname to a stable local file key so internal links can be resolved
+// to imported pages by the preview. MIRRORED by the inline key() in the app-builder
+// preview router (project-workspace.tsx, buildPreviewHtml) — keep the two in sync.
+function pageKeyFromPath(pathname: string): string {
+  let p: string;
+  try {
+    p = decodeURIComponent(pathname);
+  } catch {
+    p = pathname;
+  }
+  p = p
+    .split("?")[0]
+    .split("#")[0]
+    .replace(/^\/+|\/+$/g, "")
+    .replace(/\.(html?|php|aspx?)$/i, "");
+  if (!p) return "index";
+  const key = p
+    .replace(/[^a-zA-Z0-9._-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .toLowerCase();
+  return key || "index";
+}
+
+// Collect same-host, crawlable page links from a page's HTML (absolute, deduped).
+function discoverInternalLinks(html: string, pageUrl: string, host: string): string[] {
+  const $ = cheerioLoad(html);
+  const out: string[] = [];
+  const seen = new Set<string>();
+  $("a[href]").each((_, el) => {
+    const raw = ($(el).attr("href") ?? "").trim();
+    if (!raw || raw.startsWith("#")) return;
+    let u: URL;
+    try {
+      u = new URL(raw, pageUrl);
+    } catch {
+      return;
+    }
+    if (u.protocol !== "http:" && u.protocol !== "https:") return;
+    if (u.hostname.replace(/^www\./, "").toLowerCase() !== host) return;
+    if (SKIP_LINK_EXT.test(u.pathname)) return;
+    if (SKIP_LINK_PATH.test(u.pathname)) return;
+    u.hash = "";
+    const norm = u.origin + u.pathname + (u.search || "");
+    if (seen.has(norm)) return;
+    seen.add(norm);
+    out.push(norm);
+  });
+  return out;
+}
+
+// Crawl an imported site starting at the homepage: fetch the homepage, then
+// breadth-first fetch its same-host internal pages (capped by IMPORT_MAX_PAGES).
+// The homepage always becomes "index.html"; other pages get a stable key.
+async function crawlSite(
+  startUrl: string,
+): Promise<{ pages: { key: string; url: string; html: string }[]; finalUrl: string }> {
+  const home = await fetchWebsiteHtml(startUrl);
+  const baseUrl = new URL(home.finalUrl);
+  const host = baseUrl.hostname.replace(/^www\./, "").toLowerCase();
+
+  const pages: { key: string; url: string; html: string }[] = [
+    { key: "index.html", url: home.finalUrl, html: home.html },
+  ];
+  const claimed = new Set<string>(["index"]);
+  const queuedKeys = new Set<string>(["index"]);
+  const queue: string[] = discoverInternalLinks(home.html, home.finalUrl, host);
+
+  while (queue.length > 0 && pages.length < IMPORT_MAX_PAGES) {
+    const batch: string[] = [];
+    while (
+      queue.length > 0 &&
+      batch.length < IMPORT_CRAWL_CONCURRENCY &&
+      pages.length + batch.length < IMPORT_MAX_PAGES
+    ) {
+      const link = queue.shift()!;
+      let key: string;
+      try {
+        key = pageKeyFromPath(new URL(link).pathname);
+      } catch {
+        continue;
+      }
+      if (queuedKeys.has(key)) continue;
+      queuedKeys.add(key);
+      batch.push(link);
+    }
+    if (batch.length === 0) break;
+
+    const results = await Promise.allSettled(batch.map((l) => fetchWebsiteHtml(l)));
+    for (const r of results) {
+      if (r.status !== "fulfilled") continue;
+      let key: string;
+      try {
+        key = pageKeyFromPath(new URL(r.value.finalUrl).pathname);
+      } catch {
+        continue;
+      }
+      if (claimed.has(key)) continue;
+      claimed.add(key);
+      pages.push({ key: `${key}.html`, url: r.value.finalUrl, html: r.value.html });
+      if (pages.length < IMPORT_MAX_PAGES) {
+        for (const nl of discoverInternalLinks(r.value.html, r.value.finalUrl, host)) {
+          let nk: string;
+          try {
+            nk = pageKeyFromPath(new URL(nl).pathname);
+          } catch {
+            continue;
+          }
+          if (queuedKeys.has(nk)) continue;
+          queue.push(nl);
+        }
+      }
+    }
+  }
+
+  return { pages, finalUrl: home.finalUrl };
+}
+
 function buildSystemPrompt(projectName: string, fileContext: string, learningsContext: string): string {
   return `You are Buildly, an expert AI web app builder. Generate beautiful, fully-functional web apps for a project called "${projectName}", with clean, well-structured, modular code.${learningsContext}
 
@@ -899,9 +1029,9 @@ router.post("/projects/import-url", async (req, res) => {
     rawUrl = `https://${rawUrl}`;
   }
 
-  let imported: { html: string; finalUrl: string };
+  let crawled: { pages: { key: string; url: string; html: string }[]; finalUrl: string };
   try {
-    imported = await fetchWebsiteHtml(rawUrl);
+    crawled = await crawlSite(rawUrl);
   } catch (err) {
     const message =
       err instanceof Error && err.name === "AbortError"
@@ -915,10 +1045,9 @@ router.post("/projects/import-url", async (req, res) => {
   }
 
   try {
-    const preparedHtml = prepareImportedHtml(imported.html, imported.finalUrl);
     let hostname = "Imported Site";
     try {
-      hostname = new URL(imported.finalUrl).hostname.replace(/^www\./, "");
+      hostname = new URL(crawled.finalUrl).hostname.replace(/^www\./, "");
     } catch {
       /* keep fallback */
     }
@@ -927,21 +1056,28 @@ router.post("/projects/import-url", async (req, res) => {
       .insert(projects)
       .values({
         name: hostname,
-        description: `Imported from ${imported.finalUrl}`,
+        description: `Imported from ${crawled.finalUrl}`,
       })
       .returning();
 
-    await db.insert(projectFiles).values({
-      projectId: project.id,
-      path: "index.html",
-      content: preparedHtml,
-      language: "html",
-    });
+    await db.insert(projectFiles).values(
+      crawled.pages.map((p) => ({
+        projectId: project.id,
+        path: p.key,
+        content: prepareImportedHtml(p.html, p.url),
+        language: "html" as const,
+      })),
+    );
+
+    req.log.info(
+      { projectId: project.id, pageCount: crawled.pages.length, finalUrl: crawled.finalUrl },
+      "Imported website",
+    );
 
     res.status(201).json({
       ...project,
       messageCount: 0,
-      fileCount: 1,
+      fileCount: crawled.pages.length,
     });
   } catch (err) {
     req.log.error({ err }, "Failed to create imported project");

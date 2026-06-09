@@ -68,84 +68,102 @@ function escapeRegExp(s: string): string {
 }
 
 /** Combine separate files into one self-contained HTML doc so the iframe preview works. */
-function buildPreviewHtml(files: ProjectFile[] | undefined, isImported: boolean): string {
+function buildPreviewHtml(
+  files: ProjectFile[] | undefined,
+  isImported: boolean,
+  currentPage?: string | null,
+): string {
   if (!files || files.length === 0) return "";
   const index =
+    (currentPage ? files.find((f) => f.path === currentPage) : undefined) ??
     files.find((f) => f.path === "index.html") ??
     files.find((f) => f.path.endsWith("index.html")) ??
     files.find((f) => f.path.endsWith(".html"));
   if (!index) return "";
-  let html = index.content;
+  // Inject a snippet right after <head> (or prepend it if the doc has no head).
+  const injectHead = (doc: string, snippet: string): string =>
+    /<head[^>]*>/i.test(doc) ? doc.replace(/<head[^>]*>/i, (m) => m + snippet) : snippet + doc;
 
-  for (const f of files) {
-    if (f.path.endsWith(".css")) {
-      const name = escapeRegExp(f.path);
-      const re = new RegExp(`<link[^>]*href=["']\\.?/?${name}["'][^>]*>`, "gi");
-      html = html.replace(re, `<style>\n${f.content}\n</style>`);
+  // Turn one stored page (the shell OR a sibling page of an imported site) into a
+  // preview-ready, self-contained HTML doc. Pure w.r.t. `files`, so it can run for
+  // every page of a multi-page imported site, not just the index.
+  const processPage = (raw: string): string => {
+    let html = raw;
+
+    for (const f of files) {
+      if (f.path.endsWith(".css")) {
+        const name = escapeRegExp(f.path);
+        const re = new RegExp(`<link[^>]*href=["']\\.?/?${name}["'][^>]*>`, "gi");
+        html = html.replace(re, `<style>\n${f.content}\n</style>`);
+      }
     }
-  }
-  for (const f of files) {
-    if (f.path.endsWith(".js")) {
-      const name = escapeRegExp(f.path);
-      const re = new RegExp(`<script[^>]*src=["']\\.?/?${name}["'][^>]*>\\s*</script>`, "gi");
-      html = html.replace(re, `<script>\n${f.content}\n</script>`);
+    for (const f of files) {
+      if (f.path.endsWith(".js")) {
+        const name = escapeRegExp(f.path);
+        const re = new RegExp(`<script[^>]*src=["']\\.?/?${name}["'][^>]*>\\s*</script>`, "gi");
+        html = html.replace(re, `<script>\n${f.content}\n</script>`);
+      }
     }
-  }
 
-  // Neutralize any leftover references to LOCAL siblings we couldn't inline
-  // (e.g. a file the AI referenced but didn't generate). In srcDoc there is no
-  // base URL, so these would 404 and silently break the app. External URLs
-  // (http(s)://, //, data:) are left untouched.
-  const isExternal = (url: string) => /^(https?:)?\/\//i.test(url) || url.startsWith("data:");
-  html = html.replace(
-    /<link\b[^>]*\bhref=["']([^"']+)["'][^>]*>/gi,
-    (m, href: string) => (/rel=["']?stylesheet/i.test(m) && !isExternal(href) ? "" : m),
-  );
-  html = html.replace(
-    /<script\b[^>]*\bsrc=["']([^"']+)["'][^>]*>\s*<\/script>/gi,
-    (m, src: string) => (isExternal(src) ? m : ""),
-  );
-
-  // Imported static sites (e.g. WordPress / Elementor) ship lazy-loaded images:
-  // the real URL lives in data-src / data-srcset while `src` holds a 1x1 placeholder,
-  // and a `.lazyload` class keeps the image at opacity:0 until the site's own
-  // lazy-loader JS swaps it in. That script usually doesn't run in our sandbox, so
-  // the images never appear (blank heroes, missing logo, empty quote cards). Promote
-  // the real URLs — only on elements that actually carry them — so images render
-  // without the original JS. (No-op for generated apps, which don't use data-src.)
-  const delazy = (tag: string) => {
-    if (!/\bdata-src=/i.test(tag) && !/\bdata-srcset=/i.test(tag)) return tag;
-    // Strip the existing placeholder src/srcset (quoted OR unquoted) BEFORE
-    // promoting data-src/data-srcset, otherwise a duplicate attribute would
-    // survive and the browser keeps the first (placeholder) one.
-    return tag
-      .replace(/\ssrc=(?:"[^"]*"|'[^']*'|[^\s>]+)/i, "")
-      .replace(/\ssrcset=(?:"[^"]*"|'[^']*'|[^\s>]+)/i, "")
-      .replace(/\bdata-srcset=/i, "srcset=")
-      .replace(/\bdata-src=/i, "src=")
-      .replace(/\sloading=(?:"lazy"|'lazy'|lazy)(?=[\s>])/gi, "");
-  };
-  html = html.replace(/<img\b[^>]*>/gi, delazy);
-  html = html.replace(/<source\b[^>]*>/gi, delazy);
-
-  // Imported sites' <noscript> fallbacks were turned into ESCAPED text by the parser
-  // (cheerio parses a noscript body as a raw text node), so the raw markup prints as
-  // visible text — a lazy-image fallback under each image, or a hidden tracking
-  // <iframe> (e.g. Google Tag Manager). Scripts run in our preview, so these no-JS
-  // fallbacks are redundant. Strip the escaped artifacts, scoped to known fallback
-  // signatures so we never remove escaped code a generated app intentionally shows.
-  // (New imports no longer produce these — the importer now drops <noscript> — but
-  // already-imported projects still carry them.)
-  // Escaped images: only the lazy-load fallback signature (avoids touching an escaped
-  // instructional snippet). Escaped iframes: tracker host or hidden/zero-size styling —
-  // an escaped iframe in body text is virtually always a no-JS tracking fallback.
-  const stripImg = (m: string) => /lazyload/i.test(m);
-  const stripIframe = (m: string) =>
-    /googletagmanager|google-analytics|doubleclick|facebook\.com\/tr|hotjar|visibility\s*:\s*hidden|display\s*:\s*none|(?:width|height)=["']?0\b/i.test(
-      m,
+    // Neutralize any leftover references to LOCAL siblings we couldn't inline
+    // (e.g. a file the AI referenced but didn't generate). In srcDoc there is no
+    // base URL, so these would 404 and silently break the app. External URLs
+    // (http(s)://, //, data:) are left untouched.
+    const isExternal = (url: string) => /^(https?:)?\/\//i.test(url) || url.startsWith("data:");
+    html = html.replace(
+      /<link\b[^>]*\bhref=["']([^"']+)["'][^>]*>/gi,
+      (m, href: string) => (/rel=["']?stylesheet/i.test(m) && !isExternal(href) ? "" : m),
     );
-  html = html.replace(/&lt;img\b[\s\S]*?&gt;/gi, (m) => (stripImg(m) ? "" : m));
-  html = html.replace(/&lt;iframe\b[\s\S]*?&lt;\/iframe&gt;/gi, (m) => (stripIframe(m) ? "" : m));
+    html = html.replace(
+      /<script\b[^>]*\bsrc=["']([^"']+)["'][^>]*>\s*<\/script>/gi,
+      (m, src: string) => (isExternal(src) ? m : ""),
+    );
+
+    // Imported static sites (e.g. WordPress / Elementor) ship lazy-loaded images:
+    // the real URL lives in data-src / data-srcset while `src` holds a 1x1 placeholder,
+    // and a `.lazyload` class keeps the image at opacity:0 until the site's own
+    // lazy-loader JS swaps it in. That script usually doesn't run in our sandbox, so
+    // the images never appear (blank heroes, missing logo, empty quote cards). Promote
+    // the real URLs — only on elements that actually carry them — so images render
+    // without the original JS. (No-op for generated apps, which don't use data-src.)
+    const delazy = (tag: string) => {
+      if (!/\bdata-src=/i.test(tag) && !/\bdata-srcset=/i.test(tag)) return tag;
+      // Strip the existing placeholder src/srcset (quoted OR unquoted) BEFORE
+      // promoting data-src/data-srcset, otherwise a duplicate attribute would
+      // survive and the browser keeps the first (placeholder) one.
+      return tag
+        .replace(/\ssrc=(?:"[^"]*"|'[^']*'|[^\s>]+)/i, "")
+        .replace(/\ssrcset=(?:"[^"]*"|'[^']*'|[^\s>]+)/i, "")
+        .replace(/\bdata-srcset=/i, "srcset=")
+        .replace(/\bdata-src=/i, "src=")
+        .replace(/\sloading=(?:"lazy"|'lazy'|lazy)(?=[\s>])/gi, "");
+    };
+    html = html.replace(/<img\b[^>]*>/gi, delazy);
+    html = html.replace(/<source\b[^>]*>/gi, delazy);
+
+    // Imported sites' <noscript> fallbacks were turned into ESCAPED text by the parser
+    // (cheerio parses a noscript body as a raw text node), so the raw markup prints as
+    // visible text — a lazy-image fallback under each image, or a hidden tracking
+    // <iframe> (e.g. Google Tag Manager). Scripts run in our preview, so these no-JS
+    // fallbacks are redundant. Strip the escaped artifacts, scoped to known fallback
+    // signatures so we never remove escaped code a generated app intentionally shows.
+    // (New imports no longer produce these — the importer now drops <noscript> — but
+    // already-imported projects still carry them.)
+    // Escaped images: only the lazy-load fallback signature (avoids touching an escaped
+    // instructional snippet). Escaped iframes: tracker host or hidden/zero-size styling —
+    // an escaped iframe in body text is virtually always a no-JS tracking fallback.
+    const stripImg = (m: string) => /lazyload/i.test(m);
+    const stripIframe = (m: string) =>
+      /googletagmanager|google-analytics|doubleclick|facebook\.com\/tr|hotjar|visibility\s*:\s*hidden|display\s*:\s*none|(?:width|height)=["']?0\b/i.test(
+        m,
+      );
+    html = html.replace(/&lt;img\b[\s\S]*?&gt;/gi, (m) => (stripImg(m) ? "" : m));
+    html = html.replace(/&lt;iframe\b[\s\S]*?&lt;\/iframe&gt;/gi, (m) => (stripIframe(m) ? "" : m));
+
+    return html;
+  };
+
+  let html = processPage(index.content);
 
   // The preview runs in a sandbox WITHOUT allow-same-origin (opaque origin) so
   // generated code can't reach Buildly's storage/cookies. A side effect is that
@@ -199,13 +217,26 @@ function buildPreviewHtml(files: ProjectFile[] | undefined, isImported: boolean)
   const menuToggle = isImported
     ? `<script>(function(){function isMenu(el){if(!el)return false;var tag=el.tagName;if(tag==="NAV"||tag==="UL")return true;var c=el.className&&el.className.toString?el.className.toString():"";return /menu|nav/i.test(c)}function force(el,open){if(open){el.style.setProperty("display","block","important");el.style.setProperty("visibility","visible","important");el.style.setProperty("opacity","1","important");el.style.setProperty("max-height","none","important");el.style.setProperty("overflow","visible","important");el.setAttribute("aria-hidden","false")}else{["display","visibility","opacity","max-height","overflow"].forEach(function(p){el.style.removeProperty(p)});el.setAttribute("aria-hidden","true")}}function findMenu(t){var ac=t.getAttribute&&t.getAttribute("aria-controls");if(ac){var byId=document.getElementById(ac);if(byId&&isMenu(byId))return byId}var w=t.closest(".elementor-widget-nav-menu,.elementor-element");if(w){var dd=w.querySelector("nav.elementor-nav-menu--dropdown");if(dd)return dd}var p=t.parentElement,hops=0;while(p&&hops<6){var m=p.querySelector('nav,ul.menu,ul[class*="menu"],[class*="nav-menu"]');if(m&&isMenu(m)&&!m.contains(t)&&!t.contains(m))return m;p=p.parentElement;hops++}return null}var SEL='.elementor-menu-toggle,.menu-toggle,[class*="menu-toggle"],.menu-toggle-button,.navbar-toggler,.navbar-toggle,[class*="hamburger"],[class*="burger-menu"]';var CONT='.elementor-menu-toggle,.menu-toggle,.menu-toggle-button,.navbar-toggler,.navbar-toggle,[class*="hamburger"],[class*="burger-menu"]';document.addEventListener("click",function(e){var hit=e.target&&e.target.closest?e.target.closest(SEL):null;if(!hit)return;var t=hit.closest(CONT)||hit;var menu=findMenu(t);if(!menu)return;e.preventDefault();var open=t.getAttribute("aria-expanded")!=="true";t.setAttribute("aria-expanded",open?"true":"false");if(t.classList){t.classList.toggle("elementor-active",open);t.classList.toggle("buildly-menu-open",open)}force(menu,open)},true)})();</script>`
     : "";
-  const inject = baseStyle + storageShim + reporter + linkHandler + menuToggle;
-  if (/<head[^>]*>/i.test(html)) {
-    html = html.replace(/<head[^>]*>/i, (m) => m + inject);
-  } else {
-    html = inject + html;
+  // Multi-page navigation for imported sites. The preview iframe uses srcDoc (opaque
+  // origin, no real URLs/routing), so an internal link can't load a sibling page on
+  // its own. We intercept clicks whose path maps to another imported page and ask the
+  // parent (React) to re-render the preview for that page — keeping only ONE page in
+  // the iframe at a time (embedding every page would bloat srcDoc into the megabytes).
+  // The host guard (same as linkHandler) is essential: WITHOUT it an external link
+  // whose path happens to match a stored key — e.g. a footer credit "https://other.tld/"
+  // (path "/" -> index.html) — would be hijacked into the preview instead of opening a
+  // new tab. So we only intercept SAME-SITE links; everything else falls to linkHandler.
+  let router = "";
+  const htmlFiles = files.filter((f) => f.path.endsWith(".html"));
+  if (isImported && htmlFiles.length > 1) {
+    const keysJson = JSON.stringify(htmlFiles.map((f) => f.path));
+    router = `<script>(function(){var KEYS=${keysJson};var HOST=${JSON.stringify(primaryHost)};function norm(h){return h.replace(/^www\\./,"")}function key(pn){var p;try{p=decodeURIComponent(pn)}catch(e){p=pn}p=p.split("?")[0].split("#")[0].replace(/^\\/+|\\/+$/g,"").replace(/\\.(html?|php|aspx?)$/i,"");if(!p)return"index";var k=p.replace(/[^a-zA-Z0-9._-]+/g,"-").replace(/-+/g,"-").replace(/^-|-$/g,"").toLowerCase();return k||"index"}document.addEventListener("click",function(e){var t=e.target,a=t&&t.closest?t.closest("a[href]"):null;if(!a)return;var raw=(a.getAttribute("href")||"").trim();if(!raw||raw.charAt(0)==="#")return;var u;try{u=new URL(a.href)}catch(err){return}if(u.protocol!=="http:"&&u.protocol!=="https:")return;if(!HOST||norm(u.hostname.toLowerCase())!==norm(HOST))return;var fk=key(u.pathname)+".html";if(KEYS.indexOf(fk)>-1){e.preventDefault();try{parent.postMessage({__buildlyNav:fk},"*")}catch(err){}}},true);})();</script>`;
   }
-  return html;
+
+  // Router runs before linkHandler so it can intercept imported-page links; for
+  // non-imported (external) links the router no-ops and linkHandler takes over.
+  const inject = baseStyle + storageShim + reporter + router + linkHandler + menuToggle;
+  return injectHead(html, inject);
 }
 
 export function ProjectWorkspace() {
@@ -218,6 +249,8 @@ export function ProjectWorkspace() {
   const [activeTab, setActiveTab] = useState<"code" | "preview">("preview");
   const [showCode, setShowCode] = useState(false);
   const [previewKey, setPreviewKey] = useState(0);
+  // For imported multi-page sites: which page the preview currently shows (null = index).
+  const [previewPage, setPreviewPage] = useState<string | null>(null);
 
   const [isStreaming, setIsStreaming] = useState(false);
   const [phaseIndex, setPhaseIndex] = useState(0);
@@ -314,8 +347,20 @@ export function ProjectWorkspace() {
     function onMessage(e: MessageEvent) {
       // Only trust messages coming from our own preview iframe.
       if (!previewIframeRef.current || e.source !== previewIframeRef.current.contentWindow) return;
-      const d = e.data as { __buildlyError?: boolean; message?: string; source?: string; line?: number };
-      if (!d || !d.__buildlyError || typeof d.message !== "string") return;
+      const d = e.data as {
+        __buildlyError?: boolean;
+        __buildlyNav?: string;
+        message?: string;
+        source?: string;
+        line?: number;
+      };
+      if (!d) return;
+      // Imported multi-page navigation: the preview asks to render a sibling page.
+      if (typeof d.__buildlyNav === "string") {
+        if (/^[a-zA-Z0-9._-]+\.html$/.test(d.__buildlyNav)) setPreviewPage(d.__buildlyNav);
+        return;
+      }
+      if (!d.__buildlyError || typeof d.message !== "string") return;
       const file = d.source ? d.source.split("/").pop() : "";
       const detail = file ? `${d.message} (${file}:${d.line ?? "?"})` : d.message;
       setPreviewErrors((prev) => (prev.includes(detail) ? prev : [...prev, detail].slice(-4)));
@@ -328,6 +373,11 @@ export function ProjectWorkspace() {
   useEffect(() => {
     setPreviewErrors([]);
   }, [previewKey]);
+
+  // Start each project's preview on its home page (imported multi-page nav state).
+  useEffect(() => {
+    setPreviewPage(null);
+  }, [projectId]);
 
   // Abort any in-flight build if the user navigates away / the page unmounts,
   // so generation doesn't keep running (and billing) in the background.
@@ -518,7 +568,7 @@ export function ProjectWorkspace() {
 
   const activeFile = files?.find((f) => f.path === selectedFile);
   const isImported = (project?.description ?? "").startsWith("Imported from");
-  const previewHtml = buildPreviewHtml(files, isImported);
+  const previewHtml = buildPreviewHtml(files, isImported, previewPage);
 
   // Conversational narration: the model speaks first (before any "FILE:" block),
   // so show that opening text as a live, streaming assistant message in the chat.
