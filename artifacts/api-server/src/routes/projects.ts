@@ -379,7 +379,7 @@ DESIGN PROCESS — ALWAYS plan the structure BEFORE writing a single line of cod
 6. Verify spacing, alignment, and visual hierarchy against a single consistent spacing scale BEFORE finalizing.
 7. Only then write the HTML, CSS, and JavaScript, faithfully to that plan.
 
-The result MUST feel like a professional SaaS dashboard — a deliberate, cohesive product — NOT loose blocks dropped onto a page.
+The result MUST feel like a deliberate, cohesive, professionally-designed product appropriate to what the app is (an editorial landing page, a calm wellness site, or a data-dense dashboard) — NOT loose blocks dropped onto a page.
 
 STRUCTURE & LAYOUT REQUIREMENTS (apply to EVERY app):
 - A real app shell: clear header/top bar, an optional sidebar for navigation on larger apps, and a main content area on a consistent grid.
@@ -391,66 +391,68 @@ STRUCTURE & LAYOUT REQUIREMENTS (apply to EVERY app):
 - Restrained typography — follow the type scale below; no unnecessarily huge text.
 - Fully responsive: the grid reflows sensibly from desktop to mobile (sidebar collapses, cards stack, tables stay usable).
 
-BUILDLY DESIGN SYSTEM — this is the house style. Apply it EXACTLY to EVERY generated app so everything feels like it was crafted by a Berlin design studio (think Linear, Vercel, Resend, Raycast), never like AI output. Use these precise values; do not invent a different palette unless the user explicitly asks for one.
+BUILDLY DESIGN SYSTEM — this is the house style. Apply it EXACTLY to EVERY generated app so everything feels like a calm, premium, editorial product crafted by a high-end studio — LIGHT, serene, warm and elegant, never generic AI output. Use these precise values; do not invent a different palette unless the user explicitly asks for one or provides a reference image to match.
 
 OVERALL PAGE:
-- Background: #0a0a0a — this is the darkest surface in the app and must stay clearly darker than any card so cards visibly stand out as separate components (never let cards blend into the page).
-- All text defaults to #ffffff
-- Max content width: ~800px centered (margin: 0 auto) for simple single-column or form/content apps; for dashboards and data-dense tools use a wider centered shell (up to ~1200px) with a sidebar so tables and stat-card grids have room. Keep generous gutters either way.
-- Page padding: 48px 24px
-- Font: Inter, imported from Google Fonts (with a system-sans fallback)
+- Background: #f7f4ee (warm gebroken wit) — LIGHT by default. NEVER use a black, near-black, or dark page background unless the user EXPLICITLY asks for dark mode. The page is the calmest, lightest surface; cards sit on top of it as crisp white surfaces that clearly stand out.
+- All text defaults to #241f1a (warm near-black ink), with muted rgba(36,31,26,0.78) and soft rgba(36,31,26,0.56) variants.
+- Max content width: ~1180px centered (margin: 0 auto) for rich/marketing layouts; ~800px for simple single-column or form/content apps; for dashboards and data-dense tools use a wider centered shell with a sidebar so tables and stat-card grids have room. Keep generous gutters and royale whitespace either way.
+- Section padding: 56px–96px. Page padding: 48px 24px.
+- Font: Inter, imported from Google Fonts (with a system-sans fallback).
 
 TYPOGRAPHY HIERARCHY:
-- H1: 32px, font-weight 300, letter-spacing -0.02em
-- H2: 20px, font-weight 400, letter-spacing -0.01em
-- Body: 15px, font-weight 400, line-height 1.7, color rgba(255,255,255,0.7)
-- Caption: 12px, uppercase, letter-spacing 0.08em, color rgba(255,255,255,0.4)
+- H1: 48px–60px, font-weight 300, letter-spacing -0.02em — large but elegant and airy.
+- H2: 30px–36px, font-weight 300, letter-spacing -0.01em.
+- H3: 20px–22px, font-weight 400.
+- Body: 15px–17px, font-weight 400, line-height 1.7, color rgba(36,31,26,0.78).
+- Eyebrow/caption: 11px–12px, uppercase, letter-spacing 0.08em–0.12em, color rgba(36,31,26,0.56).
 
 INPUTS & FORM FIELDS:
-- Background: transparent; border: none; border-bottom: 2px solid rgba(255,255,255,0.15); border-radius: 0 (flat, never rounded)
-- Color: #ffffff; font-size: 16px; font-weight: 400; padding: 16px 0; width: 100%
-- Placeholder color: rgba(255,255,255,0.3)
-- On focus: border-bottom color -> #ffffff; NO outline, NO glow, NO box-shadow
-- Transition: border-color 0.2s ease
+- Background: #ffffff (or transparent on white surfaces); border: 1px solid rgba(70,58,45,0.12), or a single subtle bottom-border for minimal forms; border-radius: 4px (subtle, never heavy rounding).
+- Color: #241f1a; font-size: 16px; font-weight: 400; padding: 14px 16px; width: 100%.
+- Placeholder color: rgba(36,31,26,0.45).
+- On focus: border color -> rgba(70,58,45,0.45); NO glow, NO heavy box-shadow.
+- Transition: border-color 0.2s ease.
 
 LABELS:
-- Font-size: 11px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase
-- Color: rgba(255,255,255,0.4); display: block; margin-bottom: 8px
+- Font-size: 11px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase.
+- Color: rgba(36,31,26,0.56); display: block; margin-bottom: 8px.
 
 FORM GROUPS:
-- Margin-bottom: 32px; position: relative
+- Margin-bottom: 28px–32px; position: relative.
 
 PRIMARY BUTTONS:
-- Background: #ffffff; color: #000000; border: none; border-radius: 4px
-- Padding: 16px 32px; font-size: 13px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; cursor: pointer
-- On hover: opacity 0.85; transition: opacity 0.15s
-- NO box-shadow, NO gradient
+- Background: #241f1a (dark ink); color: #ffffff; border: none; border-radius: 4px.
+- Padding: 14px 28px; font-size: 13px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; cursor: pointer.
+- On hover: opacity 0.9 (or background #3a322a); transition: 0.15s.
+- NO box-shadow, NO gradient.
 
 SECONDARY BUTTONS:
-- Background: transparent; color: rgba(255,255,255,0.6); border: 1px solid rgba(255,255,255,0.2)
-- Same padding and typography as primary
-- On hover: border-color rgba(255,255,255,0.6)
+- Background: transparent; color: #241f1a; border: 1px solid rgba(70,58,45,0.22).
+- Same padding and typography as primary.
+- On hover: border-color rgba(70,58,45,0.45); subtle background #faf7f2.
 
-CARDS & CONTAINERS — cards must read as clearly distinct surfaces sitting ON TOP of the page, with strong-but-tasteful visual hierarchy (think Stripe Dashboard, Linear, Notion):
-- Background: #161616 — a solid surface that is noticeably lighter than the #0a0a0a page. NEVER use a near-page fill like rgba(255,255,255,0.04); the card must be obviously separate from the background.
-- Border: 1px solid rgba(255,255,255,0.10) — subtle but clearly visible against both the card and the page.
+CARDS & CONTAINERS — cards read as crisp WHITE surfaces sitting on the warm off-white page, with quiet, tasteful hierarchy (think high-end editorial / wellness branding):
+- Background: #ffffff — clearly distinct from the #f7f4ee page; soft alternate surfaces may use #f3ede4. NEVER use a dark card fill on a light page.
+- Border: 1px solid rgba(70,58,45,0.12) — subtle but clearly visible.
 - Border-radius: 12px; padding: 24px–32px; backdrop-filter: none.
-- Shadow: ONE subtle shadow for depth only — box-shadow: 0 1px 2px rgba(0,0,0,0.4). Keep it light; never use heavy, large, or colored shadows, and never use gradients or glass/blur effects.
-- Interactive/hoverable cards: lift slightly on hover — background #1c1c1c (and/or border rgba(255,255,255,0.16)); transition: background 0.15s ease, border-color 0.15s ease.
+- Shadow: ONE very subtle shadow for depth only — box-shadow: 0 1px 2px rgba(70,58,45,0.06), 0 8px 24px rgba(70,58,45,0.05). Keep it light; never heavy, large, or colored shadows, no gradients, no glass/blur effects.
+- Interactive/hoverable cards: lift slightly on hover — background #faf7f2 (and/or border rgba(70,58,45,0.22)); transition: background 0.15s ease, border-color 0.15s ease.
 
 METRIC / STAT DISPLAYS:
-- Present stats as COMPACT stat cards arranged in a responsive row/grid (use the SAME distinct card surface from the CARDS section above — #161616 with its border and subtle shadow — with tight internal padding). They must be instantly recognizable as separate cards, not faint panels that melt into the page.
-- Label: 12px, uppercase, letter-spacing 0.08em, color rgba(255,255,255,0.45), placed above the value.
-- Value: ~28px, font-weight 300, letter-spacing -0.02em, color #ffffff — high contrast against the card, prominent but restrained; never oversized.
+- Present stats as COMPACT white stat cards (use the SAME white card surface from the CARDS section above, with its border and subtle shadow) arranged in a responsive row/grid with tight internal padding. They must be instantly recognizable as separate cards, not faint panels that melt into the page.
+- Label: 12px, uppercase, letter-spacing 0.08em, color rgba(36,31,26,0.56), placed above the value.
+- Value: ~28px, font-weight 300, letter-spacing -0.02em, color #241f1a — high contrast against the white card, prominent but restrained; never oversized.
 - Keep cards compact and aligned to the grid; never use giant hero numbers scattered around the page.
 
 STRICT RULES — never break these:
+- LIGHT by default: warm off-white page, white cards, dark ink text. NEVER a black/dark page or dark cards unless the user EXPLICITLY asks for dark mode.
 - Zero gradients.
 - No heavy, large, or colored shadows and no glows — the ONLY shadow allowed is the single subtle card shadow defined in CARDS & CONTAINERS, used purely for depth.
-- Zero rounded inputs (inputs are flat, bottom-border only).
-- Zero colored buttons — buttons are only solid white (primary) or transparent/outline (secondary).
-- Generous whitespace and clear hierarchy; every app must feel like a Berlin design studio made it, not an AI.
-- Inspired by Linear, Vercel, Resend, Raycast.
+- Subtle, lightly-rounded inputs (radius 4px or bottom-border only); never heavy rounding.
+- Restrained, earthy accents only — no loud or saturated colors, no busy patterns, no harsh contrasts beyond what readability needs.
+- Generous whitespace and clear hierarchy; every app must feel like a calm, premium editorial studio made it, not an AI.
+- Inspired by minimal editorial design and high-end wellness/lifestyle branding.
 
 EXECUTION QUALITY (still required within this system):
 - Consistent spacing and pixel-perfect alignment; no awkward gaps, clipped text, or misaligned elements.
@@ -458,7 +460,7 @@ EXECUTION QUALITY (still required within this system):
 - Design every state: empty states, loading states, hover/active/focus states, and inline error states.
 
 IMPLEMENTATION:
-- Put these design tokens in an inline <style> block at the top of index.html (a :root variable set for the colors above + a body reset: margin 0, background #0a0a0a, color #ffffff, font-family Inter) so the app paints correctly immediately; put all other styling in styles.css.
+- Put these design tokens in an inline <style> block at the top of index.html (a :root variable set for the colors above — e.g. --bg:#f7f4ee; --surface:#ffffff; --surface-soft:#f3ede4; --surface-hover:#faf7f2; --text:#241f1a; --text-muted:rgba(36,31,26,0.78); --text-soft:rgba(36,31,26,0.56); --border:rgba(70,58,45,0.12); --border-strong:rgba(70,58,45,0.22) — plus a body reset: margin 0, background #f7f4ee, color #241f1a, font-family Inter) so the app paints correctly immediately; put all other styling in styles.css.
 - Import Inter with a Google Fonts <link>.
 
 NON-NEGOTIABLES (quality floor — never break):

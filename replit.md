@@ -34,7 +34,8 @@ _Describe the high-level user-facing capabilities of this app once they exist._
 
 ## User preferences
 
-_Populate as you build — explicit user instructions worth remembering across sessions._
+- Generated apps must default to a LIGHT, warm editorial palette (off-white page, white cards, dark ink text) — never a black/dark theme — unless the user explicitly asks for dark mode. This default lives in the generation system prompt (`buildSystemPrompt` in `artifacts/api-server/src/routes/projects.ts`), not in Buildly's own UI chrome (which stays dark).
+- User is Dutch and non-technical — respond in Dutch, plain language.
 
 ## Gotchas
 

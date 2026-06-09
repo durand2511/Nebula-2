@@ -1,0 +1,152 @@
+**Prompt:**
+
+Bouw een complete, productieklare single-page website in vanilla HTML, CSS en JavaScript voor een rustige, vrouwelijke wellness- of lifestylepraktijk. De stijl moet standaard deze designregels volgen:
+
+### Algemene visuele richting
+- Gebruik een **lichte, serene, premium uitstraling**.
+- Achtergrond is **wit of warm gebroken wit**, nooit zwart of donker.
+- De sfeer is **rustig, zacht, elegant, vrouwelijk en professioneel**.
+- Vermijd dat de website eruitziet als een standaard template of generieke SaaS.
+- Denk aan een mix van **minimal editorial design** en **high-end wellness branding**.
+- Geen schreeuwerige kleuren, geen drukke patronen, geen harde contrasten behalve waar nodig voor leesbaarheid.
+
+### Kleursysteem
+Gebruik standaard een licht palet zoals:
+- `--bg: #f7f4ee` of `#fcfaf7`
+- `--surface: #ffffff`
+- `--surface-soft: #f3ede4`
+- `--surface-hover: #faf7f2`
+- `--text: #241f1a`
+- `--text-muted: rgba(36,31,26,0.78)`
+- `--text-soft: rgba(36,31,26,0.56)`
+- `--border: rgba(70,58,45,0.12)`
+- `--border-strong: rgba(70,58,45,0.22)`
+- Accentkleuren alleen zeer subtiel en aards, geen felle kleuren.
+
+### Typografie
+- Gebruik **Inter** als standaard font.
+- Typografie moet verfijnd en rustig zijn, met duidelijke hiërarchie.
+- H1: groot maar elegant, licht gewicht, ongeveer `48px–60px`, `font-weight: 300`
+- H2: ongeveer `30px–36px`, `font-weight: 300`
+- H3: ongeveer `20px–22px`, `font-weight: 400`
+- Body tekst: `15px–17px`, goede regelhoogte (`1.7`)
+- Eyebrows / captions:
+  - uppercase
+  - kleine font-size (`11px–12px`)
+  - letter-spacing `0.08em` tot `0.12em`
+  - ingetogen kleur
+
+### Layout en structuur
+- Maak de homepage **heel gestructureerd**, met duidelijke secties en veel rust.
+- Gebruik altijd een **centrale container** met max-width van ongeveer `1180px`.
+- Werk met royale witruimte:
+  - sectie padding: `56px–96px`
+  - card padding: `24px–32px`
+- Gebruik een duidelijke flow:
+  1. Header
+  2. Hero
+  3. Korte intro / kernvoordelen
+  4. Aanbod / diensten
+  5. Voor wie / voordelen
+  6. Lesrooster of praktische info
+  7. Over de begeleider
+  8. FAQ
+  9. Contact / proefles
+  10. Footer
+- Gebruik grids met consistente gaps (`20px`, `24px`, `32px`).
+
+### Header
+- Sticky header met lichte semi-transparante achtergrond.
+- Dunne border-bottom.
+- Netjes uitgelijnde navigatie.
+- Woordmerk als tekstlogo, geen icoon.
+- Duidelijke CTA rechts in het menu.
+- Mobiel menu moet echt werken.
+
+### Hero
+- Hero moet sterk en rustig zijn.
+- Grote headline met zachte, warme boodschap.
+- Ondersteunende tekst met duidelijke waardepropositie.
+- Primaire en secundaire CTA.
+- Compacte stat cards of kernpunten onder de hero copy.
+- Een mooi editorial zijpaneel of kaart aan de rechterkant met illustratie, quote of welkomtekst.
+
+### Cards en componenten
+- Gebruik kaarten met:
+  - witte achtergrond
+  - subtiele border
+  - lichte schaduw
+  - radius `12px`
+- Hover mag alleen subtiel zijn.
+- Geen gradients.
+- Geen glassmorphism.
+- Geen zware schaduwen.
+- De site moet premium en kalm voelen.
+
+### Buttons
+- Primaire knop:
+  - donkere tekst of donkere achtergrond afhankelijk van contrast
+  - compact, stijlvol, uppercase
+  - radius `4px`
+- Secundaire knop:
+  - transparant of outlined
+  - subtiele border
+- Hoverstates zijn subtiel, nooit flashy.
+
+### Formulieren
+- Formulieren moeten er rustig en chic uitzien.
+- Labels klein uppercase.
+- Inputs minimalistisch:
+  - witte of transparante achtergrond
+  - alleen subtiele border of bottom-border
+  - geen zware rounding
+- Altijd inline validatie.
+- Foutmeldingen moeten duidelijk en vriendelijk zijn.
+- Succesmeldingen ook duidelijk.
+
+### Inhoudsstijl
+- Gebruik echte, warme Nederlandse copy.
+- De tone of voice is:
+  - zacht
+  - uitnodigend
+  - professioneel
+  - geruststellend
+- Vermijd marketingtaal die te hard verkoopt.
+- Schrijf alsof het merk draait om rust, aandacht, zachtheid en vertrouwen.
+
+### UX-regels
+- Alles moet goed leesbaar zijn op mobiel en desktop.
+- Sterke visuele hiërarchie.
+- Elke sectie moet direct herkenbaar zijn.
+- Nooit te veel tekst in één blok; breek inhoud op in kaarten, kolommen en secties.
+- Voeg altijd empty states, hover states, focus states en foutafhandeling toe.
+- Geen dode knoppen of nepinteractie.
+
+### Technische output
+- Gebruik alleen:
+  - `index.html`
+  - `styles.css`
+  - `script.js`
+- Vanilla JS only.
+- Geen frameworks.
+- Gebruik localStorage waar nodig.
+- Alle knoppen, filters, accordions en formulieren moeten echt werken.
+- Bouw geen mockup maar een volledig werkende site.
+
+### Samenvatting van de stijl
+De standaardstijl moet voelen als:
+- lichte achtergrond
+- editorial wellness
+- premium rust
+- vrouwelijke zachtheid
+- moderne structuur
+- subtiele elegantie
+- veel witruimte
+- nette kaarten
+- hoogwaardige homepage met duidelijke sectie-opbouw
+
+Als je wilt, kan ik hier ook meteen een **veel scherpere “master prompt” versie** van maken die nóg beter werkt voor AI code generators, bijvoorbeeld in:
+1. **korte versie**
+2. **uitgebreide versie**
+3. **speciaal voor homepage-generatie**
+4. **speciaal voor Buildly / Lovable / v0-stijl generators**
