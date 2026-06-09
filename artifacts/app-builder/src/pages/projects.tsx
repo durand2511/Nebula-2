@@ -6,6 +6,7 @@ import { formatDistanceToNow } from "date-fns";
 import { FileCode, MessageSquare, Clock, Plus, Trash2, Loader2, FolderOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/ui/card";
+import logoUrl from "@assets/yogilates_logo.png";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -39,6 +40,9 @@ export function Projects() {
 
   return (
     <div className="mx-auto w-full max-w-6xl px-4 py-10">
+      <div className="flex justify-center mb-10">
+        <img src={logoUrl} alt="Yogilates" className="h-16 w-auto" />
+      </div>
       <div className="flex justify-between items-center mb-8">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Projects</h1>
