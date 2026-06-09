@@ -117,7 +117,15 @@ function buildPreviewHtml(files: ProjectFile[] | undefined): string {
   // Inject a tiny reporter (first thing in the doc) that forwards runtime errors
   // to the parent window so Buildly can surface them and offer an auto-fix.
   const reporter = `<script>(function(){function r(p){try{parent.postMessage({__buildlyError:true,message:String(p.message||"Error"),source:p.source||"",line:p.line||0},"*")}catch(e){}}window.addEventListener("error",function(e){r({message:e.message,source:e.filename,line:e.lineno})});window.addEventListener("unhandledrejection",function(e){var m=e.reason&&e.reason.message?e.reason.message:e.reason;r({message:"Unhandled promise rejection: "+m})});})();</script>`;
-  const inject = storageShim + reporter;
+  // Enforce the native semantics of the `hidden` attribute. Generated apps often
+  // toggle modals/dialogs/drawers via `el.hidden = true/false` but then style the
+  // base class with `display:grid/flex`, which overrides `[hidden]` and leaves a
+  // full-screen `position:fixed; inset:0` overlay permanently on top — swallowing
+  // every click and making the whole app feel "dead". Forcing [hidden] to stay
+  // hidden robustly neutralizes that bug class (beats normal app CSS via
+  // !important; a hostile `display:... !important` could still override it).
+  const baseStyle = `<style>[hidden]{display:none !important}</style>`;
+  const inject = baseStyle + storageShim + reporter;
   if (/<head[^>]*>/i.test(html)) {
     html = html.replace(/<head[^>]*>/i, (m) => m + inject);
   } else {
