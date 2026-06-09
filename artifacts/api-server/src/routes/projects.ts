@@ -302,10 +302,13 @@ function prepareImportedHtml(html: string, baseUrl: string): string {
       $(el).remove();
     }
   });
-  // Keep noscript content visible but drop the wrapper.
-  $("noscript").each((_, el) => {
-    $(el).replaceWith($(el).contents());
-  });
+  // Drop <noscript> entirely. Its body is the JS-DISABLED fallback, which a browser
+  // never renders while scripting is on — and our preview runs with allow-scripts.
+  // cheerio/parse5 parse a <noscript> body as a single raw TEXT node (scripting-on
+  // semantics), so unwrapping it injects the markup as ESCAPED text that prints as
+  // visible tags (e.g. GTM's hidden tracking <iframe>, lazy-image fallbacks).
+  // Removing it matches real browser behavior and avoids the escaped-text artifact.
+  $("noscript").remove();
 
   $("*").each((_, node) => {
     const el = node as { attribs?: Record<string, string> };

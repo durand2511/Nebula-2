@@ -128,14 +128,24 @@ function buildPreviewHtml(files: ProjectFile[] | undefined): string {
   html = html.replace(/<img\b[^>]*>/gi, delazy);
   html = html.replace(/<source\b[^>]*>/gi, delazy);
 
-  // WordPress lazy-load also emits a no-JS <noscript><img ...></noscript> fallback.
-  // The importer parsed those with scripting-enabled semantics, which turns the
-  // <noscript> body into a TEXT node, so it was stored HTML-escaped (`&lt;img ...&gt;`)
-  // and the browser now prints the raw tag as visible text under each image. Scripts
-  // run in our preview, so the fallback is redundant — strip the escaped lazyload
-  // <img> fallbacks (scoped to `lazyload` so we never touch legit escaped code shown
-  // intentionally by a generated app).
-  html = html.replace(/&lt;img\b[\s\S]*?&gt;/gi, (m) => (/lazyload/i.test(m) ? "" : m));
+  // Imported sites' <noscript> fallbacks were turned into ESCAPED text by the parser
+  // (cheerio parses a noscript body as a raw text node), so the raw markup prints as
+  // visible text — a lazy-image fallback under each image, or a hidden tracking
+  // <iframe> (e.g. Google Tag Manager). Scripts run in our preview, so these no-JS
+  // fallbacks are redundant. Strip the escaped artifacts, scoped to known fallback
+  // signatures so we never remove escaped code a generated app intentionally shows.
+  // (New imports no longer produce these — the importer now drops <noscript> — but
+  // already-imported projects still carry them.)
+  // Escaped images: only the lazy-load fallback signature (avoids touching an escaped
+  // instructional snippet). Escaped iframes: tracker host or hidden/zero-size styling —
+  // an escaped iframe in body text is virtually always a no-JS tracking fallback.
+  const stripImg = (m: string) => /lazyload/i.test(m);
+  const stripIframe = (m: string) =>
+    /googletagmanager|google-analytics|doubleclick|facebook\.com\/tr|hotjar|visibility\s*:\s*hidden|display\s*:\s*none|(?:width|height)=["']?0\b/i.test(
+      m,
+    );
+  html = html.replace(/&lt;img\b[\s\S]*?&gt;/gi, (m) => (stripImg(m) ? "" : m));
+  html = html.replace(/&lt;iframe\b[\s\S]*?&lt;\/iframe&gt;/gi, (m) => (stripIframe(m) ? "" : m));
 
   // The preview runs in a sandbox WITHOUT allow-same-origin (opaque origin) so
   // generated code can't reach Buildly's storage/cookies. A side effect is that
