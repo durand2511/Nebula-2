@@ -16,7 +16,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
               Projects
             </Link>
             <Link href="/ai-editor" className={`rounded-full px-5 py-1.5 text-sm font-medium transition-colors ${location === "/ai-editor" ? "bg-foreground text-background" : "text-foreground/60 hover:text-foreground hover:bg-foreground/5"}`}>
-              AI Editor
+              Yogilates
             </Link>
           </nav>
         </header>
