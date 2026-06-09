@@ -183,9 +183,14 @@ async function fetchWebsiteHtml(rawUrl: string): Promise<{ html: string; finalUr
         dispatcher: importDispatcher,
         signal: controller.signal,
         headers: {
+          // Present as a real browser — many sites return 403 to non-browser
+          // User-Agents / missing browser headers (e.g. Cloudflare bot checks).
           "User-Agent":
-            "Mozilla/5.0 (compatible; BuildlyImporter/1.0; +https://buildly.app)",
-          Accept: "text/html,application/xhtml+xml",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          Accept:
+            "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+          "Accept-Language": "en-US,en;q=0.9,nl;q=0.8",
+          "Upgrade-Insecure-Requests": "1",
         },
       });
     } finally {
