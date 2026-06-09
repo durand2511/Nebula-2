@@ -156,7 +156,15 @@ function buildPreviewHtml(files: ProjectFile[] | undefined): string {
   // hidden robustly neutralizes that bug class (beats normal app CSS via
   // !important; a hostile `display:... !important` could still override it).
   const baseStyle = `<style>[hidden]{display:none !important}img.lazyload,img.lazyloading,.lazyload,.lazyloading{opacity:1 !important}</style>`;
-  const inject = baseStyle + storageShim + reporter;
+  // Make the preview behave like a real browser for links. The iframe is sandboxed
+  // (opaque origin), so an external link that navigates the frame in-place gets
+  // blocked by the target site's X-Frame-Options/CSP (WhatsApp, Momoyoga booking,
+  // etc.) and appears "dead". Intercept clicks on absolute http(s)/mailto/tel links
+  // and open them in a real new tab via window.open (allowed by allow-popups +
+  // allow-popups-to-escape-sandbox). In-page anchors (#...) and relative links keep
+  // their normal in-frame behavior.
+  const linkHandler = `<script>(function(){document.addEventListener("click",function(e){var t=e.target,a=t&&t.closest?t.closest("a[href]"):null;if(!a)return;var h=(a.getAttribute("href")||"").trim();if(!h||h.charAt(0)==="#")return;var ext=/^(https?:|mailto:|tel:)/i.test(h)||h.indexOf("//")===0;if(ext){e.preventDefault();try{window.open(a.href,"_blank","noopener")}catch(err){}}},true);})();</script>`;
+  const inject = baseStyle + storageShim + reporter + linkHandler;
   if (/<head[^>]*>/i.test(html)) {
     html = html.replace(/<head[^>]*>/i, (m) => m + inject);
   } else {
@@ -916,7 +924,7 @@ export function ProjectWorkspace() {
                     ref={previewIframeRef}
                     srcDoc={previewHtml}
                     className="flex-1 w-full border-0 bg-white"
-                    sandbox="allow-scripts allow-forms allow-modals allow-popups"
+                    sandbox="allow-scripts allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox"
                     title="App Preview"
                   />
                   {previewErrors.length > 0 && !isStreaming && (
