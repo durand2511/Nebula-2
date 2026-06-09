@@ -15,3 +15,4 @@ export * from './messageRole';
 export * from './project';
 export * from './projectFile';
 export * from './projectInput';
+export * from './projectSource';

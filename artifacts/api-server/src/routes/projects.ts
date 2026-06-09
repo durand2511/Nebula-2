@@ -952,6 +952,7 @@ router.get("/projects", async (req, res) => {
         id: projects.id,
         name: projects.name,
         description: projects.description,
+        source: projects.source,
         createdAt: projects.createdAt,
         updatedAt: projects.updatedAt,
         messageCount: sql<number>`(select count(*) from project_messages where project_id = ${projects.id})::int`,
@@ -973,6 +974,7 @@ router.get("/projects/recent", async (req, res) => {
         id: projects.id,
         name: projects.name,
         description: projects.description,
+        source: projects.source,
         createdAt: projects.createdAt,
         updatedAt: projects.updatedAt,
         messageCount: sql<number>`(select count(*) from project_messages where project_id = ${projects.id})::int`,
@@ -1000,6 +1002,7 @@ router.post("/projects", async (req, res) => {
       .values({
         name: parsed.data.name,
         description: parsed.data.description ?? "",
+        source: "jordy",
       })
       .returning();
     res.status(201).json({
@@ -1057,6 +1060,7 @@ router.post("/projects/import-url", async (req, res) => {
       .values({
         name: hostname,
         description: `Imported from ${crawled.finalUrl}`,
+        source: "yogilates",
       })
       .returning();
 
@@ -1097,6 +1101,7 @@ router.get("/projects/:projectId", async (req, res) => {
         id: projects.id,
         name: projects.name,
         description: projects.description,
+        source: projects.source,
         createdAt: projects.createdAt,
         updatedAt: projects.updatedAt,
         messageCount: sql<number>`(select count(*) from project_messages where project_id = ${projects.id})::int`,

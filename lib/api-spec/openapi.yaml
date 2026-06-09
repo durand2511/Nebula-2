@@ -265,7 +265,7 @@ components:
 
     Project:
       type: object
-      required: [id, name, description, createdAt, updatedAt, messageCount, fileCount]
+      required: [id, name, description, source, createdAt, updatedAt, messageCount, fileCount]
       properties:
         id:
           type: integer
@@ -273,6 +273,9 @@ components:
           type: string
         description:
           type: string
+        source:
+          type: string
+          enum: [jordy, yogilates]
         createdAt:
           type: string
           format: date-time

@@ -5,11 +5,13 @@
  * AI App Builder API
  * OpenAPI spec version: 0.1.0
  */
+import type { ProjectSource } from './projectSource';
 
 export interface Project {
   id: number;
   name: string;
   description: string;
+  source: ProjectSource;
   createdAt: Date;
   updatedAt: Date;
   messageCount: number;

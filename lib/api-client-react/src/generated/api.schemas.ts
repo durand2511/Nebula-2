@@ -9,10 +9,19 @@ export interface HealthStatus {
   status: string;
 }
 
+export type ProjectSource = typeof ProjectSource[keyof typeof ProjectSource];
+
+
+export const ProjectSource = {
+  jordy: 'jordy',
+  yogilates: 'yogilates',
+} as const;
+
 export interface Project {
   id: number;
   name: string;
   description: string;
+  source: ProjectSource;
   createdAt: string;
   updatedAt: string;
   messageCount: number;
