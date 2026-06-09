@@ -128,6 +128,15 @@ function buildPreviewHtml(files: ProjectFile[] | undefined): string {
   html = html.replace(/<img\b[^>]*>/gi, delazy);
   html = html.replace(/<source\b[^>]*>/gi, delazy);
 
+  // WordPress lazy-load also emits a no-JS <noscript><img ...></noscript> fallback.
+  // The importer parsed those with scripting-enabled semantics, which turns the
+  // <noscript> body into a TEXT node, so it was stored HTML-escaped (`&lt;img ...&gt;`)
+  // and the browser now prints the raw tag as visible text under each image. Scripts
+  // run in our preview, so the fallback is redundant — strip the escaped lazyload
+  // <img> fallbacks (scoped to `lazyload` so we never touch legit escaped code shown
+  // intentionally by a generated app).
+  html = html.replace(/&lt;img\b[\s\S]*?&gt;/gi, (m) => (/lazyload/i.test(m) ? "" : m));
+
   // The preview runs in a sandbox WITHOUT allow-same-origin (opaque origin) so
   // generated code can't reach Buildly's storage/cookies. A side effect is that
   // window.localStorage/sessionStorage THROW a SecurityError on access, which made
