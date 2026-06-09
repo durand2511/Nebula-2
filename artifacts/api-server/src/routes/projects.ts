@@ -489,7 +489,10 @@ IMPORTED WEBSITE ASSETS (applies ONLY when the current project files below are H
 - That imported HTML contains the site's REAL images as ABSOLUTE URLs (e.g. <img src="https://…">, <source srcset="https://…">, and CSS background-image: url(https://…)). These are genuine, working assets from the source site — NOT random, placeholder, or hallucinated URLs — so the "no external image URLs" runtime rule does NOT apply to them. REUSE them.
 - Pull the most relevant real images out of the imported HTML and place them tastefully into your new design so the result feels like ONE cohesive whole with the original site: a hero/banner image at the top, supporting photos inside cards/sections, a gallery where it fits, and the site's real logo image in the header (this is the one case where an actual logo image is expected instead of a text wordmark).
 - Copy each image URL EXACTLY as it appears in the imported HTML (keep the full absolute URL). Never invent, guess, shorten, or alter an image URL, and never swap in a stock/CDN URL. If you need an image that is not present in the imported HTML, fall back to inline SVG/emoji per the runtime rules rather than guessing a URL.
-- Make every reused image responsive and on-grid: max-width:100%, height:auto, object-fit:cover where cropping helps, sensible aspect ratios, and meaningful alt text. Style the surrounding layout with the design system so the photos feel intentionally composed, not pasted in.
+- Make every reused image responsive and on-grid: max-width:100%, height:auto, object-fit:cover where cropping helps, sensible aspect ratios, and meaningful alt text. Style the surrounding layout with the design system so the photos feel intentionally composed, not pasted in. Place images like a real designer: a strong hero image, balanced photo/text sections, an occasional gallery or image grid — never one lonely picture and never a wall of images.
+- REBUILD THE WHOLE SITE, NOT JUST THE HOMEPAGE. Recreate the imported site as ONE cohesive multi-view single-page app inside index.html. Read the site's MAIN navigation menu from the imported HTML and create a working nav tab/view for EVERY primary section (e.g. Home, each class/service page, About, Pricing/Rates, Blog, Contact). Switch views client-side (hash routing or show/hide sections) — every nav tab must actually work. Building only a home page is a FAILURE.
+- FULLY DESIGN EACH TAB, not only the home view. Every tab gets real headings, real copy taken from that section's imported page, and the relevant real images from that page, laid out on the grid with the design system. Never leave a tab empty, stubbed, "coming soon", or visibly thinner than the others — each view must look finished on its own. The home/landing view is just one of several complete views.
+- If a primary nav section's page is NOT present in the files below (omitted for size), STILL create its tab and fill it with tasteful, on-brand content and a relevant reused image consistent with the rest of the site — do not drop the tab or leave it blank.
 
 RUNTIME CONSTRAINTS (the app runs sandboxed in a browser iframe — respect these exactly):
 - Vanilla JavaScript only (ES modules / plain JS). NO npm, NO build step, NO JSX/TSX, NO frameworks that need compiling.
@@ -734,8 +737,9 @@ function buildFileContext(files: { path: string; content: string }[]): {
   let note = "";
   if (omitted.length > 0) {
     note =
-      `\n\nNOTE: This project is too large to include every file in full. ` +
-      `The following pages were omitted to stay within limits — do NOT output, recreate, delete, or reference them, and only edit the files shown above unless the user explicitly asks about an omitted page:\n` +
+      `\n\nNOTE: This project is too large to include every source file in full. ` +
+      `The following original page FILES were omitted to stay within limits — do NOT emit a code block for any of these exact filenames (you can't see their content, so any output would corrupt them) and do not link to them. ` +
+      `You MAY still build an in-app nav tab/view for the corresponding section (see IMPORTED WEBSITE ASSETS) using on-brand content; just keep all of that inside index.html, never in these files:\n` +
       omitted.map((p) => `- ${p}`).join("\n");
   }
 
