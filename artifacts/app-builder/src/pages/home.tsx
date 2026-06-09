@@ -1,6 +1,5 @@
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
-import { ArrowRight } from "lucide-react";
 import logoUrl from "@assets/yogilates_logo.png";
 
 export function Home() {
@@ -11,8 +10,8 @@ export function Home() {
       </div>
 
       <h1
-        className="text-5xl font-semibold tracking-tight mb-6 max-w-2xl leading-tight"
-        style={{ fontFamily: '"Fraunces", serif' }}
+        className="text-6xl tracking-tight mb-6 max-w-3xl leading-tight"
+        style={{ fontFamily: '"Abril Fatface", serif' }}
       >
         Een app in je eigen website, gebouwd met AI
       </h1>
@@ -28,7 +27,6 @@ export function Home() {
       <Link href="/ai-editor">
         <Button size="lg" className="h-12 px-8 font-bold" data-testid="button-start">
           Begin nu
-          <ArrowRight className="ml-2 h-5 w-5" />
         </Button>
       </Link>
     </div>
