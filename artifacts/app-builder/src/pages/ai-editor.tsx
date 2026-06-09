@@ -8,7 +8,8 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ArrowRight, Globe, Loader2, Sparkles } from "lucide-react";
+import { ArrowRight, Globe, Loader2 } from "lucide-react";
+import logoUrl from "@assets/yogilates_logo.png";
 
 export function AiEditor() {
   const [, setLocation] = useLocation();
@@ -53,15 +54,8 @@ export function AiEditor() {
 
   return (
     <div className="flex-1 flex flex-col items-center pt-24 px-4 pb-12 w-full max-w-4xl mx-auto">
-      <div className="flex flex-col items-center text-center mb-10">
-        <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border border-border bg-card shadow-sm mb-6">
-          <Globe className="h-7 w-7 text-foreground" />
-        </div>
-        <h1 className="text-3xl font-semibold tracking-tight mb-3">AI Editor</h1>
-        <p className="text-muted-foreground max-w-md text-base leading-relaxed">
-          Plak de link van een bestaande website. Buildly haalt de pagina op,
-          waarna je hem met AI kunt aanpassen.
-        </p>
+      <div className="flex justify-center mb-12">
+        <img src={logoUrl} alt="Yogilates" className="h-20 w-auto" />
       </div>
 
       <div className="w-full max-w-2xl">
@@ -112,15 +106,6 @@ export function AiEditor() {
             {error}
           </p>
         )}
-
-        <div className="mt-6 flex items-start gap-2 justify-center text-sm text-muted-foreground">
-          <Sparkles className="h-4 w-4 mt-0.5 shrink-0 text-foreground/50" />
-          <span className="max-w-md text-center">
-            We importeren de opmaak en stijl van de pagina als startpunt.
-            Interactieve scripts worden niet meegenomen — die bouw je daarna
-            opnieuw op met AI.
-          </span>
-        </div>
       </div>
     </div>
   );
