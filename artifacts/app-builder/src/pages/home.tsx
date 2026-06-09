@@ -11,7 +11,7 @@ export function Home() {
 
       <h1
         className="text-6xl tracking-tight mb-6 max-w-3xl leading-tight"
-        style={{ fontFamily: '"Abril Fatface", serif' }}
+        style={{ fontFamily: '"DM Serif Display", serif' }}
       >
         Een app in je eigen website, gebouwd met AI
       </h1>
