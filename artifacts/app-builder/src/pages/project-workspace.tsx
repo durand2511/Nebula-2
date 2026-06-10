@@ -35,6 +35,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CodeViewer } from "@/components/code-viewer";
+import { formatFileContent } from "@/lib/format-code";
 import {
   fileToReferenceImage,
   MAX_ATTACHED_IMAGES,
@@ -618,7 +619,14 @@ export function ProjectWorkspace() {
     setIsDownloading(true);
     try {
       const zip = new JSZip();
-      files.forEach((f) => zip.file(f.path, f.content ?? ""));
+      // Format each file the same way the on-screen viewer does, so the
+      // downloaded code is neatly indented instead of the raw minified content.
+      await Promise.all(
+        files.map(async (f) => {
+          const content = await formatFileContent(f.path, f.content ?? "");
+          zip.file(f.path, content);
+        }),
+      );
       const blob = await zip.generateAsync({ type: "blob" });
       const safeName =
         (project?.name ?? "project")
