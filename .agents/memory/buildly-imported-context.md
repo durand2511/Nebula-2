@@ -38,6 +38,21 @@ image URLs, plus the main nav) drops the payload to ~64K chars, leaving room to 
   and non-Elementor imports lack the marker, so a fingerprint would misclassify a
   fresh raw import as already-rebuilt (skipping distillation) — a worse regression.
 
+**Redesign preservation contract (rebuild mode only):**
+- The first rebuild gets a strict "REDESIGN PRESERVATION CONTRACT" appended to the
+  system prompt: preserve every nav item, button/CTA (same label + action), section,
+  and link; improve ONLY visuals (type, spacing, color, components, mobile); never
+  remove/reorder/shorten. The distilled brief now also extracts per-page CTAs
+  (`extractCtas`) and more copy so the model has the data to keep that structure.
+- **Why:** the user supplied these PRESERVE/IMPROVE rules after redesigns dropped
+  buttons/sections. Append it ONLY when `importMode === "rebuild"` — NOT in `edit`
+  mode: edit mode already says "change only what's asked", and the contract's
+  "improve the visuals" language would wrongly trigger a redesign on a tiny edit.
+- The text-preservation line says "use the REAL wording PROVIDED below", not "keep
+  all text exactly" — the brief is distilled/truncated, so promising verbatim full
+  text is a claim the data can't satisfy. Structure (nav/buttons/sections/links) IS
+  fully captured and can be promised; full body copy cannot.
+
 **How to apply:**
 - Detection: `project.description` starts with `"Imported from"` (same convention the
   frontend uses for `isImported`). Both the stream route and the non-stream messages

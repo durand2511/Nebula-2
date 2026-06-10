@@ -497,8 +497,27 @@ function buildSystemPrompt(
   learningsContext: string,
   importMode: "none" | "rebuild" | "edit" = "none",
 ): string {
+  // Strict redesign contract for the FIRST rebuild of an imported site: improve
+  // the LOOK only, never drop or restructure content, so a "make it prettier"
+  // pass keeps every nav item, button, section, link, and the real copy. Only
+  // applied in "rebuild" mode — "edit" mode already says "change only what's
+  // asked", and pasting "improve the visuals" there would wrongly push a
+  // redesign during a tiny follow-up edit.
+  const preservationRules = `
+REDESIGN PRESERVATION CONTRACT — when rebuilding this site you may change ONLY the visual design, never the content or structure:
+PRESERVE EXACTLY (never change, remove, rename, reorder, or shorten):
+- Every navigation item and the menu structure, exactly as-is.
+- Every button and CTA — same label, same destination, same functionality.
+- Every section and content block — keep all of them, in the same order; nothing may be removed or reordered.
+- Every link and its destination (cross-page links become working in-app nav tabs/views — but none may disappear).
+- The real content provided for each page below — use the REAL wording, headings and CTA labels exactly as given; never replace them with lorem ipsum or invented marketing copy, and never leave a section empty, stubbed, or "coming soon".
+IMPROVE (this is ALL you may change): typography (cleaner, modern); spacing and layout consistency (uniform spacing, alignment, visual hierarchy on a real grid); color palette (refine and modernize but keep the brand recognizable); component styling for buttons, cards and inputs (same function, better design); mobile responsiveness.
+HARD RULES:
+- If a section, button, menu item, or link exists in the original, it MUST exist in the redesign.
+- Never simplify by removing — only simplify by cleaning up the visuals.
+- When in doubt: keep it, and make it look better.`;
   const importedBlock =
-    importMode === "edit"
+    (importMode === "edit"
       ? `IMPORTED WEBSITE — INCREMENTAL EDIT (this site was imported and has ALREADY been rebuilt into the single-page app shown in the current project files below):
 - Apply ONLY the specific change the user asks for. Preserve the existing layout, structure, sections, navigation, copy, and styling EXACTLY as they are — do NOT redesign, re-theme, restructure, or regenerate the page, and do not touch anything the user did not mention. A full rebuild here is a FAILURE.
 - The current files already reuse the site's REAL image URLs (absolute https URLs); keep them as-is — the "no external image URLs" rule does NOT apply to image URLs already present in these files. If the change needs a new image, prefer one already in the files; otherwise use inline SVG/emoji per the runtime rules.
@@ -510,7 +529,8 @@ function buildSystemPrompt(
 - Make every reused image responsive and on-grid: max-width:100%, height:auto, object-fit:cover where cropping helps, sensible aspect ratios, and meaningful alt text. Style the surrounding layout with the design system so the photos feel intentionally composed, not pasted in. Place images like a real designer: a strong hero image, balanced photo/text sections, an occasional gallery or image grid — never one lonely picture and never a wall of images.
 - REBUILD THE WHOLE SITE, NOT JUST THE HOMEPAGE. Recreate the imported site as ONE cohesive multi-view single-page app inside index.html. Read the site's MAIN navigation menu from the imported HTML and create a working nav tab/view for EVERY primary section (e.g. Home, each class/service page, About, Pricing/Rates, Blog, Contact). Switch views client-side (hash routing or show/hide sections) — every nav tab must actually work. Building only a home page is a FAILURE.
 - FULLY DESIGN EACH TAB, not only the home view. Every tab gets real headings, real copy taken from that section's imported page, and the relevant real images from that page, laid out on the grid with the design system. Never leave a tab empty, stubbed, "coming soon", or visibly thinner than the others — each view must look finished on its own. The home/landing view is just one of several complete views.
-- If a primary nav section's page is NOT present in the files below (omitted for size), STILL create its tab and fill it with tasteful, on-brand content and a relevant reused image consistent with the rest of the site — do not drop the tab or leave it blank.`;
+- If a primary nav section's page is NOT present in the files below (omitted for size), STILL create its tab and fill it with tasteful, on-brand content and a relevant reused image consistent with the rest of the site — do not drop the tab or leave it blank.`) +
+    (importMode === "rebuild" ? "\n" + preservationRules : "");
   return `You are Buildly, an expert AI web app builder. Generate beautiful, fully-functional web apps for a project called "${projectName}", with clean, well-structured, modular code.${learningsContext}
 
 You build COMPLETE, production-ready web apps — never demos, prototypes, or placeholders.
@@ -726,8 +746,8 @@ const MAX_FILE_CONTEXT_CHARS = 2_000_000;
 // produced zero tokens). So for imports we send a compact, DISTILLED brief of
 // each page instead of the raw HTML: titles, headings, key copy and the real
 // image URLs — everything the model needs to rebuild a clean single-page app.
-const IMPORTED_CONTEXT_MAX_CHARS = 180_000;
-const PER_PAGE_MAX_CHARS = 8_000;
+const IMPORTED_CONTEXT_MAX_CHARS = 260_000;
+const PER_PAGE_MAX_CHARS = 11_000;
 
 function htmlToText(html: string): string {
   return html
@@ -756,14 +776,36 @@ function collectTagText(re: RegExp, html: string, limit: number): string[] {
 }
 
 function extractHeadings(html: string): string[] {
-  return collectTagText(/<h[1-3][^>]*>([\s\S]*?)<\/h[1-3]>/gi, html, 14);
+  return collectTagText(/<h[1-4][^>]*>([\s\S]*?)<\/h[1-4]>/gi, html, 24);
 }
 
 function extractParagraphs(html: string): string[] {
-  return collectTagText(/<p[^>]*>([\s\S]*?)<\/p>/gi, html, 80)
-    .filter((t) => t.length >= 40)
-    .slice(0, 10)
-    .map((t) => (t.length > 320 ? t.slice(0, 320) + "…" : t));
+  return collectTagText(/<(?:p|li)[^>]*>([\s\S]*?)<\/(?:p|li)>/gi, html, 140)
+    .filter((t) => t.length >= 30)
+    .slice(0, 18)
+    .map((t) => (t.length > 600 ? t.slice(0, 600) + "…" : t));
+}
+
+// Pull the labels of buttons and button-styled links so a redesign keeps every
+// CTA verbatim (the PRESERVATION CONTRACT requires same labels + same actions).
+function extractCtas(html: string): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const push = (raw: string) => {
+    const t = htmlToText(raw);
+    const key = t.toLowerCase();
+    if (t && t.length >= 2 && t.length <= 48 && !seen.has(key)) {
+      seen.add(key);
+      out.push(t);
+    }
+  };
+  let m: RegExpExecArray | null;
+  const btnRe = /<button\b[^>]*>([\s\S]*?)<\/button>/gi;
+  while ((m = btnRe.exec(html)) !== null && out.length < 16) push(m[1]);
+  const linkBtnRe =
+    /<a\b[^>]*\b(?:class|role)=["'][^"']*(?:btn|button|cta)[^"']*["'][^>]*>([\s\S]*?)<\/a>/gi;
+  while ((m = linkBtnRe.exec(html)) !== null && out.length < 16) push(m[1]);
+  return out.slice(0, 16);
 }
 
 function extractPageImages(html: string): string[] {
@@ -905,12 +947,14 @@ function buildImportedContext(files: { path: string; content: string }[]): {
     const desc = extractMetaDescription(f.content);
     const headings = extractHeadings(f.content);
     const paras = extractParagraphs(f.content);
+    const ctas = extractCtas(f.content);
     const imgs = extractPageImages(f.content);
 
     let block = `=== PAGE: ${f.path} ===\nTitle: ${title}\n`;
     if (desc) block += `Description: ${desc}\n`;
-    if (headings.length) block += `Headings:\n${headings.map((h) => `- ${h}`).join("\n")}\n`;
-    if (paras.length) block += `Key copy:\n${paras.map((p) => `- ${p}`).join("\n")}\n`;
+    if (headings.length) block += `Headings (keep all of these):\n${headings.map((h) => `- ${h}`).join("\n")}\n`;
+    if (paras.length) block += `Key copy (keep this real wording):\n${paras.map((p) => `- ${p}`).join("\n")}\n`;
+    if (ctas.length) block += `Buttons / CTAs (recreate each one with this EXACT label and its action):\n${ctas.map((c) => `- ${c}`).join("\n")}\n`;
     if (imgs.length) block += `Real images (reuse these EXACT URLs):\n${imgs.map((u) => `- ${u}`).join("\n")}\n`;
     block = block.slice(0, PER_PAGE_MAX_CHARS);
 
@@ -921,8 +965,9 @@ function buildImportedContext(files: { path: string; content: string }[]): {
 
   const navLine = nav.length ? `Main navigation: ${nav.join(" · ")}\n\n` : "";
   const context =
-    `\n\nThis project was IMPORTED from a real website. What follows is a DISTILLED summary of every page (titles, headings, key copy, and the real image URLs) — NOT the raw HTML, which is far too large to include. ` +
+    `\n\nThis project was IMPORTED from a real website. What follows is a DISTILLED summary of every page (titles, headings, key copy, buttons/CTAs, and the real image URLs) — NOT the raw HTML, which is far too large to include. ` +
     `Use it to rebuild the site as ONE cohesive, beautiful single-page app, reusing the real image URLs EXACTLY as given. ` +
+    `Follow the REDESIGN PRESERVATION CONTRACT strictly: recreate EVERY page as a working nav view, and keep every heading, every line of copy, every button/CTA (same label), and every link — improve only the visual design, never drop or shorten content. ` +
     `Output ONLY index.html, styles.css and script.js. Do NOT emit code blocks for any of the original per-page .html files — they are kept as-is.\n\n` +
     navLine +
     blocks.join("\n\n");
