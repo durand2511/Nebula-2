@@ -9,7 +9,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ArrowRight, Globe, Loader2 } from "lucide-react";
-import logoUrl from "@assets/yogilates_logo.png";
+import logoUrl from "../assets/nebula-logo.png";
 
 export function AiEditor() {
   const [, setLocation] = useLocation();
@@ -55,7 +55,7 @@ export function AiEditor() {
   return (
     <div className="flex-1 flex flex-col items-center pt-24 px-4 pb-12 w-full max-w-4xl mx-auto">
       <div className="flex justify-center mb-12">
-        <img src={logoUrl} alt="Yogilates" className="h-20 w-auto" />
+        <img src={logoUrl} alt="Nebula" className="h-20 w-auto" />
       </div>
 
       <div className="w-full max-w-2xl">
