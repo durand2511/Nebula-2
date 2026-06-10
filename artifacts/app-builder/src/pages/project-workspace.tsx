@@ -207,22 +207,28 @@ function buildPreviewHtml(
   const previewOrigin =
     typeof window !== "undefined" ? window.location.origin : "";
 
-  // Browser-like link handling. Links to the SAME site navigate INSIDE the preview
-  // (so it behaves like a single browser tab); links to OTHER sites (WhatsApp,
-  // Momoyoga booking, socials) open in a real new tab, because external sites refuse
-  // to render inside a frame (X-Frame-Options/CSP) and would otherwise appear dead.
-  // In-page anchors (#...) and non-web schemes (mailto/tel) keep their default behavior.
-  // For IMPORTED sites: same-site links navigate inside the preview, external links
-  // open in a new tab. For GENERATED apps (a single self-contained doc): the app has
-  // no sibling pages, so any link that unloads the document blanks the preview to a
-  // WHITE SCREEN. The spaGuard below prevents that — it lets in-page "#" anchors,
-  // mailto/tel/sms and javascript: links behave normally, opens truly external links
-  // in a new tab, and cancels every other navigation (relative paths, router-style
-  // "/route" links, same-origin) so the app can never blank itself. We never
-  // stopPropagation, so the app's own JS click handlers (real SPA view switching)
-  // still run; we only suppress the default browser navigation.
+  // Browser-like link handling. The preview iframe is a single srcDoc document, so any
+  // link that triggers a real top-level navigation either loads a frame-blocked live
+  // site (X-Frame-Options/CSP -> WHITE SCREEN) or a dead route -> blank. Both branches
+  // below run in capture phase WITHOUT stopPropagation, so the app's/site's own JS click
+  // handlers still run; we only cancel the browser's default navigation.
+  //
+  // IMPORTED sites: the `router` script (added BEFORE this one) intercepts same-site
+  // links that map to an imported page and calls preventDefault + postMessage. So here,
+  // if e.defaultPrevented the router already handled it -> skip. Everything else that the
+  // router did NOT claim — external links AND internal links whose page wasn't imported
+  // (e.g. "/contact/" with no contact.html) — would blank the frame by loading the live
+  // site, so we open it in a NEW TAB instead. In-page "#" anchors and mailto/tel/sms/
+  // javascript: schemes keep their default behavior.
+  //
+  // GENERATED apps (single self-contained doc, no sibling pages): in-page "#" anchors
+  // and mailto/tel/sms/javascript: pass through; truly external links open in a new tab;
+  // every other navigation (relative paths, router-style "/route" links, same-origin) is
+  // cancelled so the app can never blank itself. The sandbox has no allow-same-origin so
+  // location.origin is opaque ("null"); we inject the builder ORIGIN (relative links
+  // resolve against it) to classify self-links vs. genuinely external ones.
   const linkHandler = isImported
-    ? `<script>(function(){var HOST=${JSON.stringify(primaryHost)};function norm(h){return h.replace(/^www\\./,"")}document.addEventListener("click",function(e){var t=e.target,a=t&&t.closest?t.closest("a[href]"):null;if(!a)return;var raw=(a.getAttribute("href")||"").trim();if(!raw||raw.charAt(0)==="#")return;var u;try{u=new URL(a.href)}catch(err){return}if(u.protocol!=="http:"&&u.protocol!=="https:")return;var internal=HOST&&norm(u.hostname.toLowerCase())===norm(HOST);if(!internal){e.preventDefault();try{window.open(a.href,"_blank","noopener")}catch(err){}}},true);})();</script>`
+    ? `<script>(function(){document.addEventListener("click",function(e){var t=e.target,a=t&&t.closest?t.closest("a[href]"):null;if(!a)return;var raw=(a.getAttribute("href")||"").trim();if(!raw||raw.charAt(0)==="#")return;if(e.defaultPrevented)return;if(/^(mailto:|tel:|sms:|javascript:)/i.test(raw))return;var u;try{u=new URL(a.href,location.href)}catch(err){return}if(u.protocol!=="http:"&&u.protocol!=="https:")return;e.preventDefault();try{window.open(a.href,"_blank","noopener")}catch(err){}},true);})();</script>`
     : `<script>(function(){var ORIGIN=${JSON.stringify(previewOrigin)};document.addEventListener("click",function(e){var t=e.target,a=t&&t.closest?t.closest("a[href]"):null;if(!a)return;var raw=(a.getAttribute("href")||"").trim();if(raw===""||raw==="#"){e.preventDefault();return}if(raw.charAt(0)==="#")return;if(/^(mailto:|tel:|sms:|javascript:)/i.test(raw))return;var u;try{u=new URL(a.href,location.href)}catch(err){e.preventDefault();return}if(u.protocol!=="http:"&&u.protocol!=="https:"){e.preventDefault();return}if(!ORIGIN||u.origin===ORIGIN){e.preventDefault();return}e.preventDefault();try{window.open(a.href,"_blank","noopener")}catch(err){}},true);})();</script>`;
 
   // Mobile hamburger toggle — IMPORTED SITES ONLY. Imported themes render a hamburger
