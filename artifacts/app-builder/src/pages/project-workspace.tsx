@@ -295,6 +295,12 @@ export function ProjectWorkspace() {
   const [pendingUser, setPendingUser] = useState<string | null>(null);
   const [previewErrors, setPreviewErrors] = useState<string[]>([]);
   const [streamedText, setStreamedText] = useState("");
+  // Honest, always-moving progress for long builds: how many files have streamed in
+  // so far, and how many seconds the build has been running. A capped phase timeline
+  // alone looks frozen for the minutes a large/imported rebuild takes — these keep
+  // visibly ticking so the user can see it is genuinely working, not stuck.
+  const [filesWritten, setFilesWritten] = useState(0);
+  const [elapsedSec, setElapsedSec] = useState(0);
   const [attachedImages, setAttachedImages] = useState<AttachedImage[]>([]);
   const [pendingImages, setPendingImages] = useState<string[]>([]);
 
@@ -383,6 +389,19 @@ export function ProjectWorkspace() {
     return () => clearInterval(id);
   }, [isStreaming]);
 
+  // Tick a live elapsed-time counter while building. Large/imported rebuilds take a
+  // few minutes; a visibly counting timer reassures the user the build is alive even
+  // after the phase timeline has reached its final step.
+  useEffect(() => {
+    if (!isStreaming) return;
+    const start = Date.now();
+    setElapsedSec(0);
+    const id = setInterval(() => {
+      setElapsedSec(Math.floor((Date.now() - start) / 1000));
+    }, 1000);
+    return () => clearInterval(id);
+  }, [isStreaming]);
+
   useEffect(() => {
     if (files && files.length > 0 && !selectedFile) {
       setSelectedFile(files[0].path);
@@ -447,6 +466,8 @@ export function ProjectWorkspace() {
       rawStreamRef.current = "";
       shownLenRef.current = 0;
       setStreamedText("");
+      setFilesWritten(0);
+      setElapsedSec(0);
       setActiveTab("preview");
 
       const ac = new AbortController();
@@ -486,7 +507,9 @@ export function ProjectWorkspace() {
           } else if (event.type === "file" && event.path) {
             // Refresh the file list as files arrive so the saved app is ready the
             // moment the build finishes. Filenames are intentionally NOT surfaced
-            // in the UI during generation.
+            // in the UI during generation, but the COUNT is — it gives honest,
+            // moving progress on long rebuilds.
+            setFilesWritten((n) => n + 1);
             queryClient.invalidateQueries({ queryKey: getListFilesQueryKey(projectId) });
           } else if (event.type === "error") {
             setBuildError(event.message ?? "Something went wrong");
@@ -888,6 +911,9 @@ export function ProjectWorkspace() {
                 <div className="flex items-center gap-2 text-sm font-medium text-foreground min-w-0">
                   <Loader2 className="h-4 w-4 animate-spin text-primary shrink-0" />
                   <span className="truncate">Nebula is building your app…</span>
+                  <span className="text-xs font-normal text-muted-foreground tabular-nums shrink-0">
+                    {Math.floor(elapsedSec / 60)}:{String(elapsedSec % 60).padStart(2, "0")}
+                  </span>
                 </div>
                 <Button
                   variant="outline"
@@ -957,6 +983,26 @@ export function ProjectWorkspace() {
                       );
                     })}
                   </ol>
+
+                  {/* Honest live progress — keeps visibly moving for the minutes a
+                      large or imported rebuild takes, so it never looks frozen. */}
+                  <div className="mt-8 rounded-lg border border-border bg-card/40 px-4 py-3">
+                    <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin text-primary shrink-0" />
+                      <span>Pagina's worden geschreven…</span>
+                    </div>
+                    <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
+                      {filesWritten > 0
+                        ? `${filesWritten} bestand${filesWritten === 1 ? "" : "en"} klaar · ${Math.floor(elapsedSec / 60)}:${String(elapsedSec % 60).padStart(2, "0")} bezig`
+                        : `${Math.floor(elapsedSec / 60)}:${String(elapsedSec % 60).padStart(2, "0")} bezig`}
+                    </p>
+                    {elapsedSec >= 15 && (
+                      <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+                        Grote of geïmporteerde websites kunnen een paar minuten duren. Je kunt dit
+                        scherm gerust open laten staan — het bouwen gaat gewoon door.
+                      </p>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>

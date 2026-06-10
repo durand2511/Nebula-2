@@ -25,3 +25,17 @@ The AI generates MULTIPLE files (index.html linking styles.css / script.js with 
 
 ## Large imports: send the first SSE byte BEFORE the heavy pre-stream work
 On a big imported project (e.g. 30 pages, ~5.4MB of stored file content) the generation stream (`POST /projects/:id/messages/stream`) was dropped by the edge proxy after ~3.8s with no model output — "request aborted" server-side, "lang bezig" with no result client-side, and no assistant message/files ever persisted. **Root cause:** after `res.flushHeaders()` the route does heavy work (DB-select EVERY file's content, `buildFileContext`, `buildSystemPrompt`) before the first `send(status)`. During that gap no response BODY byte flows, so the proxy treats the connection as idle and kills it. The status event came too late and the heartbeat (then 10s) never fired before the abort. **Fix:** (1) write an immediate `: open\n\n` comment right after `flushHeaders`, before any DB/context work (guard in try/catch — socket may already be gone); (2) lower the heartbeat interval to 3s. SSE comment lines (`:` prefix) reset proxy idle timers and the client parser ignores them (only `data:` lines are parsed). **Why it matters:** the proxy idle window is only a few seconds, so the FIRST byte must go out at ~0s, not after multi-second prep — applies to any slow-to-first-byte streaming route, not just big imports. The client (project-workspace.tsx) has no timeout of its own; aborts at a few seconds are always the proxy, not the user pressing Stop.
+
+## Long-build loading UI must keep visibly moving
+- During a build the chat live-narration is intentionally frozen at the first `^FILE:`
+  marker (filenames are hidden), and the BUILD_PHASES timeline caps at the last phase
+  after ~30s. For a large/imported REBUILD the model then writes ~80K chars of code for
+  several MINUTES, so the UI looked frozen → users reported "it keeps loading / is it
+  broken" even though the build completes fine (~5 min, all 3 files saved).
+- Fix lives in the streaming view (`project-workspace.tsx`): a live m:ss elapsed counter
+  (1s setInterval gated on isStreaming, NOT rAF — rAF is throttled in the canvas iframe)
+  + a files-written counter incremented on each SSE `file` event + a reassurance line
+  shown only after ~15s. WHY: a capped phase timeline + frozen narration is not enough
+  feedback for multi-minute generations; the perceived hang was UX, not a real hang.
+- When adding long-running streaming UX, always include at least one element that ticks
+  every second so the user can tell it is alive after the scripted phases run out.
