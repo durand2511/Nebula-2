@@ -1,0 +1,64 @@
+Analyseer dit project als een senior software engineer en refactor de code naar een nette, onderhoudbare website-structuur.
+
+Context:
+- Dit project is een statische export van een WordPress/Elementor website.
+- Er zijn ongeveer 30 losse HTML-pagina’s.
+- Veel code wordt herhaald: header, navigatie, footer, SEO/meta, layout wrappers en scripts/styles.
+- Het doel is om de website overzichtelijk, schaalbaar en makkelijk aanpasbaar te maken zonder de visuele uitstraling en inhoud te breken.
+
+Taken:
+1. Breng eerst de huidige structuur in kaart:
+   - Welke pagina’s bestaan er?
+   - Welke onderdelen komen op bijna elke pagina terug?
+   - Welke CSS/JS/assets worden gebruikt?
+   - Welke links verwijzen nog naar senszenjoy.nl of WordPress-routes?
+
+2. Maak daarna een nette projectstructuur, bijvoorbeeld:
+   - /src/pages
+   - /src/components
+   - /src/layouts
+   - /src/styles
+   - /src/assets
+   - /src/data
+   - /public
+
+3. Zet herhaalde onderdelen om naar herbruikbare componenten:
+   - Header
+   - Navigatie/menu
+   - Footer
+   - SEO/meta component
+   - PageLayout
+   - BlogCard of ArticlePreview
+   - Contact/lesrooster-sectie
+   - CTA-secties
+
+4. Haal pagina-inhoud los van layout-code:
+   - Zet tekst/content per pagina netjes apart.
+   - Gebruik duidelijke bestandsnamen.
+   - Verwijder dubbele of overbodige HTML waar mogelijk.
+
+5. Maak interne links logisch:
+   - Gebruik nette routes zoals:
+     /
+     /yoga
+     /mindfulness
+     /pilates
+     /lesrooster-en-contact
+     /tarieven
+     /blog
+   - Verwijder onnodige WordPress-querylinks zoals ?p= of wp-json waar ze niet nodig zijn.
+
+6. Verbeter onderhoudbaarheid:
+   - Maak duidelijke componentnamen.
+   - Voeg comments toe waar nodig.
+   - Verwijder dode code.
+   - Houd SEO-tags per pagina intact.
+   - Zorg dat de site lokaal in Replit kan draaien.
+
+7. Belangrijk:
+   - Verander de inhoud niet inhoudelijk.
+   - Breek het design niet.
+   - Maak eerst een veilige refactor.
+   - Geef na afloop een overzicht van wat je hebt aangepast en welke bestanden belangrijk zijn.
+
+Werk stap voor stap. Begin met analyse, maak daarna de nieuwe structuur, en voer dan pas de refactor uit.
