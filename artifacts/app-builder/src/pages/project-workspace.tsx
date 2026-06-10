@@ -25,8 +25,8 @@ import {
   X,
   Square,
   ImagePlus,
-  ZoomIn,
-  ZoomOut,
+  Maximize2,
+  Minimize2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -277,12 +277,10 @@ export function ProjectWorkspace() {
   const [activeTab, setActiveTab] = useState<"code" | "preview">("preview");
   const [showCode, setShowCode] = useState(false);
   const [previewKey, setPreviewKey] = useState(0);
-  // Pure VISUAL zoom for the preview. The iframe keeps width/height = 100% (= the pane
-  // size) so its internal viewport — and therefore the responsive layout — is CONSTANT;
-  // we only apply transform: scale(previewZoom). A spacer in the preview pane defines the
-  // scrollable footprint when zoomed in. This intentionally does NOT reflow the site, so
-  // the mobile hamburger menu keeps working at every zoom level.
-  const [previewZoom, setPreviewZoom] = useState(1);
+  // Full-screen "web viewer" for the preview. There is no zoom/scaling: the site always
+  // renders at its real, fixed size (exactly how it looks in a real browser). This toggle
+  // just makes the preview take over the whole window so the user can see it full size.
+  const [previewFullscreen, setPreviewFullscreen] = useState(false);
   // For imported multi-page sites: which page the preview currently shows (null = index).
   const [previewPage, setPreviewPage] = useState<string | null>(null);
 
@@ -324,6 +322,16 @@ export function ProjectWorkspace() {
       messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
     }
   }, [messages, phaseIndex, pendingUser]);
+
+  // Let Escape exit the full-screen web viewer.
+  useEffect(() => {
+    if (!previewFullscreen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setPreviewFullscreen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [previewFullscreen]);
 
   // Track the known message count so the optimistic user bubble can be dropped
   // only once the persisted message actually lands (handles repeated prompts).
@@ -934,45 +942,17 @@ export function ProjectWorkspace() {
 
               <div className="ml-auto flex items-center gap-1">
                 {activeTab === "preview" && previewHtml && (
-                  <div className="flex items-center gap-0.5 mr-1">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 text-muted-foreground hover:text-foreground"
-                      onClick={() =>
-                        setPreviewZoom((z) =>
-                          Math.max(0.25, Math.round((z - 0.25) * 100) / 100),
-                        )
-                      }
-                      disabled={previewZoom <= 0.25}
-                      aria-label="Zoom uit"
-                      title="Zoom uit"
-                    >
-                      <ZoomOut className="h-3.5 w-3.5" />
-                    </Button>
-                    <button
-                      onClick={() => setPreviewZoom(1)}
-                      className="min-w-[3rem] text-center text-xs font-medium text-muted-foreground hover:text-foreground tabular-nums"
-                      title="Herstel naar 100%"
-                    >
-                      {Math.round(previewZoom * 100)}%
-                    </button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 text-muted-foreground hover:text-foreground"
-                      onClick={() =>
-                        setPreviewZoom((z) =>
-                          Math.min(2, Math.round((z + 0.25) * 100) / 100),
-                        )
-                      }
-                      disabled={previewZoom >= 2}
-                      aria-label="Zoom in"
-                      title="Zoom in"
-                    >
-                      <ZoomIn className="h-3.5 w-3.5" />
-                    </Button>
-                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 text-muted-foreground hover:text-foreground"
+                    onClick={() => setPreviewFullscreen(true)}
+                    title="Bekijk op volledig scherm"
+                    data-testid="button-fullscreen"
+                  >
+                    <Maximize2 className="h-3.5 w-3.5 mr-1.5" />
+                    Volledig scherm
+                  </Button>
                 )}
                 {activeTab === "preview" && previewHtml && (
                   <Button
@@ -1079,35 +1059,37 @@ export function ProjectWorkspace() {
             {/* Preview Tab */}
             <TabsContent value="preview" className="flex-1 flex flex-col m-0 border-none p-0 outline-none">
               {previewHtml ? (
-                <div className="relative flex-1 overflow-auto bg-white">
-                  {/* Spacer sized to the SCALED footprint so the pane can scroll when
-                      zoomed in. The iframe itself keeps width/height = 100% (= the pane
-                      size) so its INTERNAL viewport never changes — zoom is a pure visual
-                      scale, the responsive layout (e.g. the mobile hamburger menu) stays
-                      identical at every zoom level and keeps working. */}
-                  <div
-                    aria-hidden
-                    style={{
-                      width: `${100 * previewZoom}%`,
-                      height: `${100 * previewZoom}%`,
-                      minWidth: "100%",
-                      minHeight: "100%",
-                    }}
-                  />
+                <div
+                  className={
+                    previewFullscreen
+                      ? "fixed inset-0 z-50 bg-white"
+                      : "relative flex-1 overflow-hidden bg-white"
+                  }
+                >
+                  {/* No zoom/scaling — the site always renders at its real, fixed size.
+                      The iframe simply fills its box and scrolls its own content. In
+                      full-screen mode the box is the whole window (a real web viewer). */}
                   <iframe
                     key={previewKey}
                     ref={previewIframeRef}
                     srcDoc={previewHtml}
-                    className="absolute top-0 left-0 border-0 bg-white"
-                    style={{
-                      width: "100%",
-                      height: "100%",
-                      transform: `scale(${previewZoom})`,
-                      transformOrigin: "top left",
-                    }}
+                    className="absolute inset-0 h-full w-full border-0 bg-white"
                     sandbox="allow-scripts allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox"
                     title="App Preview"
                   />
+                  {previewFullscreen && (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      className="absolute top-3 right-3 z-[60] shadow-lg"
+                      onClick={() => setPreviewFullscreen(false)}
+                      title="Sluit volledig scherm (Esc)"
+                      data-testid="button-exit-fullscreen"
+                    >
+                      <Minimize2 className="h-3.5 w-3.5 mr-1.5" />
+                      Sluiten
+                    </Button>
+                  )}
                   {previewErrors.length > 0 && !isStreaming && (
                     <div className="absolute bottom-4 left-4 right-4 z-10">
                       <div className="flex items-start gap-3 rounded-lg border border-destructive/40 bg-destructive/10 backdrop-blur px-4 py-3 shadow-lg">
