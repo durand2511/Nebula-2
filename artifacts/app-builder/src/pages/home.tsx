@@ -1,4 +1,4 @@
-import logoUrl from "../assets/nebula-logo.png";
+import logoUrl from "../assets/nebula-logo-home.png";
 
 export function Home() {
   return (
