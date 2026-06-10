@@ -1,0 +1,7 @@
+---
+import BaseLayout from '@layouts/BaseLayout.astro';
+import headInner from '@data/yoga-in-capelle-aan-den-ijssel.head.html?raw';
+import content from '@data/yoga-in-capelle-aan-den-ijssel.content.html?raw';
+import meta from '@data/yoga-in-capelle-aan-den-ijssel.meta.json';
+---
+<BaseLayout headInner={headInner} content={content} seo={meta.seo} bodyClass={meta.bodyClass} route={meta.route} />

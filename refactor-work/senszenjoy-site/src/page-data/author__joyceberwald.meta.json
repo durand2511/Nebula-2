@@ -1,0 +1,23 @@
+{
+ "route": "/author/joyceberwald/",
+ "bodyClass": "archive author author-joyceberwald author-4 wp-embed-responsive wp-theme-astra wp-child-theme-child-theme ehf-template-astra ehf-stylesheet-child-theme ast-desktop ast-separate-container ast-two-container ast-no-sidebar astra-4.13.1 ast-mobile-inherit-site-logo ast-inherit-site-logo-transparent ast-hfb-header ast-blog-grid-1 ast-blog-layout-1 ast-pagination-default ast-padded-layout ast-sticky-header-shrink ast-inherit-site-logo-sticky elementor-default elementor-kit-948 astra-addon-4.13.4",
+ "seo": {
+  "title": "Joyce Berwald - SensZenjoy",
+  "tags": [
+   {
+    "tag": "link",
+    "attrs": {
+     "rel": "canonical",
+     "href": "https://senszenjoy.nl/author/joyceberwald/"
+    }
+   },
+   {
+    "tag": "meta",
+    "attrs": {
+     "name": "robots",
+     "content": "max-image-preview:large"
+    }
+   }
+  ]
+ }
+}

@@ -1,0 +1,10 @@
+---
+// Gedeelde site-header (logo + navigatie), één keer gedefinieerd in plaats van
+// herhaald op elke pagina. De originele Elementor-markup blijft ongewijzigd;
+// alleen het actieve menu-item wordt per route gezet.
+import raw from './header.html?raw';
+import { markActive } from '@lib/markActive.js';
+const { route = '/' } = Astro.props;
+const html = markActive(raw, route);
+---
+<Fragment set:html={html} />

@@ -1,0 +1,7 @@
+---
+import BaseLayout from '@layouts/BaseLayout.astro';
+import headInner from '@data/het-geheim-van-innerlijke-kracht-voor-kinderen.head.html?raw';
+import content from '@data/het-geheim-van-innerlijke-kracht-voor-kinderen.content.html?raw';
+import meta from '@data/het-geheim-van-innerlijke-kracht-voor-kinderen.meta.json';
+---
+<BaseLayout headInner={headInner} content={content} seo={meta.seo} bodyClass={meta.bodyClass} route={meta.route} />

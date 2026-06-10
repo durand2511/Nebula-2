@@ -1,0 +1,37 @@
+---
+// Gedeelde paginalayout: HTML-skelet + gedeelde header/footer + per-pagina
+// <head> en inhoud. De originele opmaak (externe stylesheets + inline CSS)
+// wordt 1-op-1 als ruwe HTML ingevoegd, zodat het ontwerp identiek blijft.
+import Seo from '@components/Seo.astro';
+import Header from '@components/Header.astro';
+import Footer from '@components/Footer.astro';
+import beforePage from '@data/_shell/before.html?raw';
+import afterPage from '@data/_shell/after.html?raw';
+
+interface Props {
+  seo: { title?: string; tags?: { tag: 'meta' | 'link'; attrs: Record<string, string> }[] };
+  headInner?: string;
+  content?: string;
+  bodyClass?: string;
+  route?: string;
+}
+const { seo, headInner = '', content = '', bodyClass = '', route = '/' } = Astro.props;
+---
+<!doctype html>
+<html lang="nl-NL">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <Seo title={seo.title} tags={seo.tags} />
+    <Fragment set:html={headInner} />
+  </head>
+  <body class={bodyClass}>
+    <Fragment set:html={beforePage} />
+    <div class="hfeed site" id="page">
+      <Header route={route} />
+      <Fragment set:html={content} />
+      <Footer route={route} />
+    </div>
+    <Fragment set:html={afterPage} />
+  </body>
+</html>

@@ -1,0 +1,8 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "K0Kpku6xwc3hgjXBRKBWS"
+uri = "file://refactor-work/senszenjoy-site.zip"
+type = "unspecified"
+title = "SensZenjoy — opgeschoonde Astro-website (ZIP)"

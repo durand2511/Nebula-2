@@ -1,0 +1,7 @@
+---
+import BaseLayout from '@layouts/BaseLayout.astro';
+import headInner from '@data/category__yoga.head.html?raw';
+import content from '@data/category__yoga.content.html?raw';
+import meta from '@data/category__yoga.meta.json';
+---
+<BaseLayout headInner={headInner} content={content} seo={meta.seo} bodyClass={meta.bodyClass} route={meta.route} />

@@ -1,0 +1,135 @@
+{
+ "route": "/privacy-policy/",
+ "bodyClass": "wp-singular page-template-default page page-id-1168 wp-embed-responsive wp-theme-astra wp-child-theme-child-theme ehf-template-astra ehf-stylesheet-child-theme ast-desktop ast-page-builder-template ast-no-sidebar astra-4.13.1 ast-single-post ast-mobile-inherit-site-logo ast-inherit-site-logo-transparent ast-hfb-header ast-padded-layout ast-sticky-header-shrink ast-inherit-site-logo-sticky elementor-default elementor-kit-948 elementor-page elementor-page-1168 astra-addon-4.13.4",
+ "seo": {
+  "title": "Privacy Policy - SensZenjoy",
+  "tags": [
+   {
+    "tag": "link",
+    "attrs": {
+     "rel": "canonical",
+     "href": "https://senszenjoy.nl/privacy-policy/"
+    }
+   },
+   {
+    "tag": "meta",
+    "attrs": {
+     "name": "description",
+     "content": "Privacy policy SensZenjoy mindfulness training en yoga Privacy StatementInleidingSensZenjoy, gevestigd te Capelle aan den IJssel, kantoorhoudende aan de Paradijsselpark 75, 2904 PA Capelle aan den IJssel verwerkt persoonsgegevens van betrokkenen conform de Algemene Verordening Gegevensbescherming (AVG). Het waarborgen van de privacy van betrokkenen is daarbij van fundamenteel belang.Met ‘betrokkenen’ worden alle volgende natuurlijke personen waarvan"
+    }
+   },
+   {
+    "tag": "meta",
+    "attrs": {
+     "name": "robots",
+     "content": "max-image-preview:large"
+    }
+   },
+   {
+    "tag": "meta",
+    "attrs": {
+     "property": "og:locale",
+     "content": "nl_NL"
+    }
+   },
+   {
+    "tag": "meta",
+    "attrs": {
+     "property": "og:site_name",
+     "content": "SensZenjoy - Mindfulness en yoga voor vrouwen in de overgang in Capelle en Rotterdam"
+    }
+   },
+   {
+    "tag": "meta",
+    "attrs": {
+     "property": "og:type",
+     "content": "article"
+    }
+   },
+   {
+    "tag": "meta",
+    "attrs": {
+     "property": "og:title",
+     "content": "Privacy Policy - SensZenjoy"
+    }
+   },
+   {
+    "tag": "meta",
+    "attrs": {
+     "property": "og:description",
+     "content": "Privacy policy SensZenjoy mindfulness training en yoga Privacy StatementInleidingSensZenjoy, gevestigd te Capelle aan den IJssel, kantoorhoudende aan de Paradijsselpark 75, 2904 PA Capelle aan den IJssel verwerkt persoonsgegevens van betrokkenen conform de Algemene Verordening Gegevensbescherming (AVG). Het waarborgen van de privacy van betrokkenen is daarbij van fundamenteel belang.Met ‘betrokkenen’ worden alle volgende natuurlijke personen waarvan"
+    }
+   },
+   {
+    "tag": "meta",
+    "attrs": {
+     "property": "og:url",
+     "content": "https://senszenjoy.nl/privacy-policy/"
+    }
+   },
+   {
+    "tag": "meta",
+    "attrs": {
+     "property": "og:image",
+     "content": "https://senszenjoy.nl/wp-content/uploads/2024/04/senszenjoy.jpg"
+    }
+   },
+   {
+    "tag": "meta",
+    "attrs": {
+     "property": "og:image:secure_url",
+     "content": "https://senszenjoy.nl/wp-content/uploads/2024/04/senszenjoy.jpg"
+    }
+   },
+   {
+    "tag": "meta",
+    "attrs": {
+     "property": "article:published_time",
+     "content": "2021-03-10T11:51:52+00:00"
+    }
+   },
+   {
+    "tag": "meta",
+    "attrs": {
+     "property": "article:modified_time",
+     "content": "2026-03-25T14:43:37+00:00"
+    }
+   },
+   {
+    "tag": "meta",
+    "attrs": {
+     "property": "article:publisher",
+     "content": "https://www.facebook.com/joyceberwaldmindfulness/"
+    }
+   },
+   {
+    "tag": "meta",
+    "attrs": {
+     "name": "twitter:card",
+     "content": "summary_large_image"
+    }
+   },
+   {
+    "tag": "meta",
+    "attrs": {
+     "name": "twitter:title",
+     "content": "Privacy Policy - SensZenjoy"
+    }
+   },
+   {
+    "tag": "meta",
+    "attrs": {
+     "name": "twitter:description",
+     "content": "Privacy policy SensZenjoy mindfulness training en yoga Privacy StatementInleidingSensZenjoy, gevestigd te Capelle aan den IJssel, kantoorhoudende aan de Paradijsselpark 75, 2904 PA Capelle aan den IJssel verwerkt persoonsgegevens van betrokkenen conform de Algemene Verordening Gegevensbescherming (AVG). Het waarborgen van de privacy van betrokkenen is daarbij van fundamenteel belang.Met ‘betrokkenen’ worden alle volgende natuurlijke personen waarvan"
+    }
+   },
+   {
+    "tag": "meta",
+    "attrs": {
+     "name": "twitter:image",
+     "content": "https://senszenjoy.nl/wp-content/uploads/2024/04/senszenjoy.jpg"
+    }
+   }
+  ]
+ }
+}

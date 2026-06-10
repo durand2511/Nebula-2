@@ -1,0 +1,20 @@
+---
+// Herbruikbaar SEO-component. Rendert de per-pagina meta-tags (title,
+// description, robots, canonical, Open Graph) die uit de originele pagina's
+// zijn gehaald. Zo blijven de SEO-gegevens per pagina exact behouden.
+interface SeoTag {
+  tag: 'meta' | 'link';
+  attrs: Record<string, string>;
+}
+interface Props {
+  title?: string;
+  tags?: SeoTag[];
+}
+const { title = '', tags = [] } = Astro.props;
+---
+<title>{title}</title>
+{
+  tags.map((t) =>
+    t.tag === 'link' ? <link {...t.attrs} /> : <meta {...t.attrs} />
+  )
+}

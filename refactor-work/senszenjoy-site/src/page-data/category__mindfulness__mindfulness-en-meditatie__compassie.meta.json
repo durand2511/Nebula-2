@@ -1,0 +1,100 @@
+{
+ "route": "/category/mindfulness/mindfulness-en-meditatie/compassie/",
+ "bodyClass": "archive category category-compassie category-71 wp-embed-responsive wp-theme-astra wp-child-theme-child-theme ehf-template-astra ehf-stylesheet-child-theme ast-desktop ast-separate-container ast-two-container ast-no-sidebar astra-4.13.1 ast-mobile-inherit-site-logo ast-inherit-site-logo-transparent ast-hfb-header ast-blog-grid-1 ast-blog-layout-1 ast-pagination-default ast-padded-layout ast-sticky-header-shrink ast-inherit-site-logo-sticky elementor-default elementor-kit-948 astra-addon-4.13.4",
+ "seo": {
+  "title": "Compassie - SensZenjoy",
+  "tags": [
+   {
+    "tag": "link",
+    "attrs": {
+     "rel": "canonical",
+     "href": "https://senszenjoy.nl/category/mindfulness/mindfulness-en-meditatie/compassie/"
+    }
+   },
+   {
+    "tag": "meta",
+    "attrs": {
+     "name": "robots",
+     "content": "max-image-preview:large"
+    }
+   },
+   {
+    "tag": "meta",
+    "attrs": {
+     "property": "og:locale",
+     "content": "nl_NL"
+    }
+   },
+   {
+    "tag": "meta",
+    "attrs": {
+     "property": "og:site_name",
+     "content": "SensZenjoy - Mindfulness en yoga voor vrouwen in de overgang in Capelle en Rotterdam"
+    }
+   },
+   {
+    "tag": "meta",
+    "attrs": {
+     "property": "og:type",
+     "content": "article"
+    }
+   },
+   {
+    "tag": "meta",
+    "attrs": {
+     "property": "og:title",
+     "content": "Compassie - SensZenjoy"
+    }
+   },
+   {
+    "tag": "meta",
+    "attrs": {
+     "property": "og:url",
+     "content": "https://senszenjoy.nl/category/mindfulness/mindfulness-en-meditatie/compassie/"
+    }
+   },
+   {
+    "tag": "meta",
+    "attrs": {
+     "property": "og:image",
+     "content": "https://senszenjoy.nl/wp-content/uploads/2024/04/senszenjoy.jpg"
+    }
+   },
+   {
+    "tag": "meta",
+    "attrs": {
+     "property": "og:image:secure_url",
+     "content": "https://senszenjoy.nl/wp-content/uploads/2024/04/senszenjoy.jpg"
+    }
+   },
+   {
+    "tag": "meta",
+    "attrs": {
+     "property": "article:publisher",
+     "content": "https://www.facebook.com/joyceberwaldmindfulness/"
+    }
+   },
+   {
+    "tag": "meta",
+    "attrs": {
+     "name": "twitter:card",
+     "content": "summary_large_image"
+    }
+   },
+   {
+    "tag": "meta",
+    "attrs": {
+     "name": "twitter:title",
+     "content": "Compassie - SensZenjoy"
+    }
+   },
+   {
+    "tag": "meta",
+    "attrs": {
+     "name": "twitter:image",
+     "content": "https://senszenjoy.nl/wp-content/uploads/2024/04/senszenjoy.jpg"
+    }
+   }
+  ]
+ }
+}

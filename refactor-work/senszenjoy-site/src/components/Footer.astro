@@ -1,0 +1,9 @@
+---
+// Gedeelde site-footer, één keer gedefinieerd. Originele Astra-markup blijft
+// ongewijzigd; alleen het actieve menu-item wordt per route gezet.
+import raw from './footer.html?raw';
+import { markActive } from '@lib/markActive.js';
+const { route = '/' } = Astro.props;
+const html = markActive(raw, route);
+---
+<Fragment set:html={html} />

@@ -1,0 +1,7 @@
+---
+import BaseLayout from '@layouts/BaseLayout.astro';
+import headInner from '@data/privacy-policy.head.html?raw';
+import content from '@data/privacy-policy.content.html?raw';
+import meta from '@data/privacy-policy.meta.json';
+---
+<BaseLayout headInner={headInner} content={content} seo={meta.seo} bodyClass={meta.bodyClass} route={meta.route} />
