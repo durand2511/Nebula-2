@@ -707,7 +707,183 @@ Output nothing after the final code block — your opening sentences to the user
 // for the system prompt, conversation history, and the response.
 const MAX_FILE_CONTEXT_CHARS = 2_000_000;
 
-function buildFileContext(files: { path: string; content: string }[]): {
+// Imported WordPress/Elementor sites are enormous walls of minified markup
+// (30 pages × ~200KB = several MB). Feeding even ~2M chars of that raw HTML to a
+// reasoning model makes it burn its entire output-token budget "reading" the
+// bloat and emit NOTHING (observed: an edit request streamed for ~2.5 min and
+// produced zero tokens). So for imports we send a compact, DISTILLED brief of
+// each page instead of the raw HTML: titles, headings, key copy and the real
+// image URLs — everything the model needs to rebuild a clean single-page app.
+const IMPORTED_CONTEXT_MAX_CHARS = 180_000;
+const PER_PAGE_MAX_CHARS = 8_000;
+
+function htmlToText(html: string): string {
+  return html
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#0?39;|&#x27;|&apos;/gi, "'")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function collectTagText(re: RegExp, html: string, limit: number): string[] {
+  const out: string[] = [];
+  let m: RegExpExecArray | null;
+  re.lastIndex = 0;
+  while ((m = re.exec(html)) !== null && out.length < limit) {
+    const t = htmlToText(m[1]);
+    if (t) out.push(t);
+  }
+  return out;
+}
+
+function extractHeadings(html: string): string[] {
+  return collectTagText(/<h[1-3][^>]*>([\s\S]*?)<\/h[1-3]>/gi, html, 14);
+}
+
+function extractParagraphs(html: string): string[] {
+  return collectTagText(/<p[^>]*>([\s\S]*?)<\/p>/gi, html, 80)
+    .filter((t) => t.length >= 40)
+    .slice(0, 10)
+    .map((t) => (t.length > 320 ? t.slice(0, 320) + "…" : t));
+}
+
+function extractPageImages(html: string): string[] {
+  const urls = new Set<string>();
+  const add = (raw?: string) => {
+    if (!raw) return;
+    const first = raw.trim().split(/[\s,]+/)[0]; // srcset → first candidate URL
+    if (/^https?:\/\//i.test(first)) urls.add(first);
+  };
+  let m: RegExpExecArray | null;
+  const imgRe = /<img\b[^>]*?\bsrc=["']([^"']+)["']/gi;
+  while ((m = imgRe.exec(html)) !== null && urls.size < 12) add(m[1]);
+  const srcsetRe = /\bsrcset=["']([^"']+)["']/gi;
+  while ((m = srcsetRe.exec(html)) !== null && urls.size < 12) add(m[1]);
+  return [...urls].slice(0, 12);
+}
+
+function extractMetaDescription(html: string): string {
+  const tag = html.match(/<meta\b[^>]*\bname=["']description["'][^>]*>/i);
+  if (!tag) return "";
+  const c = tag[0].match(/content=["']([\s\S]*?)["']/i);
+  return c ? htmlToText(c[1]) : "";
+}
+
+function extractPageTitle(html: string, fallback: string): string {
+  const og = html.match(/<meta\b[^>]*\bproperty=["']og:title["'][^>]*>/i);
+  if (og) {
+    const c = og[0].match(/content=["']([\s\S]*?)["']/i);
+    if (c) return htmlToText(c[1]);
+  }
+  const t = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+  if (t) return htmlToText(t[1]);
+  return fallback;
+}
+
+function extractNavItems(indexHtml: string): string[] {
+  // Gather candidate menu containers (every <nav>, any <ul class/id="…menu…">,
+  // and the <header>), then pick whichever yields the most distinct, short link
+  // labels — i.e. the real primary menu, not a lone "skip to content" link.
+  const candidates: string[] = [];
+  let m: RegExpExecArray | null;
+  const navRe = /<nav\b[\s\S]*?<\/nav>/gi;
+  while ((m = navRe.exec(indexHtml)) !== null) candidates.push(m[0]);
+  const menuRe = /<ul\b[^>]*\b(?:class|id)=["'][^"']*menu[^"']*["'][\s\S]*?<\/ul>/gi;
+  while ((m = menuRe.exec(indexHtml)) !== null) candidates.push(m[0]);
+  const header = (indexHtml.match(/<header\b[\s\S]*?<\/header>/i) || [])[0];
+  if (header) candidates.push(header);
+
+  let best: string[] = [];
+  for (const block of candidates) {
+    const items: string[] = [];
+    const re = /<a\b[^>]*>([\s\S]*?)<\/a>/gi;
+    let a: RegExpExecArray | null;
+    while ((a = re.exec(block)) !== null && items.length < 24) {
+      const t = htmlToText(a[1]);
+      if (t && t.length >= 2 && t.length <= 40 && !items.includes(t)) items.push(t);
+    }
+    if (items.length > best.length) best = items;
+  }
+  return best.slice(0, 20);
+}
+
+// Build a distilled brief for an imported site: one compact section per page
+// plus the main navigation. All original content pages are returned as
+// "omitted" so the model is told to leave them alone and only rebuild
+// index.html (+ styles.css/script.js) into a clean single-page app.
+function buildImportedContext(files: { path: string; content: string }[]): {
+  context: string;
+  omitted: string[];
+} {
+  const htmlFiles = files.filter((f) => f.path.toLowerCase().endsWith(".html"));
+  if (htmlFiles.length === 0) return buildRawFileContext(files);
+
+  const index = htmlFiles.find((f) => f.path.toLowerCase() === "index.html");
+  const nav = index ? extractNavItems(index.content) : [];
+
+  const ordered = [...htmlFiles].sort((a, b) => {
+    if (a.path.toLowerCase() === "index.html") return -1;
+    if (b.path.toLowerCase() === "index.html") return 1;
+    return a.path.localeCompare(b.path);
+  });
+
+  const blocks: string[] = [];
+  const omitted: string[] = [];
+  let used = 0;
+  for (const f of ordered) {
+    // Protect every original page except index.html: the model rebuilds the SPA
+    // into index.html and must never overwrite the verbatim source pages.
+    if (f.path.toLowerCase() !== "index.html") omitted.push(f.path);
+
+    const title = extractPageTitle(f.content, f.path);
+    const desc = extractMetaDescription(f.content);
+    const headings = extractHeadings(f.content);
+    const paras = extractParagraphs(f.content);
+    const imgs = extractPageImages(f.content);
+
+    let block = `=== PAGE: ${f.path} ===\nTitle: ${title}\n`;
+    if (desc) block += `Description: ${desc}\n`;
+    if (headings.length) block += `Headings:\n${headings.map((h) => `- ${h}`).join("\n")}\n`;
+    if (paras.length) block += `Key copy:\n${paras.map((p) => `- ${p}`).join("\n")}\n`;
+    if (imgs.length) block += `Real images (reuse these EXACT URLs):\n${imgs.map((u) => `- ${u}`).join("\n")}\n`;
+    block = block.slice(0, PER_PAGE_MAX_CHARS);
+
+    if (used + block.length + 2 > IMPORTED_CONTEXT_MAX_CHARS) break;
+    blocks.push(block);
+    used += block.length + 2;
+  }
+
+  const navLine = nav.length ? `Main navigation: ${nav.join(" · ")}\n\n` : "";
+  const context =
+    `\n\nThis project was IMPORTED from a real website. What follows is a DISTILLED summary of every page (titles, headings, key copy, and the real image URLs) — NOT the raw HTML, which is far too large to include. ` +
+    `Use it to rebuild the site as ONE cohesive, beautiful single-page app, reusing the real image URLs EXACTLY as given. ` +
+    `Output ONLY index.html, styles.css and script.js. Do NOT emit code blocks for any of the original per-page .html files — they are kept as-is.\n\n` +
+    navLine +
+    blocks.join("\n\n");
+
+  return { context, omitted };
+}
+
+function buildFileContext(
+  files: { path: string; content: string }[],
+  imported = false,
+): {
+  context: string;
+  omitted: string[];
+} {
+  if (files.length === 0) return { context: "", omitted: [] };
+  if (imported) return buildImportedContext(files);
+  return buildRawFileContext(files);
+}
+
+function buildRawFileContext(files: { path: string; content: string }[]): {
   context: string;
   omitted: string[];
 } {
@@ -1308,8 +1484,9 @@ router.post("/projects/:projectId/messages", async (req, res) => {
       .where(eq(projectFiles.projectId, projectId));
 
     const isAdjustment = existingFiles.length > 0;
+    const isImported = (projectRows[0].description ?? "").startsWith("Imported from");
     const learningsContext = await buildLearningsContext();
-    const fileCtx = buildFileContext(existingFiles);
+    const fileCtx = buildFileContext(existingFiles, isImported);
     const systemPrompt = buildSystemPrompt(
       projectRows[0].name,
       fileCtx.context,
@@ -1452,8 +1629,9 @@ router.post("/projects/:projectId/messages/stream", json({ limit: "25mb" }), asy
       .where(eq(projectFiles.projectId, projectId));
 
     const isFirstBuild = existingFiles.length === 0;
+    const isImported = (projectRows[0].description ?? "").startsWith("Imported from");
     const learningsContext = await buildLearningsContext();
-    const fileCtx = buildFileContext(existingFiles);
+    const fileCtx = buildFileContext(existingFiles, isImported);
     const omittedPaths = new Set(fileCtx.omitted);
     const systemPrompt = buildSystemPrompt(
       projectRows[0].name,
