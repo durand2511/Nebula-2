@@ -504,18 +504,27 @@ function buildSystemPrompt(
   // asked", and pasting "improve the visuals" there would wrongly push a
   // redesign during a tiny follow-up edit.
   const preservationRules = `
-REDESIGN PRESERVATION CONTRACT — when rebuilding this site you may change ONLY the visual design, never the content or structure:
+REDESIGN PRESERVATION CONTRACT — when rebuilding this site you may change ONLY the visual design, never the content, structure, or media:
 PRESERVE EXACTLY (never change, remove, rename, reorder, or shorten):
 - Every navigation item and the menu structure, exactly as-is.
 - Every button and CTA — same label, same destination, same functionality.
 - Every section and content block — keep all of them, in the same order; nothing may be removed or reordered.
 - Every link and its destination (cross-page links become working in-app nav tabs/views — but none may disappear).
+- All forms and input fields — keep every field, label, and the form's purpose.
+- All footer content — links, address, contact details, and social icons.
 - The real content provided for each page below — use the REAL wording, headings and CTA labels exactly as given; never replace them with lorem ipsum or invented marketing copy, and never leave a section empty, stubbed, or "coming soon".
+RENDER ALL MEDIA FULLY — recreate it as the real, working thing, never a placeholder, a grey box, or a bare text link (use the exact embed/media URLs listed per page below; these real URLs are allowed exactly like the real image URLs):
+- YouTube / Vimeo → an embedded <iframe> player using the real embed URL (convert watch links to the /embed/<id> form); add allowfullscreen and allow="autoplay; encrypted-media; picture-in-picture; fullscreen".
+- Google Maps → an embedded <iframe> map using the real embed URL.
+- Video / audio files → native <video controls> / <audio controls> players pointing at the real source URL.
+- Images → loaded and displayed from their real absolute URLs.
+- Social links → keep the real URLs and show them as recognizable inline-SVG brand icons.
+- Any other iframe embed → render it inline with its real src.
 IMPROVE (this is ALL you may change): typography (cleaner, modern); spacing and layout consistency (uniform spacing, alignment, visual hierarchy on a real grid); color palette (refine and modernize but keep the brand recognizable); component styling for buttons, cards and inputs (same function, better design); mobile responsiveness.
 HARD RULES:
-- If a section, button, menu item, or link exists in the original, it MUST exist in the redesign.
-- Never simplify by removing — only simplify by cleaning up the visuals.
-- When in doubt: keep it, and make it look better.`;
+- If a section, button, menu item, link, form, or piece of media exists in the original, it MUST exist in the redesign, rendered fully.
+- Never simplify by removing, and never replace media with a placeholder — only simplify by cleaning up the visuals.
+- When in doubt: keep it, render it for real, and make it look better.`;
   const importedBlock =
     (importMode === "edit"
       ? `IMPORTED WEBSITE — INCREMENTAL EDIT (this site was imported and has ALREADY been rebuilt into the single-page app shown in the current project files below):
@@ -823,6 +832,72 @@ function extractPageImages(html: string): string[] {
   return [...urls].slice(0, 12);
 }
 
+// Capture rich media embeds (YouTube/Vimeo/Maps/Spotify iframes, <video>/<audio>
+// sources, and bare YouTube watch links) so a rebuild can recreate them as REAL
+// working players instead of dropping them or leaving a placeholder. Hidden
+// tracker iframes (GTM/analytics/zero-size) are skipped — they are not content.
+function extractEmbeds(html: string): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const isTracker = (s: string) =>
+    /googletagmanager|google-analytics|doubleclick|facebook\.com\/tr|hotjar|gtm\.js|connect\.facebook/i.test(
+      s,
+    ) ||
+    /visibility\s*:\s*hidden|display\s*:\s*none|(?:width|height)=["']?0\b/i.test(s);
+  const push = (kind: string, raw?: string) => {
+    if (!raw || out.length >= 12) return;
+    const url = raw.startsWith("//") ? "https:" + raw : raw;
+    if (!/^https?:\/\//i.test(url) || seen.has(url)) return;
+    seen.add(url);
+    out.push(`${kind}: ${url}`);
+  };
+  let m: RegExpExecArray | null;
+  const iframeRe = /<iframe\b([^>]*)>/gi;
+  while ((m = iframeRe.exec(html)) !== null && out.length < 12) {
+    const attrs = m[1];
+    if (isTracker(attrs)) continue;
+    const src = (attrs.match(/\bsrc=["']([^"']+)["']/i) || [])[1];
+    if (!src) continue;
+    let kind = "iframe embed";
+    if (/youtube(?:-nocookie)?\.com|youtu\.be/i.test(src)) kind = "YouTube video embed";
+    else if (/vimeo\.com/i.test(src)) kind = "Vimeo video embed";
+    else if (/\/maps\/embed|google\.[^/]+\/maps|maps\.google/i.test(src)) kind = "Google Maps embed";
+    else if (/spotify\.com/i.test(src)) kind = "Spotify embed";
+    else if (/soundcloud\.com/i.test(src)) kind = "SoundCloud audio embed";
+    push(kind, src);
+  }
+  const videoRe = /<video\b[^>]*\bsrc=["']([^"']+)["']/gi;
+  while ((m = videoRe.exec(html)) !== null) push("video file", m[1]);
+  const sourceRe = /<source\b[^>]*\bsrc=["']([^"']+\.(?:mp4|webm|ogg|mov)[^"']*)["']/gi;
+  while ((m = sourceRe.exec(html)) !== null) push("video file", m[1]);
+  const audioRe = /<audio\b[^>]*\bsrc=["']([^"']+)["']/gi;
+  while ((m = audioRe.exec(html)) !== null) push("audio file", m[1]);
+  const ytLinkRe =
+    /<a\b[^>]*\bhref=["'](https?:\/\/(?:www\.)?(?:youtube\.com\/watch\?[^"']+|youtu\.be\/[^"']+))["']/gi;
+  while ((m = ytLinkRe.exec(html)) !== null) push("YouTube video (embed as a player)", m[1]);
+  return out.slice(0, 12);
+}
+
+// Social profile links, one per platform, so the redesign keeps them and renders
+// recognizable brand icons instead of dropping the footer's social row.
+function extractSocialLinks(html: string): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const social =
+    /(facebook\.com|instagram\.com|twitter\.com|x\.com|linkedin\.com|youtube\.com|youtu\.be|tiktok\.com|pinterest\.|wa\.me|whatsapp\.com|t\.me|telegram|threads\.net)/i;
+  const re = /<a\b[^>]*\bhref=["'](https?:\/\/[^"']+)["']/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html)) !== null && out.length < 10) {
+    const url = m[1];
+    if (!social.test(url)) continue;
+    const platform = (url.match(social) || [])[1].toLowerCase().replace(/\.$/, "");
+    if (seen.has(platform)) continue;
+    seen.add(platform);
+    out.push(url);
+  }
+  return out;
+}
+
 function extractMetaDescription(html: string): string {
   const tag = html.match(/<meta\b[^>]*\bname=["']description["'][^>]*>/i);
   if (!tag) return "";
@@ -948,6 +1023,8 @@ function buildImportedContext(files: { path: string; content: string }[]): {
     const headings = extractHeadings(f.content);
     const paras = extractParagraphs(f.content);
     const ctas = extractCtas(f.content);
+    const embeds = extractEmbeds(f.content);
+    const socials = extractSocialLinks(f.content);
     const imgs = extractPageImages(f.content);
 
     let block = `=== PAGE: ${f.path} ===\nTitle: ${title}\n`;
@@ -955,6 +1032,8 @@ function buildImportedContext(files: { path: string; content: string }[]): {
     if (headings.length) block += `Headings (keep all of these):\n${headings.map((h) => `- ${h}`).join("\n")}\n`;
     if (paras.length) block += `Key copy (keep this real wording):\n${paras.map((p) => `- ${p}`).join("\n")}\n`;
     if (ctas.length) block += `Buttons / CTAs (recreate each one with this EXACT label and its action):\n${ctas.map((c) => `- ${c}`).join("\n")}\n`;
+    if (embeds.length) block += `Embedded media (recreate each as a REAL working embed/player — NEVER a link or placeholder; convert YouTube watch links to /embed/<id>):\n${embeds.map((e) => `- ${e}`).join("\n")}\n`;
+    if (socials.length) block += `Social links (keep these URLs, render as recognizable inline-SVG brand icons):\n${socials.map((s) => `- ${s}`).join("\n")}\n`;
     if (imgs.length) block += `Real images (reuse these EXACT URLs):\n${imgs.map((u) => `- ${u}`).join("\n")}\n`;
     block = block.slice(0, PER_PAGE_MAX_CHARS);
 
@@ -965,7 +1044,7 @@ function buildImportedContext(files: { path: string; content: string }[]): {
 
   const navLine = nav.length ? `Main navigation: ${nav.join(" · ")}\n\n` : "";
   const context =
-    `\n\nThis project was IMPORTED from a real website. What follows is a DISTILLED summary of every page (titles, headings, key copy, buttons/CTAs, and the real image URLs) — NOT the raw HTML, which is far too large to include. ` +
+    `\n\nThis project was IMPORTED from a real website. What follows is a DISTILLED summary of every page (titles, headings, key copy, buttons/CTAs, embedded media, social links, and the real image URLs) — NOT the raw HTML, which is far too large to include. ` +
     `Use it to rebuild the site as ONE cohesive, beautiful single-page app, reusing the real image URLs EXACTLY as given. ` +
     `Follow the REDESIGN PRESERVATION CONTRACT strictly: recreate EVERY page as a working nav view, and keep every heading, every line of copy, every button/CTA (same label), and every link — improve only the visual design, never drop or shorten content. ` +
     `Output ONLY index.html, styles.css and script.js. Do NOT emit code blocks for any of the original per-page .html files — they are kept as-is.\n\n` +

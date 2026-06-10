@@ -1104,7 +1104,9 @@ export function ProjectWorkspace() {
                     ref={previewIframeRef}
                     srcDoc={previewHtml}
                     className="absolute inset-0 h-full w-full border-0 bg-white"
-                    sandbox="allow-scripts allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox"
+                    sandbox="allow-scripts allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-presentation"
+                    allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
+                    allowFullScreen
                     title="App Preview"
                   />
                   {previewFullscreen && (

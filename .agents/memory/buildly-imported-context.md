@@ -53,6 +53,22 @@ image URLs, plus the main nav) drops the payload to ~64K chars, leaving room to 
   text is a claim the data can't satisfy. Structure (nav/buttons/sections/links) IS
   fully captured and can be promised; full body copy cannot.
 
+**Rendering rich media in rebuilt imports:**
+- For media (YouTube/Vimeo/Maps/Spotify/SoundCloud iframes, video/audio files, bare
+  YouTube watch links, social profile links) to survive a rebuild, the distilled
+  brief MUST carry the real embed URLs — the model can't recreate what it can't see.
+  `extractEmbeds` + `extractSocialLinks` feed them per-page; the contract's "RENDER
+  ALL MEDIA FULLY" section authorizes those real URLs (same exception as real images).
+- The preview iframe is `srcDoc` + sandbox WITHOUT `allow-same-origin` (opaque origin
+  is the core security boundary — never add it). To make embeds actually PLAY, the
+  fix is the iframe `allow` attribute (`autoplay; encrypted-media; picture-in-picture;
+  fullscreen`) + `allowFullScreen` + sandbox token `allow-presentation` — these
+  delegate feature permissions to subframes without granting same-origin. Keep the
+  `allow` list minimal: accelerometer/gyroscope/clipboard-write are NOT needed for
+  YouTube/Maps and just widen the capability surface for untrusted generated code.
+- External embeds load in a no-same-origin sandbox because the nested frame inherits
+  `allow-scripts`; rendering still depends on the provider's own X-Frame-Options/CSP.
+
 **How to apply:**
 - Detection: `project.description` starts with `"Imported from"` (same convention the
   frontend uses for `isImported`). Both the stream route and the non-stream messages
