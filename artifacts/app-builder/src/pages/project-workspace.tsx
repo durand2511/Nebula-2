@@ -27,7 +27,9 @@ import {
   ImagePlus,
   Maximize2,
   Minimize2,
+  Download,
 } from "lucide-react";
+import JSZip from "jszip";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -275,7 +277,7 @@ export function ProjectWorkspace() {
   const [prompt, setPrompt] = useState("");
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"code" | "preview">("preview");
-  const [showCode, setShowCode] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
   const [previewKey, setPreviewKey] = useState(0);
   // Full-screen "web viewer" for the preview. There is no zoom/scaling: the site always
   // renders at its real, fixed size (exactly how it looks in a real browser). This toggle
@@ -435,7 +437,6 @@ export function ProjectWorkspace() {
       setIsStreaming(true);
       setPhaseIndex(0);
       setBuildError(null);
-      setShowCode(false);
       setPendingUser(messageContent);
       setPendingImages(images);
       pendingBaseRef.current = messagesLenRef.current;
@@ -610,6 +611,31 @@ export function ProjectWorkspace() {
 
   const activeFile = files?.find((f) => f.path === selectedFile);
   const isImported = (project?.description ?? "").startsWith("Imported from");
+
+  const handleDownload = useCallback(async () => {
+    if (!files || files.length === 0) return;
+    setIsDownloading(true);
+    try {
+      const zip = new JSZip();
+      files.forEach((f) => zip.file(f.path, f.content ?? ""));
+      const blob = await zip.generateAsync({ type: "blob" });
+      const safeName =
+        (project?.name ?? "project")
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/^-+|-+$/g, "") || "project";
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${safeName}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } finally {
+      setIsDownloading(false);
+    }
+  }, [files, project?.name]);
   const previewHtml = buildPreviewHtml(files, isImported, previewPage);
 
   // Conversational narration: the model speaks first (before any "FILE:" block),
@@ -929,15 +955,13 @@ export function ProjectWorkspace() {
                   <MonitorPlay className="h-4 w-4 mr-2" />
                   Preview
                 </TabsTrigger>
-                {showCode && (
-                  <TabsTrigger
-                    value="code"
-                    className="data-[state=active]:bg-transparent data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:shadow-none rounded-none px-2 py-3 h-12 text-muted-foreground data-[state=active]:text-foreground"
-                  >
-                    <Code2 className="h-4 w-4 mr-2" />
-                    Code
-                  </TabsTrigger>
-                )}
+                <TabsTrigger
+                  value="code"
+                  className="data-[state=active]:bg-transparent data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:shadow-none rounded-none px-2 py-3 h-12 text-muted-foreground data-[state=active]:text-foreground"
+                >
+                  <Code2 className="h-4 w-4 mr-2" />
+                  Code
+                </TabsTrigger>
               </TabsList>
 
               <div className="ml-auto flex items-center gap-1">
@@ -965,34 +989,24 @@ export function ProjectWorkspace() {
                     Refresh
                   </Button>
                 )}
-                {previewHtml &&
-                  (showCode ? (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-8 text-muted-foreground hover:text-foreground"
-                      onClick={() => {
-                        setShowCode(false);
-                        setActiveTab("preview");
-                      }}
-                    >
-                      <Code2 className="h-3.5 w-3.5 mr-1.5" />
-                      Verberg broncode
-                    </Button>
-                  ) : (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-8 text-muted-foreground hover:text-foreground"
-                      onClick={() => {
-                        setShowCode(true);
-                        setActiveTab("code");
-                      }}
-                    >
-                      <Code2 className="h-3.5 w-3.5 mr-1.5" />
-                      Bekijk broncode
-                    </Button>
-                  ))}
+                {files && files.length > 0 && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 text-muted-foreground hover:text-foreground"
+                    onClick={handleDownload}
+                    disabled={isDownloading}
+                    title="Download de code als ZIP-bestand"
+                    data-testid="button-download"
+                  >
+                    {isDownloading ? (
+                      <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                    ) : (
+                      <Download className="h-3.5 w-3.5 mr-1.5" />
+                    )}
+                    Download code
+                  </Button>
+                )}
               </div>
             </div>
 
