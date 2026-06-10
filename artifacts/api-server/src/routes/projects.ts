@@ -491,7 +491,26 @@ async function crawlSite(
   return { pages, finalUrl: home.finalUrl };
 }
 
-function buildSystemPrompt(projectName: string, fileContext: string, learningsContext: string): string {
+function buildSystemPrompt(
+  projectName: string,
+  fileContext: string,
+  learningsContext: string,
+  importMode: "none" | "rebuild" | "edit" = "none",
+): string {
+  const importedBlock =
+    importMode === "edit"
+      ? `IMPORTED WEBSITE — INCREMENTAL EDIT (this site was imported and has ALREADY been rebuilt into the single-page app shown in the current project files below):
+- Apply ONLY the specific change the user asks for. Preserve the existing layout, structure, sections, navigation, copy, and styling EXACTLY as they are — do NOT redesign, re-theme, restructure, or regenerate the page, and do not touch anything the user did not mention. A full rebuild here is a FAILURE.
+- The current files already reuse the site's REAL image URLs (absolute https URLs); keep them as-is — the "no external image URLs" rule does NOT apply to image URLs already present in these files. If the change needs a new image, prefer one already in the files; otherwise use inline SVG/emoji per the runtime rules.
+- Output ONLY the file(s) you actually modify; leave every other file untouched.`
+      : `IMPORTED WEBSITE ASSETS (applies ONLY when the current project files below are HTML imported/crawled from a real website):
+- That imported HTML contains the site's REAL images as ABSOLUTE URLs (e.g. <img src="https://…">, <source srcset="https://…">, and CSS background-image: url(https://…)). These are genuine, working assets from the source site — NOT random, placeholder, or hallucinated URLs — so the "no external image URLs" runtime rule does NOT apply to them. REUSE them.
+- Pull the most relevant real images out of the imported HTML and place them tastefully into your new design so the result feels like ONE cohesive whole with the original site: a hero/banner image at the top, supporting photos inside cards/sections, a gallery where it fits, and the site's real logo image in the header (this is the one case where an actual logo image is expected instead of a text wordmark).
+- Copy each image URL EXACTLY as it appears in the imported HTML (keep the full absolute URL). Never invent, guess, shorten, or alter an image URL, and never swap in a stock/CDN URL. If you need an image that is not present in the imported HTML, fall back to inline SVG/emoji per the runtime rules rather than guessing a URL.
+- Make every reused image responsive and on-grid: max-width:100%, height:auto, object-fit:cover where cropping helps, sensible aspect ratios, and meaningful alt text. Style the surrounding layout with the design system so the photos feel intentionally composed, not pasted in. Place images like a real designer: a strong hero image, balanced photo/text sections, an occasional gallery or image grid — never one lonely picture and never a wall of images.
+- REBUILD THE WHOLE SITE, NOT JUST THE HOMEPAGE. Recreate the imported site as ONE cohesive multi-view single-page app inside index.html. Read the site's MAIN navigation menu from the imported HTML and create a working nav tab/view for EVERY primary section (e.g. Home, each class/service page, About, Pricing/Rates, Blog, Contact). Switch views client-side (hash routing or show/hide sections) — every nav tab must actually work. Building only a home page is a FAILURE.
+- FULLY DESIGN EACH TAB, not only the home view. Every tab gets real headings, real copy taken from that section's imported page, and the relevant real images from that page, laid out on the grid with the design system. Never leave a tab empty, stubbed, "coming soon", or visibly thinner than the others — each view must look finished on its own. The home/landing view is just one of several complete views.
+- If a primary nav section's page is NOT present in the files below (omitted for size), STILL create its tab and fill it with tasteful, on-brand content and a relevant reused image consistent with the rest of the site — do not drop the tab or leave it blank.`;
   return `You are Buildly, an expert AI web app builder. Generate beautiful, fully-functional web apps for a project called "${projectName}", with clean, well-structured, modular code.${learningsContext}
 
 You build COMPLETE, production-ready web apps — never demos, prototypes, or placeholders.
@@ -503,14 +522,7 @@ REFERENCE IMAGES (when the user attaches one or more images):
 - If the reference's palette/typography conflicts with the BUILDLY DESIGN SYSTEM defaults below, the REFERENCE WINS for palette, type, and overall styling (the user is explicitly asking for that look); still keep the execution-quality, layout-discipline, and runtime-robustness rules.
 - Recreate the design from scratch in your own clean code; never hotlink the reference image or any external asset URLs from it.
 
-IMPORTED WEBSITE ASSETS (applies ONLY when the current project files below are HTML imported/crawled from a real website):
-- That imported HTML contains the site's REAL images as ABSOLUTE URLs (e.g. <img src="https://…">, <source srcset="https://…">, and CSS background-image: url(https://…)). These are genuine, working assets from the source site — NOT random, placeholder, or hallucinated URLs — so the "no external image URLs" runtime rule does NOT apply to them. REUSE them.
-- Pull the most relevant real images out of the imported HTML and place them tastefully into your new design so the result feels like ONE cohesive whole with the original site: a hero/banner image at the top, supporting photos inside cards/sections, a gallery where it fits, and the site's real logo image in the header (this is the one case where an actual logo image is expected instead of a text wordmark).
-- Copy each image URL EXACTLY as it appears in the imported HTML (keep the full absolute URL). Never invent, guess, shorten, or alter an image URL, and never swap in a stock/CDN URL. If you need an image that is not present in the imported HTML, fall back to inline SVG/emoji per the runtime rules rather than guessing a URL.
-- Make every reused image responsive and on-grid: max-width:100%, height:auto, object-fit:cover where cropping helps, sensible aspect ratios, and meaningful alt text. Style the surrounding layout with the design system so the photos feel intentionally composed, not pasted in. Place images like a real designer: a strong hero image, balanced photo/text sections, an occasional gallery or image grid — never one lonely picture and never a wall of images.
-- REBUILD THE WHOLE SITE, NOT JUST THE HOMEPAGE. Recreate the imported site as ONE cohesive multi-view single-page app inside index.html. Read the site's MAIN navigation menu from the imported HTML and create a working nav tab/view for EVERY primary section (e.g. Home, each class/service page, About, Pricing/Rates, Blog, Contact). Switch views client-side (hash routing or show/hide sections) — every nav tab must actually work. Building only a home page is a FAILURE.
-- FULLY DESIGN EACH TAB, not only the home view. Every tab gets real headings, real copy taken from that section's imported page, and the relevant real images from that page, laid out on the grid with the design system. Never leave a tab empty, stubbed, "coming soon", or visibly thinner than the others — each view must look finished on its own. The home/landing view is just one of several complete views.
-- If a primary nav section's page is NOT present in the files below (omitted for size), STILL create its tab and fill it with tasteful, on-brand content and a relevant reused image consistent with the rest of the site — do not drop the tab or leave it blank.
+${importedBlock}
 
 RUNTIME CONSTRAINTS (the app runs sandboxed in a browser iframe — respect these exactly):
 - Vanilla JavaScript only (ES modules / plain JS). NO npm, NO build step, NO JSX/TSX, NO frameworks that need compiling.
@@ -814,16 +826,63 @@ function extractNavItems(indexHtml: string): string[] {
   return best.slice(0, 20);
 }
 
-// Build a distilled brief for an imported site: one compact section per page
-// plus the main navigation. All original content pages are returned as
-// "omitted" so the model is told to leave them alone and only rebuild
-// index.html (+ styles.css/script.js) into a clean single-page app.
+// True once an imported site has been rebuilt into a standalone SPA. A raw
+// WordPress import is .html-only, so the presence of any non-HTML editable file
+// (styles.css / script.js produced by the first "make it prettier" pass) means
+// later requests are INCREMENTAL edits — feed the SPA files raw and change only
+// what's asked, never re-distill and rebuild from scratch.
+function importedSpaRebuilt(files: { path: string; content: string }[]): boolean {
+  const htmlFiles = files.filter((f) => f.path.toLowerCase().endsWith(".html"));
+  if (htmlFiles.length === 0) return false;
+  const protectedSet = new Set(
+    htmlFiles
+      .filter((f) => f.path.toLowerCase() !== "index.html")
+      .map((f) => f.path.toLowerCase()),
+  );
+  return files.some(
+    (f) => !protectedSet.has(f.path.toLowerCase()) && !f.path.toLowerCase().endsWith(".html"),
+  );
+}
+
+// Build the file context for an imported site. First pass = a DISTILLED brief of
+// every page (titles, headings, key copy, real image URLs) so the model rebuilds
+// a clean single-page app without drowning in raw HTML. After the SPA exists,
+// switch to an INCREMENTAL edit that feeds the SPA files raw. Either way every
+// original content page (all .html except index.html) is returned as "omitted"
+// so it is preserved verbatim for WXR re-export.
 function buildImportedContext(files: { path: string; content: string }[]): {
   context: string;
   omitted: string[];
 } {
   const htmlFiles = files.filter((f) => f.path.toLowerCase().endsWith(".html"));
   if (htmlFiles.length === 0) return buildRawFileContext(files);
+
+  // The original imported content pages (every .html except index.html) are
+  // always protected so they are preserved verbatim for WXR re-export.
+  const protectedPaths = htmlFiles
+    .filter((f) => f.path.toLowerCase() !== "index.html")
+    .map((f) => f.path);
+  const protectedSet = new Set(protectedPaths.map((p) => p.toLowerCase()));
+  const editableFiles = files.filter((f) => !protectedSet.has(f.path.toLowerCase()));
+
+  // On every edit AFTER the first rebuild we feed the existing SPA files raw and
+  // tell the model to change ONLY what the user asked for (see importedSpaRebuilt).
+  if (importedSpaRebuilt(files)) {
+    let used = 0;
+    const blocks: string[] = [];
+    for (const f of editableFiles) {
+      const block = `--- ${f.path} ---\n${f.content}`;
+      if (used + block.length + 2 > MAX_FILE_CONTEXT_CHARS) continue;
+      blocks.push(block);
+      used += block.length + 2;
+    }
+    const context =
+      `\n\nThis project was imported from a real website and has ALREADY been rebuilt into the single-page app below. ` +
+      `Make ONLY the specific change the user asks for. Keep the existing layout, structure, sections, copy and styling exactly as they are — edit just the part that needs to change. ` +
+      `Do NOT redesign, re-theme, or regenerate the whole page, and do NOT change anything the user did not ask about. Output only the file(s) you actually modify.\n\n` +
+      `Current project files (modify these as needed):\n${blocks.join("\n\n")}`;
+    return { context, omitted: protectedPaths };
+  }
 
   const index = htmlFiles.find((f) => f.path.toLowerCase() === "index.html");
   const nav = index ? extractNavItems(index.content) : [];
@@ -1485,12 +1544,18 @@ router.post("/projects/:projectId/messages", async (req, res) => {
 
     const isAdjustment = existingFiles.length > 0;
     const isImported = (projectRows[0].description ?? "").startsWith("Imported from");
+    const importMode = !isImported
+      ? "none"
+      : importedSpaRebuilt(existingFiles)
+        ? "edit"
+        : "rebuild";
     const learningsContext = await buildLearningsContext();
     const fileCtx = buildFileContext(existingFiles, isImported);
     const systemPrompt = buildSystemPrompt(
       projectRows[0].name,
       fileCtx.context,
       learningsContext,
+      importMode,
     );
 
     const aiContent =
@@ -1630,6 +1695,11 @@ router.post("/projects/:projectId/messages/stream", json({ limit: "25mb" }), asy
 
     const isFirstBuild = existingFiles.length === 0;
     const isImported = (projectRows[0].description ?? "").startsWith("Imported from");
+    const importMode = !isImported
+      ? "none"
+      : importedSpaRebuilt(existingFiles)
+        ? "edit"
+        : "rebuild";
     const learningsContext = await buildLearningsContext();
     const fileCtx = buildFileContext(existingFiles, isImported);
     const omittedPaths = new Set(fileCtx.omitted);
@@ -1637,6 +1707,7 @@ router.post("/projects/:projectId/messages/stream", json({ limit: "25mb" }), asy
       projectRows[0].name,
       fileCtx.context,
       learningsContext,
+      importMode,
     );
 
     send({

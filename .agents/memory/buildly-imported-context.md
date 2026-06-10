@@ -18,6 +18,26 @@ when the input is large enough to consume that budget during reasoning. Distilla
 (per-page title, meta description, h1–h3 headings, key paragraphs, real absolute
 image URLs, plus the main nav) drops the payload to ~64K chars, leaving room to write.
 
+**Two phases — distill once, then edit incrementally:**
+- A raw WP import is `.html`-only. The FIRST edit ("make it prettier") runs in
+  `rebuild` mode: distilled brief + "rebuild as one SPA" + output only
+  index.html/styles.css/script.js. After that the project has standalone css/js.
+- EVERY later edit must be `edit` mode: feed the existing SPA files RAW (~25KB) and
+  say "change only what's asked, do not redesign". Phase is decided by
+  `importedSpaRebuilt(files)` = any non-`.html` editable file (css/js) exists.
+- **Why:** without this, two forces forced a full rebuild on every follow-up:
+  (1) buildImportedContext kept re-distilling + saying "rebuild the whole site";
+  (2) buildSystemPrompt ALWAYS shipped a hardcoded "IMPORTED WEBSITE ASSETS" block
+  with "REBUILD THE WHOLE SITE… Building only a home page is a FAILURE". The system
+  prompt is now phase-aware: `importMode` none|rebuild|edit swaps that block for an
+  INCREMENTAL-EDIT block in `edit` mode. Both routes compute importMode the same way.
+- **Edge case (accepted, low-risk):** if a first rebuild ever emits only index.html
+  (no css/js), the next edit is misclassified as `rebuild` and regenerates once —
+  self-corrects after css/js exist. Don't "fix" this with an elementor/`wp-content`
+  HTML fingerprint: rebuilt index.html legitimately reuses `wp-content` image URLs,
+  and non-Elementor imports lack the marker, so a fingerprint would misclassify a
+  fresh raw import as already-rebuilt (skipping distillation) — a worse regression.
+
 **How to apply:**
 - Detection: `project.description` starts with `"Imported from"` (same convention the
   frontend uses for `isImported`). Both the stream route and the non-stream messages
