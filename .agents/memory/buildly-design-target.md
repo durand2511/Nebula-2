@@ -19,26 +19,40 @@ generated output ("dit moet de ai app builder maken ... geen ai slop").
 `DESIGN` / `DESIGN PRINCIPLES` section), then restart the API server and verify e2e.
 Only touch Buildly's own UI if the user explicitly says the builder interface itself.
 
-**Current target = a FIXED "Berlin design studio" house style (Linear/Vercel/Resend/
-Raycast), under a "think like a world-class designer / premium $10k product" framing.**
-The user pasted an EXACT spec the prompt now encodes verbatim as `BUILDLY DESIGN
-SYSTEM`: page bg #0a0a0a, default text #ffffff, 800px centered, 48px 24px padding,
-Inter. Inputs are FLAT (transparent, NO border except a 2px rgba(255,255,255,0.15)
-bottom border, radius 0, focus -> white bottom border, no glow/shadow). Tiny uppercase
-dim labels (11px/0.1em/rgba .4). Primary button = solid white bg + black uppercase
-text, radius 4px, hover opacity .85. Secondary = transparent + thin white outline.
-Cards = rgba(255,255,255,0.04) bg, 1px rgba .08 border, radius 12px, 32px pad. Metric
-= 48px/300 number + tiny uppercase label, no card. STRICT: zero gradients, zero
-box-shadows, zero rounded inputs, zero colored buttons.
+**Current target = a FIXED LIGHT, warm editorial house style** encoded verbatim in the
+prompt as `BUILDLY DESIGN SYSTEM`, under a "think like a world-class designer / premium
+$10k product" framing. Core tokens: page bg #f7f4ee (warm off-white), white cards
+#ffffff, soft surface #f3ede4, ink text #241f1a, earthy border rgba(70,58,45,0.12),
+Inter. Cards = white, 1px subtle border, radius 12px, 24–32px pad, ONE very subtle
+shadow. STRICT: LIGHT by default (NEVER dark unless the user explicitly asks for dark
+mode), zero gradients, no heavy/colored shadows, subtle inputs (radius 4px or
+bottom-border only), restrained earthy accents, generous whitespace.
+**Why:** earlier dark spec (#0a0a0a "Berlin" flat-minimal) was REVERSED — the user now
+wants a light, serene, warm editorial / high-end wellness look; this default also lives
+in replit.md user preferences. Do not reintroduce the dark default.
 **Honors explicit per-app override:** prompt says "do not invent a different palette
-unless the user explicitly asks." (This locked spec superseded the brief, principle-
-driven 'pick your own palette' phase, which itself superseded an earlier dark-green
-system — the user keeps tightening toward this exact minimal look.)
-**Why:** user said default inputs/forms looked "generic and cheap"; wants the exact
-flat-minimal aesthetic, not AI-generic.
+unless the user explicitly asks or provides a reference image to match" (reference wins
+for palette/type).
 **How to verify:** generate an app, then read the saved styles.css from the
 `project_files` table (cols: project_id, path, content, language) and confirm the
-exact values; the preview screenshot also shows the dark flat look.
+exact values; the preview screenshot also shows the light warm-editorial look.
+
+## Primary nav = a floating "dynamic island" (premium signature)
+- The generation prompt's NAVIGATION section mandates the primary nav be a floating,
+  centered, pill-shaped "dynamic island" (fixed near top, over content, never a
+  full-width flat bar) with a sliding magic-move active indicator and a subtle
+  compact-on-scroll behavior; mobile collapses to a compact pill that expands downward.
+- Scoped to NEW builds + full imported REBUILDS only. On an EDIT it must NOT apply —
+  keep the existing app's nav unless the user explicitly asks to redesign it (otherwise
+  it collides with CONSISTENCY-ON-EDITS and would redesign nav on tiny edits).
+- **Why:** user wanted the menu to be "een dynamisch eiland wat heel mooi is" so the
+  generation "feels like a premium product".
+- This floating nav is the SINGLE sanctioned exception to the house style's
+  no-glass/no-blur rule (translucent frosted pill with backdrop-filter). Nothing else
+  may use blur. If you ever relax/remove that no-blur rule elsewhere, keep this carve-out
+  explicit so the model doesn't get a contradictory instruction.
+- For imported rebuilds the island must still hold EVERY preserved nav item (scroll
+  horizontally or a "More" overflow if too many) — never drop items to fit the pill.
 
 ## Auth only when the user asks
 - The generation prompt must NOT add login / sign-up / accounts / auth by default —
