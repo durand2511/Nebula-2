@@ -5,5 +5,6 @@
 - [Buildly learning loop](buildly-learning-loop.md) — distills global lessons from user adjustments (not first build), injects into every future generation's system prompt; fire-and-forget + injection-safety gate.
 - [Buildly reference images](buildly-reference-images.md) — attach images as vision style brief; not persisted/re-sent, image-only allowed via synced fallback prompt, body limit scoped to stream route only.
 - [Buildly URL import](buildly-url-import.md) — AI Editor imports a site by URL; must rewrite assets absolute, block SSRF rebinding at connect-time (undici dispatcher), and strip on*/javascript: for the allow-scripts iframe.
+- [Buildly code viewer](buildly-code-viewer.md) — Code tab formats stored content display-only (Prettier+highlight.js+line gutter); imports are stored minified; never write formatted output back or into the preview.
 - [WP→Astro refactor](wp-to-astro-refactor.md) — share header/footer/shell/SEO not CSS; re-inject nav active-state per route & verify vs originals; keep canonical absolute.
 - [zip CLI broken](env-zip-tool.md) — the `zip` command wrapper fails to create archives ("no such file or directory"); use python3 zipfile instead.

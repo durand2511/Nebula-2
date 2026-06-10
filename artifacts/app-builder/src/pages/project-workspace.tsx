@@ -34,6 +34,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { CodeViewer } from "@/components/code-viewer";
 import {
   fileToReferenceImage,
   MAX_ATTACHED_IMAGES,
@@ -1054,11 +1055,7 @@ export function ProjectWorkspace() {
                       {activeFile.path}
                     </div>
                     <div className="flex-1 min-h-0 overflow-auto">
-                      <div className="p-4 min-w-max">
-                        <pre className="text-[13px] leading-relaxed font-mono text-gray-300">
-                          <code>{activeFile.content}</code>
-                        </pre>
-                      </div>
+                      <CodeViewer path={activeFile.path} content={activeFile.content} />
                     </div>
                   </>
                 ) : (
