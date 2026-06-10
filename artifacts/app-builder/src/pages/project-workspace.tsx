@@ -277,10 +277,11 @@ export function ProjectWorkspace() {
   const [activeTab, setActiveTab] = useState<"code" | "preview">("preview");
   const [showCode, setShowCode] = useState(false);
   const [previewKey, setPreviewKey] = useState(0);
-  // Fit-to-pane zoom for the preview. The iframe element box always fills the pane
-  // (width/height = 100/zoom %, then scaled by zoom), so what actually changes is the
-  // viewport WIDTH the site renders at: >1 = magnified/narrower, <1 = shrunk/wider.
-  // This lets the user inspect how the layout composes at different effective widths.
+  // Pure VISUAL zoom for the preview. The iframe keeps width/height = 100% (= the pane
+  // size) so its internal viewport — and therefore the responsive layout — is CONSTANT;
+  // we only apply transform: scale(previewZoom). A spacer in the preview pane defines the
+  // scrollable footprint when zoomed in. This intentionally does NOT reflow the site, so
+  // the mobile hamburger menu keeps working at every zoom level.
   const [previewZoom, setPreviewZoom] = useState(1);
   // For imported multi-page sites: which page the preview currently shows (null = index).
   const [previewPage, setPreviewPage] = useState<string | null>(null);
@@ -1078,15 +1079,29 @@ export function ProjectWorkspace() {
             {/* Preview Tab */}
             <TabsContent value="preview" className="flex-1 flex flex-col m-0 border-none p-0 outline-none">
               {previewHtml ? (
-                <div className="relative flex-1 overflow-hidden bg-white">
+                <div className="relative flex-1 overflow-auto bg-white">
+                  {/* Spacer sized to the SCALED footprint so the pane can scroll when
+                      zoomed in. The iframe itself keeps width/height = 100% (= the pane
+                      size) so its INTERNAL viewport never changes — zoom is a pure visual
+                      scale, the responsive layout (e.g. the mobile hamburger menu) stays
+                      identical at every zoom level and keeps working. */}
+                  <div
+                    aria-hidden
+                    style={{
+                      width: `${100 * previewZoom}%`,
+                      height: `${100 * previewZoom}%`,
+                      minWidth: "100%",
+                      minHeight: "100%",
+                    }}
+                  />
                   <iframe
                     key={previewKey}
                     ref={previewIframeRef}
                     srcDoc={previewHtml}
                     className="absolute top-0 left-0 border-0 bg-white"
                     style={{
-                      width: `${100 / previewZoom}%`,
-                      height: `${100 / previewZoom}%`,
+                      width: "100%",
+                      height: "100%",
                       transform: `scale(${previewZoom})`,
                       transformOrigin: "top left",
                     }}
