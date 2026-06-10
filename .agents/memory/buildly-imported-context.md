@@ -83,3 +83,23 @@ image URLs, plus the main nav) drops the payload to ~64K chars, leaving room to 
 - Budget caps: `IMPORTED_CONTEXT_MAX_CHARS` (~180K total) / `PER_PAGE_MAX_CHARS` (~8K).
 - Nav extraction picks the densest `<nav>` / `<ul …menu…>` / `<header>` block (most
   distinct short link labels) so it grabs the real menu, not a skip-to-content link.
+
+## Rebuild output contract & importMode scoping
+- `importMode` (in `buildSystemPrompt`) has THREE values: `edit` (imported + already
+  rebuilt into an SPA), `rebuild` (imported, still raw .html), `none` (non-imported).
+  The `importedBlock` must branch on all three: `none` → empty string. WHY: the block
+  was historically `importMode === "edit" ? … : …`, so the `else` arm leaked into BOTH
+  `rebuild` AND `none`. Any rebuild-only text put in that `else` (e.g. "this imported
+  site has NOT been rebuilt yet") then wrongly reaches normal non-imported builds.
+  Always guard rebuild-only instructions with an explicit `none → ""`.
+- "Only CSS" rebuild failure: on a raw import, "maak mooier"/"make it prettier" made
+  the model emit ONLY a `styles.css` (no index.html/script.js) → blank page. Cause:
+  the PRESERVATION CONTRACT's "change ONLY the visual design" was read as "output only
+  CSS". Fix = a REBUILD OUTPUT CONTRACT (rebuild branch, read-first) stating all THREE
+  files must be generated from scratch this response + a hard rule that "visual-only"
+  means don't alter content/structure, NOT output-only-CSS. A rebuild ALWAYS emits the
+  full index.html + styles.css + script.js trio even for "just make it prettier".
+- Large-site rebuild is slow but NOT a hang: a ~30-page import rebuilds in ~5 min /
+  ~28K streamed delta tokens and completes within MAX_CONTINUATIONS, saving all three
+  files. A follow-up edit ("maak de titel groter") finishes ~39s touching only the one
+  file. The old true-hang (raw HTML → 0 output tokens) is gone once it streams.

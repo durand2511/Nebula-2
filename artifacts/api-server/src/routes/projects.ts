@@ -524,14 +524,19 @@ IMPROVE (this is ALL you may change): typography (cleaner, modern); spacing and 
 HARD RULES:
 - If a section, button, menu item, link, form, or piece of media exists in the original, it MUST exist in the redesign, rendered fully.
 - Never simplify by removing, and never replace media with a placeholder — only simplify by cleaning up the visuals.
-- When in doubt: keep it, render it for real, and make it look better.`;
+- When in doubt: keep it, render it for real, and make it look better.
+- "Change ONLY the visual design" refers to not altering the CONTENT or STRUCTURE — it does NOT mean output only CSS. You are still writing the full index.html markup and script.js from scratch in this same response; a response that omits index.html or script.js (e.g. only a styles.css) is a hard FAILURE.`;
   const importedBlock =
-    (importMode === "edit"
+    importMode === "none"
+      ? ""
+      : (importMode === "edit"
       ? `IMPORTED WEBSITE — INCREMENTAL EDIT (this site was imported and has ALREADY been rebuilt into the single-page app shown in the current project files below):
 - Apply ONLY the specific change the user asks for. Preserve the existing layout, structure, sections, navigation, copy, and styling EXACTLY as they are — do NOT redesign, re-theme, restructure, or regenerate the page, and do not touch anything the user did not mention. A full rebuild here is a FAILURE.
 - The current files already reuse the site's REAL image URLs (absolute https URLs); keep them as-is — the "no external image URLs" rule does NOT apply to image URLs already present in these files. If the change needs a new image, prefer one already in the files; otherwise use inline SVG/emoji per the runtime rules.
 - Output ONLY the file(s) you actually modify; leave every other file untouched.`
-      : `IMPORTED WEBSITE ASSETS (applies ONLY when the current project files below are HTML imported/crawled from a real website):
+      : `REBUILD OUTPUT CONTRACT — READ FIRST: This imported site has NOT been rebuilt yet. There is NO index.html single-page app, NO styles.css and NO script.js in the project yet — you are CREATING all three from scratch RIGHT NOW, in this single response. You MUST output all THREE complete files: index.html (the full SPA markup containing every section, the navigation, and all real content/media), styles.css (the full stylesheet), and script.js (view switching + interactivity). Use the exact "FILE: <path>" format for each. Outputting only a stylesheet — or any response that omits index.html or script.js — is a hard FAILURE: a styles.css alone has no markup to style and renders a blank page. Even if the user only says "make it prettier" / "maak mooier", a rebuild ALWAYS means generating the whole SPA, never only CSS.
+
+IMPORTED WEBSITE ASSETS (applies ONLY when the current project files below are HTML imported/crawled from a real website):
 - That imported HTML contains the site's REAL images as ABSOLUTE URLs (e.g. <img src="https://…">, <source srcset="https://…">, and CSS background-image: url(https://…)). These are genuine, working assets from the source site — NOT random, placeholder, or hallucinated URLs — so the "no external image URLs" runtime rule does NOT apply to them. REUSE them.
 - Pull the most relevant real images out of the imported HTML and place them tastefully into your new design so the result feels like ONE cohesive whole with the original site: a hero/banner image at the top, supporting photos inside cards/sections, a gallery where it fits, and the site's real logo image in the header (this is the one case where an actual logo image is expected instead of a text wordmark).
 - Copy each image URL EXACTLY as it appears in the imported HTML (keep the full absolute URL). Never invent, guess, shorten, or alter an image URL, and never swap in a stock/CDN URL. If you need an image that is not present in the imported HTML, fall back to inline SVG/emoji per the runtime rules rather than guessing a URL.
