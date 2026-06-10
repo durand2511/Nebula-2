@@ -198,12 +198,32 @@ function buildPreviewHtml(
   for (const k in hostCounts)
     if (hostCounts[k] > (hostCounts[primaryHost] || 0)) primaryHost = k;
 
+  // The preview iframe is sandboxed WITHOUT allow-same-origin, so inside it
+  // location.origin is the opaque "null" — useless for telling a dead self-link
+  // ("/sangha", "about.html") apart from a real external site. But the iframe's
+  // document base URL is this builder page's origin, so a relative link's resolved
+  // .href points HERE. We capture the builder origin now (parent context) and inject
+  // it so the generated-app guard below can classify links correctly.
+  const previewOrigin =
+    typeof window !== "undefined" ? window.location.origin : "";
+
   // Browser-like link handling. Links to the SAME site navigate INSIDE the preview
   // (so it behaves like a single browser tab); links to OTHER sites (WhatsApp,
   // Momoyoga booking, socials) open in a real new tab, because external sites refuse
   // to render inside a frame (X-Frame-Options/CSP) and would otherwise appear dead.
   // In-page anchors (#...) and non-web schemes (mailto/tel) keep their default behavior.
-  const linkHandler = `<script>(function(){var HOST=${JSON.stringify(primaryHost)};function norm(h){return h.replace(/^www\\./,"")}document.addEventListener("click",function(e){var t=e.target,a=t&&t.closest?t.closest("a[href]"):null;if(!a)return;var raw=(a.getAttribute("href")||"").trim();if(!raw||raw.charAt(0)==="#")return;var u;try{u=new URL(a.href)}catch(err){return}if(u.protocol!=="http:"&&u.protocol!=="https:")return;var internal=HOST&&norm(u.hostname.toLowerCase())===norm(HOST);if(!internal){e.preventDefault();try{window.open(a.href,"_blank","noopener")}catch(err){}}},true);})();</script>`;
+  // For IMPORTED sites: same-site links navigate inside the preview, external links
+  // open in a new tab. For GENERATED apps (a single self-contained doc): the app has
+  // no sibling pages, so any link that unloads the document blanks the preview to a
+  // WHITE SCREEN. The spaGuard below prevents that — it lets in-page "#" anchors,
+  // mailto/tel/sms and javascript: links behave normally, opens truly external links
+  // in a new tab, and cancels every other navigation (relative paths, router-style
+  // "/route" links, same-origin) so the app can never blank itself. We never
+  // stopPropagation, so the app's own JS click handlers (real SPA view switching)
+  // still run; we only suppress the default browser navigation.
+  const linkHandler = isImported
+    ? `<script>(function(){var HOST=${JSON.stringify(primaryHost)};function norm(h){return h.replace(/^www\\./,"")}document.addEventListener("click",function(e){var t=e.target,a=t&&t.closest?t.closest("a[href]"):null;if(!a)return;var raw=(a.getAttribute("href")||"").trim();if(!raw||raw.charAt(0)==="#")return;var u;try{u=new URL(a.href)}catch(err){return}if(u.protocol!=="http:"&&u.protocol!=="https:")return;var internal=HOST&&norm(u.hostname.toLowerCase())===norm(HOST);if(!internal){e.preventDefault();try{window.open(a.href,"_blank","noopener")}catch(err){}}},true);})();</script>`
+    : `<script>(function(){var ORIGIN=${JSON.stringify(previewOrigin)};document.addEventListener("click",function(e){var t=e.target,a=t&&t.closest?t.closest("a[href]"):null;if(!a)return;var raw=(a.getAttribute("href")||"").trim();if(raw===""||raw==="#"){e.preventDefault();return}if(raw.charAt(0)==="#")return;if(/^(mailto:|tel:|sms:|javascript:)/i.test(raw))return;var u;try{u=new URL(a.href,location.href)}catch(err){e.preventDefault();return}if(u.protocol!=="http:"&&u.protocol!=="https:"){e.preventDefault();return}if(!ORIGIN||u.origin===ORIGIN){e.preventDefault();return}e.preventDefault();try{window.open(a.href,"_blank","noopener")}catch(err){}},true);})();</script>`;
 
   // Mobile hamburger toggle — IMPORTED SITES ONLY. Imported themes render a hamburger
   // + a hidden dropdown <nav>/<ul> of internal pages, but their toggle JS (Elementor,
