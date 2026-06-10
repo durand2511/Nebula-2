@@ -25,6 +25,8 @@ import {
   X,
   Square,
   ImagePlus,
+  ZoomIn,
+  ZoomOut,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -249,6 +251,11 @@ export function ProjectWorkspace() {
   const [activeTab, setActiveTab] = useState<"code" | "preview">("preview");
   const [showCode, setShowCode] = useState(false);
   const [previewKey, setPreviewKey] = useState(0);
+  // Fit-to-pane zoom for the preview. The iframe element box always fills the pane
+  // (width/height = 100/zoom %, then scaled by zoom), so what actually changes is the
+  // viewport WIDTH the site renders at: >1 = magnified/narrower, <1 = shrunk/wider.
+  // This lets the user inspect how the layout composes at different effective widths.
+  const [previewZoom, setPreviewZoom] = useState(1);
   // For imported multi-page sites: which page the preview currently shows (null = index).
   const [previewPage, setPreviewPage] = useState<string | null>(null);
 
@@ -900,6 +907,47 @@ export function ProjectWorkspace() {
 
               <div className="ml-auto flex items-center gap-1">
                 {activeTab === "preview" && previewHtml && (
+                  <div className="flex items-center gap-0.5 mr-1">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                      onClick={() =>
+                        setPreviewZoom((z) =>
+                          Math.max(0.25, Math.round((z - 0.25) * 100) / 100),
+                        )
+                      }
+                      disabled={previewZoom <= 0.25}
+                      aria-label="Zoom uit"
+                      title="Zoom uit"
+                    >
+                      <ZoomOut className="h-3.5 w-3.5" />
+                    </Button>
+                    <button
+                      onClick={() => setPreviewZoom(1)}
+                      className="min-w-[3rem] text-center text-xs font-medium text-muted-foreground hover:text-foreground tabular-nums"
+                      title="Herstel naar 100%"
+                    >
+                      {Math.round(previewZoom * 100)}%
+                    </button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                      onClick={() =>
+                        setPreviewZoom((z) =>
+                          Math.min(2, Math.round((z + 0.25) * 100) / 100),
+                        )
+                      }
+                      disabled={previewZoom >= 2}
+                      aria-label="Zoom in"
+                      title="Zoom in"
+                    >
+                      <ZoomIn className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                )}
+                {activeTab === "preview" && previewHtml && (
                   <Button
                     variant="ghost"
                     size="sm"
@@ -1004,12 +1052,18 @@ export function ProjectWorkspace() {
             {/* Preview Tab */}
             <TabsContent value="preview" className="flex-1 flex flex-col m-0 border-none p-0 outline-none">
               {previewHtml ? (
-                <div className="relative flex-1 flex">
+                <div className="relative flex-1 overflow-hidden bg-white">
                   <iframe
                     key={previewKey}
                     ref={previewIframeRef}
                     srcDoc={previewHtml}
-                    className="flex-1 w-full border-0 bg-white"
+                    className="absolute top-0 left-0 border-0 bg-white"
+                    style={{
+                      width: `${100 / previewZoom}%`,
+                      height: `${100 / previewZoom}%`,
+                      transform: `scale(${previewZoom})`,
+                      transformOrigin: "top left",
+                    }}
                     sandbox="allow-scripts allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox"
                     title="App Preview"
                   />
