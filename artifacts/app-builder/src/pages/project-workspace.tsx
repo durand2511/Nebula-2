@@ -36,6 +36,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CodeViewer } from "@/components/code-viewer";
 import { formatFileContent } from "@/lib/format-code";
+import { buildAstroExport } from "@/lib/astro-export";
 import {
   fileToReferenceImage,
   MAX_ATTACHED_IMAGES,
@@ -619,14 +620,23 @@ export function ProjectWorkspace() {
     setIsDownloading(true);
     try {
       const zip = new JSZip();
-      // Format each file the same way the on-screen viewer does, so the
-      // downloaded code is neatly indented instead of the raw minified content.
-      await Promise.all(
-        files.map(async (f) => {
-          const content = await formatFileContent(f.path, f.content ?? "");
-          zip.file(f.path, content);
-        }),
-      );
+      // For imported WordPress/Astra/Elementor sites, export a clean, structured
+      // Astro project (shared header/footer/layout, tidy routes, WP cruft
+      // stripped) instead of the raw repeated-markup pages. Falls back to the
+      // plain formatted source for anything that isn't a supported import.
+      const astro = buildAstroExport(files);
+      if (astro) {
+        for (const [path, content] of astro) zip.file(path, content);
+      } else {
+        // Format each file the same way the on-screen viewer does, so the
+        // downloaded code is neatly indented instead of raw minified content.
+        await Promise.all(
+          files.map(async (f) => {
+            const content = await formatFileContent(f.path, f.content ?? "");
+            zip.file(f.path, content);
+          }),
+        );
+      }
       const blob = await zip.generateAsync({ type: "blob" });
       const safeName =
         (project?.name ?? "project")
