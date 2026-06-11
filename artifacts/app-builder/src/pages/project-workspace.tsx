@@ -108,7 +108,14 @@ function buildPreviewHtml(
       if (f.path.endsWith(".js")) {
         const name = escapeRegExp(f.path);
         const re = new RegExp(`<script[^>]*src=["']\\.?/?${name}["'][^>]*>\\s*</script>`, "gi");
-        html = html.replace(re, `<script>\n${f.content}\n</script>`);
+        // Preserve `type="module"` when present: a self-contained module (or one
+        // that imports a library from a CDN over https) only works if the inlined
+        // tag stays a module. Downgrading it to a classic script makes any
+        // top-level `import` throw and kills all interactivity (dead buttons).
+        html = html.replace(re, (tag) => {
+          const isModule = /\btype\s*=\s*["']?module\b/i.test(tag);
+          return `<script${isModule ? ' type="module"' : ""}>\n${f.content}\n</script>`;
+        });
       }
     }
 
