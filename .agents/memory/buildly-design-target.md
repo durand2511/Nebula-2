@@ -92,3 +92,12 @@ exact values; the preview screenshot also shows the light warm-editorial look.
 - **Why:** for a POST, `req` ("close") fires the instant the request body is fully read (right after `express.json()` parses it), long before any disconnect. Using it falsely flags an abort immediately, so `send()` is suppressed and nothing ever streams (0 bytes, request hangs to max-time). This cost two debugging rounds.
 - On real disconnect: set a `clientGone` flag, call `stream.controller.abort()` to stop the OpenAI call, break the generation loop, and still persist any COMPLETE files already in `full` (incomplete trailing file has no closing ``` so it's skipped by FILE_BLOCK_REGEX — safe).
 - The stream route also emits `{ type: "delta", text }` per token so the client can render code being written live (client parses the current FILE block via `extractLiveFile`).
+
+## Quality-over-speed: keep the depth directive
+- The user explicitly chose RICHEST result over speed for generated apps: a full
+  "make it prettier" rebuild of a large imported site taking a few minutes is
+  acceptable to them. Do NOT dial back / soften the "DEPTH & COMPLETENESS ~4,000
+  lines" directive in `buildSystemPrompt` to save time unless the user later asks.
+  **Why:** they were asked directly (rich vs fast vs middle) and picked rich.
+  **How to apply:** if a future "it's slow" complaint comes up, address it with
+  better progress feedback or genuine speedups — not by reducing design ambition.
