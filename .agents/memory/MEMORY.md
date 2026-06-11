@@ -10,3 +10,4 @@
 - [Buildly code viewer](buildly-code-viewer.md) — Code tab formats stored content display-only (Prettier+highlight.js+line gutter); imports are stored minified; never write formatted output back or into the preview.
 - [WP→Astro refactor](wp-to-astro-refactor.md) — share header/footer/shell/SEO not CSS; re-inject nav active-state per route & verify vs originals; keep canonical absolute.
 - [zip CLI broken](env-zip-tool.md) — the `zip` command wrapper fails to create archives ("no such file or directory"); use python3 zipfile instead.
+- [Buildly AI timeout](buildly-ai-timeout.md) — long builds died on undici 5-min Body Timeout; now a 20-min undici Agent + SDK timeout on the long chat.completions calls (keep the overload cast).

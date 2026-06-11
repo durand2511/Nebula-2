@@ -168,6 +168,21 @@ const importDispatcher = new Agent({
   },
 });
 
+// A rich app build/rebuild can legitimately stream for many minutes. undici's
+// default 5-minute headers/body timeouts would abort such a long generation
+// mid-stream ("terminated: Body Timeout Error"), so the upstream AI requests get
+// a much longer budget. The SDK-level `timeout` bounds the request overall; the
+// dispatcher's timeouts bound time-to-first-byte and gaps between streamed chunks.
+const AI_REQUEST_TIMEOUT_MS = 20 * 60 * 1000;
+const aiDispatcher = new Agent({
+  headersTimeout: AI_REQUEST_TIMEOUT_MS,
+  bodyTimeout: AI_REQUEST_TIMEOUT_MS,
+});
+const aiRequestOptions = {
+  timeout: AI_REQUEST_TIMEOUT_MS,
+  fetchOptions: { dispatcher: aiDispatcher },
+} as unknown as Parameters<typeof openai.chat.completions.create>[1];
+
 // Fetch HTML while following redirects manually, re-validating every hop so a
 // redirect can't bounce us to an internal address.
 async function fetchWebsiteHtml(rawUrl: string): Promise<{ html: string; finalUrl: string }> {
@@ -1343,11 +1358,14 @@ async function generateWithContinuation(messages: ChatMsg[]): Promise<string> {
   for (let round = 0; round <= MAX_CONTINUATIONS; round++) {
     const completion = await withRetry(
       () =>
-        openai.chat.completions.create({
-          model: "gpt-5.4",
-          max_completion_tokens: MAX_GENERATION_TOKENS,
-          messages: msgs as SdkMessages,
-        }),
+        openai.chat.completions.create(
+          {
+            model: "gpt-5.4",
+            max_completion_tokens: MAX_GENERATION_TOKENS,
+            messages: msgs as SdkMessages,
+          },
+          aiRequestOptions,
+        ),
       "sync-completion",
     );
     const choice = completion.choices[0];
@@ -1874,12 +1892,15 @@ router.post("/projects/:projectId/messages/stream", json({ limit: "25mb" }), asy
 
       const stream = await withRetry(
         () =>
-          openai.chat.completions.create({
-            model: "gpt-5.4",
-            max_completion_tokens: MAX_GENERATION_TOKENS,
-            stream: true,
-            messages: streamMsgs as SdkMessages,
-          }),
+          openai.chat.completions.create(
+            {
+              model: "gpt-5.4",
+              max_completion_tokens: MAX_GENERATION_TOKENS,
+              stream: true,
+              messages: streamMsgs as SdkMessages,
+            },
+            aiRequestOptions,
+          ),
         "stream-completion",
       );
 
