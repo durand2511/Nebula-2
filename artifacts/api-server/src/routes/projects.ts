@@ -1,4 +1,4 @@
-import { Router, json } from "express";
+import { Router, json, type Response } from "express";
 import { eq, desc, sql } from "drizzle-orm";
 import { lookup as dnsLookup } from "node:dns/promises";
 import { isIP } from "node:net";
@@ -1742,75 +1742,134 @@ router.post("/projects/:projectId/messages", async (req, res) => {
 const REFERENCE_ONLY_PROMPT =
   "Build an app that matches the attached reference image(s) as closely as possible.";
 
-// This route opts in to a larger body limit (skipped by the global parser) so it
-// can accept base64-encoded reference images.
-router.post("/projects/:projectId/messages/stream", json({ limit: "25mb" }), async (req, res) => {
-  const projectId = Number(req.params.projectId);
-  if (isNaN(projectId)) {
-    res.status(400).json({ error: "Invalid project ID" });
-    return;
-  }
+// ---- Detached build sessions -------------------------------------------------
+// A build can take several minutes. The browser/iframe may refresh, the user may
+// navigate, or the edge proxy may drop a long-lived SSE connection mid-build —
+// any of which kills the request socket. To stop that from wasting an entire
+// build (or leaving a project half-written), generation runs DETACHED from the
+// HTTP request: it streams progress into an in-memory session that clients attach
+// to. A dropped connection just removes a listener; the build keeps running and
+// still persists its files. Clients reconnect to the same session and replay the
+// progress they missed.
 
-  const images = sanitizeImageDataUrls(req.body?.images);
-  const rawContent = typeof req.body?.content === "string" ? req.body.content : "";
-  // Allow image-only requests: fall back to a default instruction when the user
-  // attached reference image(s) without any text.
-  const content = rawContent.trim()
-    ? rawContent
-    : images.length > 0
-      ? REFERENCE_ONLY_PROMPT
-      : "";
-  if (!content) {
-    res.status(400).json({ error: "content is required" });
-    return;
-  }
+type BuildEvent = Record<string, unknown>;
 
+type BuildSession = {
+  projectId: number;
+  events: BuildEvent[]; // full ordered buffer, replayed on every (re)connect
+  status: "running" | "done" | "error";
+  listeners: Set<(e: BuildEvent) => void>;
+  startedAt: number;
+  cancelled: boolean;
+  abort: () => void; // tears down the upstream model call on an explicit Stop
+};
+
+const activeBuilds = new Map<number, BuildSession>();
+// Keep a finished session around briefly so a client reconnecting right after
+// completion still receives the terminal event before we free the buffer.
+const FINISHED_SESSION_TTL_MS = 2 * 60_000;
+
+function createBuildSession(projectId: number): BuildSession {
+  const session: BuildSession = {
+    projectId,
+    events: [],
+    status: "running",
+    listeners: new Set(),
+    startedAt: Date.now(),
+    cancelled: false,
+    abort: () => {},
+  };
+  activeBuilds.set(projectId, session);
+  return session;
+}
+
+function emitBuildEvent(session: BuildSession, event: BuildEvent): void {
+  session.events.push(event);
+  for (const listener of session.listeners) {
+    try {
+      listener(event);
+    } catch {
+      /* a dead listener must never break the build */
+    }
+  }
+}
+
+function finishBuildSession(session: BuildSession, status: "done" | "error"): void {
+  session.status = status;
+  const timer = setTimeout(() => {
+    if (activeBuilds.get(session.projectId) === session) {
+      activeBuilds.delete(session.projectId);
+    }
+  }, FINISHED_SESSION_TTL_MS);
+  timer.unref?.();
+}
+
+// Stream an in-flight (or just-finished) build session to one HTTP client as SSE.
+// Replays the full buffer first so a reconnecting client is caught up, then
+// forwards live events. A dropped socket only detaches this listener.
+function attachToBuild(session: BuildSession, res: Response): void {
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache, no-transform");
   res.setHeader("Connection", "keep-alive");
   res.setHeader("X-Accel-Buffering", "no");
   res.flushHeaders?.();
-  // Emit a first body byte IMMEDIATELY, before any DB/context work. On a large
-  // imported project the pre-stream work (reading every file, building the prompt)
-  // can take several seconds; without an early byte the edge proxy sees an idle
-  // connection and drops it (observed ~3.8s aborts) before the model ever replies.
-  try {
-    res.write(": open\n\n");
-  } catch {
-    /* socket already gone before we started */
+
+  let closed = false;
+  let heartbeat: ReturnType<typeof setInterval> | undefined;
+
+  function safeWrite(chunk: string): void {
+    if (closed || res.writableEnded) return;
+    try {
+      res.write(chunk);
+    } catch {
+      /* socket gone */
+    }
+  }
+  function cleanup(): void {
+    if (closed) return;
+    closed = true;
+    if (heartbeat) clearInterval(heartbeat);
+    session.listeners.delete(listener);
+  }
+  function listener(event: BuildEvent): void {
+    safeWrite(`data: ${JSON.stringify(event)}\n\n`);
+    if (event.type === "done" || event.type === "error") {
+      cleanup();
+      res.end();
+    }
   }
 
-  let clientGone = false;
-  const send = (event: Record<string, unknown>) => {
-    if (clientGone || res.writableEnded) return;
-    res.write(`data: ${JSON.stringify(event)}\n\n`);
-  };
+  safeWrite(": open\n\n");
+  for (const event of session.events) {
+    safeWrite(`data: ${JSON.stringify(event)}\n\n`);
+  }
+  if (session.status !== "running") {
+    // Build already finished — the replay above included its terminal event.
+    res.end();
+    return;
+  }
 
-  // Detect a real client disconnect (e.g. the user pressed "Stop"). We listen on
-  // the RESPONSE, not the request: req "close" fires as soon as the POST body is
-  // read, which would falsely look like an abort before we've sent anything.
-  res.on("close", () => {
-    if (!res.writableEnded) clientGone = true;
-  });
+  session.listeners.add(listener);
+  heartbeat = setInterval(() => safeWrite(": ping\n\n"), 3000);
+  // Passive disconnect (refresh, navigation, proxy cap): keep the build running.
+  res.on("close", cleanup);
+}
 
-  // Keep the proxied SSE connection from idling out while the model "thinks":
-  // on complex apps there can be a 30s+ gap before the first token, which the
-  // edge proxy would otherwise treat as a dead connection and drop. A comment
-  // line resets idle timers and is ignored by the client's `data:` parser.
-  const heartbeat = setInterval(() => {
-    if (clientGone || res.writableEnded || res.destroyed) return;
-    try {
-      res.write(": ping\n\n");
-    } catch {
-      /* socket already torn down */
-    }
-  }, 3000);
-
+// Run a full generation, detached from any HTTP request, streaming progress into
+// the session and persisting the result regardless of whether a client is still
+// connected. Only an explicit cancel (session.cancelled) stops it early.
+async function runBuild(
+  session: BuildSession,
+  projectId: number,
+  content: string,
+  images: string[],
+): Promise<void> {
+  const send = (event: BuildEvent) => emitBuildEvent(session, event);
   try {
     const projectRows = await db.select().from(projects).where(eq(projects.id, projectId));
     if (projectRows.length === 0) {
       send({ type: "error", message: "Project not found" });
-      res.end();
+      finishBuildSession(session, "error");
       return;
     }
 
@@ -1863,8 +1922,7 @@ router.post("/projects/:projectId/messages/stream", json({ limit: "25mb" }), asy
     attachImagesToLastUser(streamMsgs, images);
 
     outer: for (let round = 0; round <= MAX_CONTINUATIONS; round++) {
-      // Don't kick off (or pay for) another round if the user already bailed.
-      if (clientGone) break;
+      if (session.cancelled) break;
 
       const stream = await withRetry(
         () =>
@@ -1877,22 +1935,17 @@ router.post("/projects/:projectId/messages/stream", json({ limit: "25mb" }), asy
         "stream-completion",
       );
 
-      // Tear down the upstream OpenAI request the moment the client hangs up.
-      const onClose = () => {
-        if (res.writableEnded) return;
-        clientGone = true;
+      // An explicit Stop tears down the upstream OpenAI request.
+      session.abort = () => {
+        session.cancelled = true;
         try {
           stream.controller.abort();
         } catch {
           /* already settled */
         }
       };
-      res.on("close", onClose);
-
-      // The client may have disconnected while the request was in flight.
-      if (clientGone) {
-        onClose();
-        res.off("close", onClose);
+      if (session.cancelled) {
+        session.abort();
         break;
       }
 
@@ -1900,13 +1953,12 @@ router.post("/projects/:projectId/messages/stream", json({ limit: "25mb" }), asy
       let finishReason: string | null = null;
       try {
         for await (const chunk of stream) {
-          if (clientGone) break;
+          if (session.cancelled) break;
           finishReason = chunk.choices[0]?.finish_reason ?? finishReason;
           const delta = chunk.choices[0]?.delta?.content ?? "";
           if (!delta) continue;
           part += delta;
           full += delta;
-          // Stream raw tokens so the UI can show the code being written live.
           send({ type: "delta", text: delta });
           const re = /FILE:\s*([^\n]+)\n/g;
           let m;
@@ -1919,12 +1971,10 @@ router.post("/projects/:projectId/messages/stream", json({ limit: "25mb" }), asy
           }
         }
       } catch (streamErr) {
-        if (!clientGone) throw streamErr;
-      } finally {
-        res.off("close", onClose);
+        if (!session.cancelled) throw streamErr;
       }
 
-      if (clientGone) break outer;
+      if (session.cancelled) break outer;
       // Stop unless the model ran out of room mid-output.
       if (finishReason !== "length") break;
       if (round === MAX_CONTINUATIONS) {
@@ -1939,11 +1989,13 @@ router.post("/projects/:projectId/messages/stream", json({ limit: "25mb" }), asy
       streamMsgs.push({ role: "user", content: CONTINUE_PROMPT });
     }
 
-    if (clientGone) {
+    if (session.cancelled) {
       // User pressed Stop — keep any fully-formed files already generated so the
-      // work isn't lost, but skip the SSE replies (the connection is gone).
+      // work isn't lost.
       await persistGeneratedFiles(projectId, full, existingFiles, omittedPaths);
       await db.update(projects).set({ updatedAt: new Date() }).where(eq(projects.id, projectId));
+      send({ type: "done", files: [], cancelled: true });
+      finishBuildSession(session, "done");
       return;
     }
 
@@ -1956,7 +2008,7 @@ router.post("/projects/:projectId/messages/stream", json({ limit: "25mb" }), asy
         type: "error",
         message: "I couldn't generate valid files. Please try rephrasing your request.",
       });
-      res.end();
+      finishBuildSession(session, "error");
       return;
     }
 
@@ -1970,22 +2022,108 @@ router.post("/projects/:projectId/messages/stream", json({ limit: "25mb" }), asy
 
     send({ type: "message", id: assistantMsg.id, content: explanation });
     send({ type: "done", files: written });
-    res.end();
+    finishBuildSession(session, "done");
 
     if (isFirstBuild) {
       // Give the project a real name derived from the first prompt.
       void generateProjectName(projectId, content);
     } else {
-      // Learn from this adjustment (follow-up on an existing app) so future apps improve.
+      // Learn from this adjustment (follow-up on an existing app) without blocking.
       void recordLearning(projectId, content);
     }
   } catch (err) {
-    req.log.error({ err }, "Failed to stream message");
+    logger.error({ err, projectId }, "Failed to run build");
     send({ type: "error", message: "Something went wrong while building your app." });
-    res.end();
-  } finally {
-    clearInterval(heartbeat);
+    finishBuildSession(session, "error");
   }
+}
+
+// This route opts in to a larger body limit (skipped by the global parser) so it
+// can accept base64-encoded reference images.
+router.post("/projects/:projectId/messages/stream", json({ limit: "25mb" }), async (req, res) => {
+  const projectId = Number(req.params.projectId);
+  if (isNaN(projectId)) {
+    res.status(400).json({ error: "Invalid project ID" });
+    return;
+  }
+
+  const images = sanitizeImageDataUrls(req.body?.images);
+  const rawContent = typeof req.body?.content === "string" ? req.body.content : "";
+  // Allow image-only requests: fall back to a default instruction when the user
+  // attached reference image(s) without any text.
+  const content = rawContent.trim()
+    ? rawContent
+    : images.length > 0
+      ? REFERENCE_ONLY_PROMPT
+      : "";
+  if (!content) {
+    res.status(400).json({ error: "content is required" });
+    return;
+  }
+
+  // If a build is already running for this project, attach this client to it
+  // instead of starting a second one (the client guards against this, but a
+  // stale tab could still POST). Otherwise start a fresh detached build.
+  const running = activeBuilds.get(projectId);
+  if (running && running.status === "running") {
+    attachToBuild(running, res);
+    return;
+  }
+  const session = createBuildSession(projectId);
+  void runBuild(session, projectId, content, images);
+  attachToBuild(session, res);
+});
+
+// Report whether a detached build is currently running for this project, so a
+// freshly loaded (or reloaded) client can decide to reattach to live progress.
+router.get("/projects/:projectId/build/status", (req, res) => {
+  const projectId = Number(req.params.projectId);
+  if (isNaN(projectId)) {
+    res.status(400).json({ error: "Invalid project ID" });
+    return;
+  }
+  const session = activeBuilds.get(projectId);
+  res.json({
+    running: !!session && session.status === "running",
+    startedAt: session?.startedAt ?? null,
+  });
+});
+
+// Reconnect to an in-flight build's SSE stream (replays missed progress). Unlike
+// the POST route this never creates a new message or build — it only attaches.
+router.get("/projects/:projectId/build/stream", (req, res) => {
+  const projectId = Number(req.params.projectId);
+  if (isNaN(projectId)) {
+    res.status(400).json({ error: "Invalid project ID" });
+    return;
+  }
+  const session = activeBuilds.get(projectId);
+  if (!session) {
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache, no-transform");
+    res.setHeader("X-Accel-Buffering", "no");
+    res.flushHeaders?.();
+    res.write(`data: ${JSON.stringify({ type: "idle" })}\n\n`);
+    res.end();
+    return;
+  }
+  attachToBuild(session, res);
+});
+
+// Explicitly cancel a running build (the user pressed Stop). A passive
+// disconnect must NOT cancel — only this does.
+router.post("/projects/:projectId/build/cancel", (req, res) => {
+  const projectId = Number(req.params.projectId);
+  if (isNaN(projectId)) {
+    res.status(400).json({ error: "Invalid project ID" });
+    return;
+  }
+  const session = activeBuilds.get(projectId);
+  if (session && session.status === "running") {
+    session.cancelled = true;
+    session.abort();
+  }
+  res.json({ ok: true });
 });
 
 router.get("/projects/:projectId/files", async (req, res) => {

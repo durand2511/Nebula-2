@@ -279,6 +279,8 @@ function buildPreviewHtml(
   return injectHead(html, inject);
 }
 
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
 export function ProjectWorkspace() {
   const [, params] = useRoute("/projects/:id");
   const projectId = Number(params?.id);
@@ -452,13 +454,166 @@ export function ProjectWorkspace() {
     setPreviewPage(null);
   }, [projectId]);
 
-  // Abort any in-flight build if the user navigates away / the page unmounts,
-  // so generation doesn't keep running (and billing) in the background.
+  // The build now runs DETACHED on the server, so a refresh, navigation, or a
+  // dropped SSE connection no longer wastes it — the build keeps running and
+  // persists, and the client just (re)attaches to its progress. Unmounting only
+  // closes our local connection; the server build lives on.
   useEffect(() => {
     return () => {
       abortRef.current?.abort();
     };
   }, []);
+
+  // Consume one SSE stream (the initial POST or a reconnect GET). The server
+  // replays its FULL progress buffer on every (re)connect, so callers reset the
+  // accumulators before each attempt to avoid double-counting. Returns how the
+  // stream ended so the driver can decide whether to reconnect.
+  const consumeStream = useCallback(
+    async (body: ReadableStream<Uint8Array>): Promise<"terminal" | "idle" | "dropped"> => {
+      const reader = body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let outcome: "terminal" | "idle" | "dropped" = "dropped";
+
+      const handleEvent = (line: string) => {
+        if (!line.startsWith("data:")) return;
+        let event: { type: string; message?: string; path?: string; text?: string };
+        try {
+          event = JSON.parse(line.slice(5).trim());
+        } catch {
+          return;
+        }
+        if (event.type === "delta" && typeof event.text === "string") {
+          rawStreamRef.current += event.text;
+        } else if (event.type === "file" && event.path) {
+          setFilesWritten((n) => n + 1);
+          queryClient.invalidateQueries({ queryKey: getListFilesQueryKey(projectId) });
+        } else if (event.type === "error") {
+          setBuildError(event.message ?? "Something went wrong");
+          outcome = "terminal";
+        } else if (event.type === "done") {
+          outcome = "terminal";
+        } else if (event.type === "idle") {
+          outcome = "idle";
+        }
+      };
+
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split("\n\n");
+        buffer = parts.pop() ?? "";
+        for (const part of parts) handleEvent(part.trim());
+      }
+      if (buffer.trim()) handleEvent(buffer.trim());
+      return outcome;
+    },
+    [projectId, queryClient]
+  );
+
+  const finalizeStream = useCallback(async () => {
+    abortRef.current = null;
+    // Reveal any remaining buffered tail so the final narration isn't cut off.
+    shownLenRef.current = rawStreamRef.current.length;
+    setStreamedText(rawStreamRef.current);
+    setIsStreaming(false);
+    setPhaseIndex(BUILD_PHASES.length);
+    setPendingUser(null);
+    setPendingImages([]);
+    if (projectId) {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: getListMessagesQueryKey(projectId) }),
+        queryClient.invalidateQueries({ queryKey: getListFilesQueryKey(projectId) }),
+        queryClient.invalidateQueries({ queryKey: getGetProjectQueryKey(projectId) }),
+      ]);
+    }
+    setPreviewKey((k) => k + 1);
+  }, [projectId, queryClient]);
+
+  // Drive a build to completion across reconnects. A non-null `postBody` starts a
+  // new build (POST); null attaches to a build already running on the server (GET).
+  // If the connection drops mid-build we reconnect and replay until we see a
+  // terminal event, the server reports the build is no longer running, or we
+  // exhaust the retry budget.
+  const drive = useCallback(
+    async (postBody: { content: string; images?: string[] } | null) => {
+      if (!projectId) return;
+      let first = postBody !== null;
+      let attempts = 0;
+      const MAX_RECONNECTS = 30;
+      try {
+        // eslint-disable-next-line no-constant-condition
+        while (true) {
+          const ac = new AbortController();
+          abortRef.current = ac;
+          // The server replays the FULL buffer on every (re)connect; start each
+          // attempt clean so files/text aren't double-counted.
+          rawStreamRef.current = "";
+          shownLenRef.current = 0;
+          setStreamedText("");
+          setFilesWritten(0);
+          setBuildError(null);
+
+          let res: Response;
+          try {
+            res = first
+              ? await fetch(`/api/projects/${projectId}/messages/stream`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify(postBody),
+                  signal: ac.signal,
+                })
+              : await fetch(`/api/projects/${projectId}/build/stream`, { signal: ac.signal });
+          } catch (err) {
+            if (err instanceof DOMException && err.name === "AbortError") return;
+            first = false;
+            if (++attempts > MAX_RECONNECTS) {
+              setBuildError("Something went wrong while building");
+              break;
+            }
+            await sleep(1000);
+            continue;
+          }
+
+          if (!res.ok || !res.body) {
+            first = false;
+            if (++attempts > MAX_RECONNECTS) {
+              setBuildError("Something went wrong while building");
+              break;
+            }
+            await sleep(1000);
+            continue;
+          }
+
+          let outcome: "terminal" | "idle" | "dropped";
+          try {
+            outcome = await consumeStream(res.body);
+          } catch (err) {
+            if (err instanceof DOMException && err.name === "AbortError") return;
+            outcome = "dropped";
+          }
+
+          if (outcome === "terminal" || outcome === "idle") break;
+
+          // Dropped mid-build — reconnect only if the server is still building.
+          first = false;
+          if (++attempts > MAX_RECONNECTS) break;
+          try {
+            const st = await fetch(`/api/projects/${projectId}/build/status`).then((r) => r.json());
+            if (!st?.running) break;
+          } catch {
+            /* status check failed; try to reconnect anyway */
+          }
+          await sleep(1000);
+        }
+      } finally {
+        await finalizeStream();
+      }
+    },
+    [projectId, consumeStream, finalizeStream]
+  );
 
   const streamMessage = useCallback(
     async (messageContent: string, images: string[] = []) => {
@@ -470,94 +625,40 @@ export function ProjectWorkspace() {
       setPendingImages(images);
       pendingBaseRef.current = messagesLenRef.current;
       setPreviewErrors([]);
-      rawStreamRef.current = "";
-      shownLenRef.current = 0;
-      setStreamedText("");
-      setFilesWritten(0);
       setElapsedSec(0);
       setActiveTab("preview");
-
-      const ac = new AbortController();
-      abortRef.current = ac;
-
-      try {
-        const res = await fetch(`/api/projects/${projectId}/messages/stream`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(
-            images.length > 0
-              ? { content: messageContent, images }
-              : { content: messageContent }
-          ),
-          signal: ac.signal,
-        });
-        if (!res.ok || !res.body) {
-          throw new Error(`Request failed (${res.status})`);
-        }
-
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
-
-        const handleEvent = (line: string) => {
-          if (!line.startsWith("data:")) return;
-          let event: { type: string; message?: string; path?: string; text?: string };
-          try {
-            event = JSON.parse(line.slice(5).trim());
-          } catch {
-            return;
-          }
-          if (event.type === "delta" && typeof event.text === "string") {
-            // Buffer raw tokens; the reveal loop types them out smoothly so the
-            // model's bursty output appears as continuous narration in the chat.
-            rawStreamRef.current += event.text;
-          } else if (event.type === "file" && event.path) {
-            // Refresh the file list as files arrive so the saved app is ready the
-            // moment the build finishes. Filenames are intentionally NOT surfaced
-            // in the UI during generation, but the COUNT is — it gives honest,
-            // moving progress on long rebuilds.
-            setFilesWritten((n) => n + 1);
-            queryClient.invalidateQueries({ queryKey: getListFilesQueryKey(projectId) });
-          } else if (event.type === "error") {
-            setBuildError(event.message ?? "Something went wrong");
-          }
-        };
-
-        // eslint-disable-next-line no-constant-condition
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const parts = buffer.split("\n\n");
-          buffer = parts.pop() ?? "";
-          for (const part of parts) handleEvent(part.trim());
-        }
-        // Flush any trailing event left in the buffer when the stream ends.
-        if (buffer.trim()) handleEvent(buffer.trim());
-      } catch (err) {
-        const stopped = err instanceof DOMException && err.name === "AbortError";
-        if (!stopped) setBuildError("Something went wrong while building");
-      } finally {
-        abortRef.current = null;
-        // Reveal any remaining buffered tail so the final narration isn't cut off
-        // in the brief moment before the view switches to the finished app.
-        shownLenRef.current = rawStreamRef.current.length;
-        setStreamedText(rawStreamRef.current);
-        setIsStreaming(false);
-        // Mark every phase complete the moment the real build finishes.
-        setPhaseIndex(BUILD_PHASES.length);
-        setPendingUser(null);
-        setPendingImages([]);
-        await Promise.all([
-          queryClient.invalidateQueries({ queryKey: getListMessagesQueryKey(projectId) }),
-          queryClient.invalidateQueries({ queryKey: getListFilesQueryKey(projectId) }),
-          queryClient.invalidateQueries({ queryKey: getGetProjectQueryKey(projectId) }),
-        ]);
-        setPreviewKey((k) => k + 1);
-      }
+      await drive(
+        images.length > 0 ? { content: messageContent, images } : { content: messageContent }
+      );
     },
-    [projectId, queryClient]
+    [projectId, drive]
   );
+
+  // On (re)load, if a build is already running on the server for this project,
+  // reattach to its live progress instead of showing a static, seemingly-idle UI.
+  // This is what makes a mid-build refresh (or a proxy-dropped connection) recover
+  // gracefully rather than looking "stuck".
+  useEffect(() => {
+    if (!projectId) return;
+    let cancelled = false;
+    (async () => {
+      if (abortRef.current) return; // already driving a build in this tab
+      try {
+        const st = await fetch(`/api/projects/${projectId}/build/status`).then((r) => r.json());
+        if (cancelled || abortRef.current || !st?.running) return;
+        setIsStreaming(true);
+        setPhaseIndex(0);
+        setElapsedSec(0);
+        setActiveTab("preview");
+        void drive(null);
+      } catch {
+        /* status unknown; leave the UI idle */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, drive]);
 
   // Auto-send initial prompt from the home page (stored in sessionStorage)
   useEffect(() => {
@@ -639,6 +740,11 @@ export function ProjectWorkspace() {
   };
 
   const handleStop = () => {
+    // Explicitly cancel the server-side build (a passive disconnect would just
+    // keep it running), then close our local connection.
+    if (projectId) {
+      void fetch(`/api/projects/${projectId}/build/cancel`, { method: "POST" });
+    }
     abortRef.current?.abort();
   };
 

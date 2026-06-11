@@ -1,4 +1,5 @@
 - [Buildly streaming & preview](buildly-streaming.md) — SSE build streaming needs `X-Accel-Buffering: no`; iframe preview must inline separate css/js; chat stores explanation only.
+- [Buildly detached build sessions](buildly-detached-build.md) — builds run decoupled from the SSE request (activeBuilds Map); passive disconnect ≠ cancel; client must reset accumulators before each reconnect (server replays full buffer).
 - [Buildly design directives target generated apps](buildly-design-target.md) — design-quality instructions belong in the generation system prompt, not Buildly's own UI chrome.
 - [app-builder preview](app-builder-preview.md) — generated apps render in a no-same-origin sandboxed iframe; validate postMessage by e.source (origin is opaque), self-healing error banner.
 - [Buildly preview scripts / dead buttons](buildly-preview-scripts.md) — local ESM (`type=module`/`import './x.js'`) breaks in the srcDoc preview → all buttons dead; prompt forbids local modules, inliner preserves `type=module`.
