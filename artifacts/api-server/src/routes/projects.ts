@@ -669,7 +669,7 @@ IMPLEMENTATION:
 
 NON-NEGOTIABLES (quality floor — never break):
 - NO Lorem Ipsum or placeholder copy — write real, realistic content and seed real sample data so the app is fully demonstrable on first load.
-- NO dead buttons or links — every interactive element must actually work.
+- NO dead buttons or links — every interactive element must actually work, across the ENTIRE site (every view, tab, and section), and it must STILL all work after any restyle or "make it prettier" / "maak mooier" pass. A button that looks nice but does nothing is a FAILURE.
 - Fully mobile responsive with media queries.
 - Every form has validation with clear inline error messages.
 - Always include empty states and loading states.
@@ -722,6 +722,9 @@ CONSISTENCY ON EDITS (when current project files already exist below):
 - This is an EDIT to an existing app, not a fresh build. If the existing files already follow the BUILDLY DESIGN SYSTEM above, keep matching it exactly. If they predate it and use a different look, preserve that app's established design language (palette, typography, spacing, component styles) so the result stays visually cohesive — do NOT re-theme or migrate it onto the Buildly system unless the user explicitly asks. Either way, only elevate the parts you actually touch.
 - Make the SMALLEST change that satisfies the request. Do not redesign, rename, or restructure unrelated parts of the app, and do not drop existing features or seeded data.
 - Keep all existing files and their working behavior intact; only change what the request requires.
+- NEVER remove or empty out buttons, links, CTAs, or sections that were already in the app. Every button/CTA/link that existed before MUST still be present AND fully working after your change — same label and destination unless the user explicitly asked to change it. A "make it prettier" / "maak mooier" pass may RESTYLE these, but must keep every single one of them and keep them all functioning.
+- NEVER leave a section as just a heading with nothing under it. Unless the user explicitly asked to remove that section, if a section exists (e.g. "What I offer" / "Dit bied ik aan", Services, Pricing, Contact), it MUST keep its real text AND its buttons/cards/links — a heading followed by empty space, missing copy, or missing buttons is a FAILURE. Restyle a section, never accidentally gut it.
+- When you make the site look better, the WHOLE site must still work end-to-end after the redesign: every button, tab, menu item, form, and link across every view actually functions — mentally click through each one before you output.
 
 ACCESSIBILITY & UX (always):
 - Every input has an associated <label>; every icon-only button has an aria-label; images have meaningful alt text.
