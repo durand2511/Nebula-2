@@ -673,6 +673,9 @@ importers:
       p-retry:
         specifier: ^7.1.1
         version: 7.1.1
+      undici:
+        specifier: ^8.4.1
+        version: 8.4.1
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
