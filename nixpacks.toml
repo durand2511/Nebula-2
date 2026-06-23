@@ -1,0 +1,19 @@
+# Force the EXACT pnpm version that generated pnpm-lock.yaml.
+#
+# Why: `overrides` + `catalog` live in pnpm-workspace.yaml (the pnpm 10+ layout). Railway's default
+# pnpm picked a different/older version that reads those overrides differently, so the frozen install
+# failed with ERR_PNPM_LOCKFILE_CONFIG_MISMATCH. Activating pnpm@11.8.0 via corepack — the version the
+# lockfile was built with — makes the frozen install match. (Verified locally: passes under 11.8.0.)
+
+[phases.install]
+cmds = [
+  "corepack enable",
+  "corepack prepare pnpm@11.8.0 --activate",
+  "pnpm install --frozen-lockfile",
+]
+
+[phases.build]
+cmds = ["pnpm --filter @workspace/api-server run build"]
+
+[start]
+cmd = "node artifacts/api-server/dist/index.mjs"
