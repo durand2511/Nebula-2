@@ -6,21 +6,26 @@ import { randomUUID } from "crypto";
 import { tmpdir } from "os";
 import { join } from "path";
 
-if (!process.env.AI_INTEGRATIONS_OPENAI_BASE_URL) {
-  throw new Error(
-    "AI_INTEGRATIONS_OPENAI_BASE_URL must be set. Did you forget to provision the OpenAI AI integration?",
-  );
+// Lazy client: don't throw at import time (that would crash the server on startup when the audio AI
+// gateway isn't configured). The env vars are validated on first use instead.
+let _client: OpenAI | null = null;
+function client(): OpenAI {
+  if (_client) return _client;
+  const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
+  const baseURL = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL;
+  if (!apiKey || !baseURL) {
+    throw new Error(
+      "Audio-functies vereisen AI_INTEGRATIONS_OPENAI_API_KEY en AI_INTEGRATIONS_OPENAI_BASE_URL.",
+    );
+  }
+  _client = new OpenAI({ apiKey, baseURL });
+  return _client;
 }
 
-if (!process.env.AI_INTEGRATIONS_OPENAI_API_KEY) {
-  throw new Error(
-    "AI_INTEGRATIONS_OPENAI_API_KEY must be set. Did you forget to provision the OpenAI AI integration?",
-  );
-}
-
-export const openai = new OpenAI({
-  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+export const openai = new Proxy({} as OpenAI, {
+  get(_target, prop) {
+    return (client() as unknown as Record<string | symbol, unknown>)[prop];
+  },
 });
 
 export type AudioFormat = "wav" | "mp3" | "webm" | "mp4" | "ogg" | "unknown";
