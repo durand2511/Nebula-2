@@ -1,0 +1,48 @@
+# Render Blueprint — defines EXACTLY ONE web service (no monorepo auto-split).
+# Render builds the repo with the root Dockerfile (corepack pnpm@11.8.0 → install → build api-server).
+# Secrets (sync:false) are entered in the Render dashboard, never committed here.
+services:
+  - type: web
+    name: nebula-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    branch: main
+    plan: starter            # always-on. Use "free" to try it (sleeps when idle).
+    region: frankfurt
+    healthCheckPath: /api/healthz
+    autoDeploy: true
+    envVars:
+      # ── non-secret config (safe to commit) ──
+      - key: NODE_ENV
+        value: production
+      - key: PLATFORM_HOST
+        value: nebulabookings.com
+      - key: CUSTOMERS_TARGET
+        value: customers.nebulabookings.com
+      - key: SMTP_HOST
+        value: smtp.gmail.com
+      - key: SMTP_PORT
+        value: "465"
+      - key: SMTP_SECURE
+        value: "true"
+      - key: SMTP_USER
+        value: durand2511@gmail.com
+      - key: SMTP_FROM
+        value: durand2511@gmail.com
+      - key: LOG_LEVEL
+        value: info
+      # ── secrets: you fill these in the Render dashboard (kept out of git) ──
+      - key: DATABASE_URL
+        sync: false
+      - key: EMAIL_SECRET_KEY
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      # PUBLIC_APP_URL / PUBLIC_API_URL: add in the dashboard once you know the Render URL / your domain.
+      # NOT needed: PORT (Render injects it) and AI_INTEGRATIONS_OPENAI_* (image/audio AI is optional).
