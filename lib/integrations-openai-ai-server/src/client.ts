@@ -1,15 +1,9 @@
-import OpenAI from "openai";
+import Anthropic from "@anthropic-ai/sdk";
 import { fetch as undiciFetch, Agent } from "undici";
 
-if (!process.env.AI_INTEGRATIONS_OPENAI_BASE_URL) {
+if (!process.env.ANTHROPIC_API_KEY) {
   throw new Error(
-    "AI_INTEGRATIONS_OPENAI_BASE_URL must be set. Did you forget to provision the OpenAI AI integration?",
-  );
-}
-
-if (!process.env.AI_INTEGRATIONS_OPENAI_API_KEY) {
-  throw new Error(
-    "AI_INTEGRATIONS_OPENAI_API_KEY must be set. Did you forget to provision the OpenAI AI integration?",
+    "ANTHROPIC_API_KEY must be set. Did you forget to configure the Anthropic AI integration?",
   );
 }
 
@@ -26,12 +20,12 @@ const aiDispatcher = new Agent({
   bodyTimeout: AI_REQUEST_TIMEOUT_MS,
 });
 
-type OpenAIClientOptions = NonNullable<ConstructorParameters<typeof OpenAI>[0]>;
-
-export const openai = new OpenAI({
-  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+export const anthropic = new Anthropic({
+  apiKey: process.env.ANTHROPIC_API_KEY,
   timeout: AI_REQUEST_TIMEOUT_MS,
-  fetch: undiciFetch as unknown as OpenAIClientOptions["fetch"],
-  fetchOptions: { dispatcher: aiDispatcher } as unknown as OpenAIClientOptions["fetchOptions"],
+  fetch: (url, init) =>
+    undiciFetch(url as string, {
+      ...(init as Record<string, unknown>),
+      dispatcher: aiDispatcher,
+    }) as Promise<Response>,
 });

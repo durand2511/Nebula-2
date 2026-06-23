@@ -1,0 +1,1220 @@
+/**
+ * HARD-CODED booking app — inserted deterministically (no AI generation) when a user asks
+ * for a "booking app". A self-contained, working front-end: all client + studio features run
+ * in the browser via localStorage. Backend-dependent features (Stripe, e-mail, Zoom/Calendar/
+ * Zapier/Mailchimp, native apps) are shown as polished demo UI, ready to wire to a real backend.
+ *
+ * The whole app is scoped under #booking-app and uses `font-family: inherit` + the site's
+ * primary colour (var(--buildly-primary)) so it blends into the host site's styling.
+ *
+ * NOTE: the app's own JS uses string concatenation (no backticks / no ${...}) on purpose, so
+ * this module can hold it inside a single template literal without escaping headaches.
+ */
+
+const BOOKING_APP_MAIN = `<section id="booking-app">
+<style>
+#booking-app{--ba:var(--buildly-primary,#1f6f78);--ba-bg:#f6f7f9;--ba-line:#e6e8ec;--ba-ink:#1f2937;--ba-muted:#6b7280;--ba-soft:color-mix(in srgb,var(--ba) 8%,#fff);--ba-soft2:color-mix(in srgb,var(--ba) 14%,#fff);--ba-ring:color-mix(in srgb,var(--ba) 28%,transparent);--ba-shadow:0 1px 2px rgba(17,24,39,.05),0 10px 30px -16px rgba(17,24,39,.22);font-family:inherit;color:var(--ba-ink);max-width:1080px;margin:0 auto;padding:28px 20px 72px;box-sizing:border-box;-webkit-font-smoothing:antialiased}
+#booking-app *{box-sizing:border-box}
+#booking-app .ba-h{font-size:28px;font-weight:800;letter-spacing:-.01em;margin:0 0 4px}
+#booking-app .ba-sub{color:var(--ba-muted);margin:0 0 22px;font-size:14px}
+#booking-app .ba-tabs{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:24px;padding:5px;background:color-mix(in srgb,var(--ba) 5%,#fff);border:1px solid var(--ba-line);border-radius:14px;overflow-x:auto}
+#booking-app .ba-tab{appearance:none;border:0;background:none;font:inherit;font-weight:600;font-size:14px;color:var(--ba-muted);padding:9px 16px;cursor:pointer;border-radius:10px;white-space:nowrap;transition:background .15s ease,color .15s ease}
+#booking-app .ba-tab:hover{color:var(--ba-ink);background:rgba(17,24,39,.04)}
+#booking-app .ba-tab.is-on{color:var(--ba);background:#fff;box-shadow:0 1px 2px rgba(17,24,39,.06),0 2px 8px -4px rgba(17,24,39,.2);font-weight:700}
+#booking-app .ba-panel{display:none;animation:bafade .2s ease}
+#booking-app .ba-panel.is-on{display:block}
+@keyframes bafade{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+#booking-app .ba-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:16px}
+#booking-app .ba-card{border:1px solid var(--ba-line);border-radius:16px;padding:20px;background:#fff;box-shadow:var(--ba-shadow)}
+#booking-app .ba-card h4{margin:0 0 3px;font-size:16px;font-weight:700;letter-spacing:-.01em}
+#booking-app .ba-meta{color:var(--ba-muted);font-size:13px;margin:0 0 12px;line-height:1.5}
+#booking-app .ba-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-bottom:24px}
+#booking-app .ba-stat{border:1px solid var(--ba-line);border-radius:16px;padding:18px 18px;background:linear-gradient(180deg,var(--ba-soft),#fff);box-shadow:var(--ba-shadow);transition:transform .16s ease}
+#booking-app .ba-stat:hover{transform:translateY(-2px)}
+#booking-app .ba-stat b{display:block;font-size:30px;line-height:1.05;font-weight:800;color:var(--ba);letter-spacing:-.02em}
+#booking-app .ba-stat span{color:var(--ba-muted);font-size:13px;font-weight:500}
+#booking-app .ba-btn{appearance:none;border:0;border-radius:11px;background:var(--ba);color:#fff;font:inherit;font-weight:700;font-size:14px;padding:10px 16px;cursor:pointer;transition:filter .15s ease,box-shadow .15s ease,transform .05s ease;box-shadow:0 1px 2px rgba(17,24,39,.12)}
+#booking-app .ba-btn:hover{filter:brightness(1.06);box-shadow:0 4px 14px -4px var(--ba-ring)}
+#booking-app .ba-btn:active{transform:translateY(1px)}
+#booking-app .ba-btn:focus-visible{outline:none;box-shadow:0 0 0 3px var(--ba-ring)}
+#booking-app .ba-btn[disabled]{opacity:.45;cursor:not-allowed;box-shadow:none;filter:none}
+#booking-app .ba-btn.ghost{background:#fff;color:var(--ba-ink);border:1px solid var(--ba-line);box-shadow:none}
+#booking-app .ba-btn.ghost:hover{background:rgba(17,24,39,.04);filter:none}
+#booking-app .ba-btn.warn{background:#fff;color:#b91c1c;border:1px solid #fecaca;box-shadow:none}
+#booking-app .ba-btn.warn:hover{background:#fef2f2;filter:none}
+#booking-app .ba-btn.warn:focus-visible{box-shadow:0 0 0 3px rgba(220,38,38,.25)}
+#booking-app .ba-btn.sm{padding:7px 12px;font-size:13px;border-radius:9px}
+#booking-app .ba-badge{display:inline-flex;align-items:center;gap:4px;font-size:12px;font-weight:600;padding:3px 10px;border-radius:999px;background:var(--ba-bg);color:#374151;border:1px solid transparent}
+#booking-app .ba-badge.full{background:#fef2f2;color:#b91c1c;border-color:#fecaca}
+#booking-app .ba-badge.ok{background:#ecfdf5;color:#047857;border-color:#a7f3d0}
+#booking-app .ba-row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+#booking-app label.ba-f{display:block;font-size:13px;font-weight:600;color:#374151;margin:12px 0 5px}
+#booking-app input,#booking-app select,#booking-app textarea{font:inherit;font-size:14px;width:100%;min-height:42px;padding:10px 12px;border:1px solid var(--ba-line);border-radius:11px;background:#fff;color:var(--ba-ink);transition:border-color .15s ease,box-shadow .15s ease}
+#booking-app input:focus,#booking-app select:focus,#booking-app textarea:focus{outline:none;border-color:var(--ba);box-shadow:0 0 0 3px var(--ba-ring)}
+#booking-app .ba-2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+#booking-app .ba-list{display:flex;flex-direction:column;gap:10px}
+#booking-app .ba-scroll{max-height:320px;overflow-y:auto;padding-right:6px}
+#booking-app .ba-agenda{display:flex;flex-direction:column;gap:18px}
+#booking-app .ba-day-h{font-weight:800;font-size:15px;text-transform:capitalize;margin:0 0 10px;padding-bottom:6px;border-bottom:2px solid var(--ba-line)}
+#booking-app .ba-appt{display:flex;gap:14px;align-items:stretch;margin-bottom:10px}
+#booking-app .ba-appt-time{flex:0 0 56px;font-weight:700;font-size:14px;color:#6b7280;padding-top:14px;text-align:right}
+#booking-app .ba-appt-card{flex:1;border:1px solid var(--ba-line);border-left:5px solid var(--ba);border-radius:12px;padding:12px 14px;background:#fff;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+#booking-app .ba-appt-card.is-full{border-left-color:#dc2626}
+#booking-app .ba-appt-card.is-mine{border-left-color:#047857;background:#f0fdf8}
+#booking-app .ba-appt-main{min-width:0}
+#booking-app .ba-appt-main b{font-size:15px}
+#booking-app .ba-empty{display:flex;gap:14px}
+#booking-app .ba-empty .ba-empty-card{flex:1;border:1px dashed var(--ba-line);border-radius:12px;padding:12px 14px;color:#9ca3af;font-size:13px;font-style:italic;margin-left:70px}
+#booking-app .ba-weeknav{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:18px}
+#booking-app .ba-weeknav b{font-size:15px}
+#booking-app .ba-item{border:1px solid var(--ba-line);border-radius:13px;padding:13px 15px;background:#fff;transition:border-color .15s ease,box-shadow .15s ease}
+#booking-app .ba-item:hover{border-color:color-mix(in srgb,var(--ba) 30%,var(--ba-line));box-shadow:0 4px 14px -10px rgba(17,24,39,.3)}
+#booking-app .ba-note{font-size:12px;color:#9ca3af;margin-top:8px;line-height:1.5}
+#booking-app pre{background:#0f172a;color:#e2e8f0;padding:12px;border-radius:10px;overflow:auto;font-size:12px}
+@media(max-width:560px){#booking-app{padding:18px 14px 56px}#booking-app .ba-2{grid-template-columns:1fr}#booking-app .ba-card{padding:16px}#booking-app .ba-h{font-size:23px}#booking-app .ba-row{gap:8px}#booking-app .ba-tabs{gap:5px}}
+#booking-app .ba-auth{max-width:520px;margin:10px auto}
+#booking-app .ba-auth h2{font-size:24px;font-weight:800;margin:0 0 4px}
+#booking-app .ba-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+@media(max-width:560px){#booking-app .ba-3{grid-template-columns:1fr}}
+</style>
+
+<div class="ba-screen" data-screen="login"></div>
+<div class="ba-screen" data-screen="app" style="display:none"></div>
+
+<script>
+(function(){
+  var root=document.getElementById('booking-app'); if(!root||root.__init)return; root.__init=1;
+  // Storage is namespaced PER SITE/PROJECT so logins, bookings and accounts never leak from
+  // one website's booking app into another's (the preview shares one localStorage origin).
+  var KEY=(function(){var id='';try{var m=(location.pathname||'').match(/projects\\/(\\d+)/);if(m)id=m[1];}catch(e){}
+    if(!id){try{id=(location.hostname||'')+(location.pathname||'');}catch(e){}}
+    return 'ba_state_v3_'+(id||'default').replace(/[^a-zA-Z0-9_-]+/g,'-');})();
+  var DOW=['zo','ma','di','wo','do','vr','za'];
+  var DOWF=['zondag','maandag','dinsdag','woensdag','donderdag','vrijdag','zaterdag'];
+  var MON=['jan','feb','mrt','apr','mei','jun','jul','aug','sep','okt','nov','dec'];
+  var activeTab='boeken';
+  var authView='home';
+  var SRV=false; // server-mode: data komt van de API i.p.v. localStorage (gezet tijdens boot)
+  var agendaWeek=0; // 0 = deze week; navigeren met de week-knoppen
+  // Accounts are configured VIA THE CHAT (the AI asks) and baked into the line below by
+  // buildBookingAppPage, so customers never see a setup screen — only a plain login.
+  var BAKED=__BAKED__;
+  function bakedAccounts(){return ((BAKED&&BAKED.accounts)||[]).map(function(a){return {role:a.role,name:a.name,email:(a.email||'').toLowerCase(),password:a.password};});}
+  function uid(){return Date.now().toString(36)+Math.floor(Math.random()*1e4).toString(36);}
+  function pad(n){return (n<10?'0':'')+n;}
+  function ymd(d){return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());}
+  // Is this date+time already in the past? (so you can't book lessons that have started/passed)
+  function isPast(dateStr,time){try{return new Date((dateStr||'')+'T'+(time||'00:00')+':00').getTime()<Date.now();}catch(e){return false;}}
+  // The exact start moment of a lesson (date + time) as a timestamp.
+  function lessonStart(cls,date){try{return new Date((date||'')+'T'+((cls&&cls.time)||'00:00')+':00').getTime();}catch(e){return NaN;}}
+  // Booking window: bookDays = how many days BEFORE the lesson booking opens (0 = no limit).
+  function bookTooEarly(cls,date){var bd=cls&&cls.bookDays;if(!bd||bd<=0)return false;var t=lessonStart(cls,date);return !isNaN(t)&&Date.now()<t-bd*86400000;}
+  function bookOpensOn(cls,date){var bd=cls&&cls.bookDays;if(!bd||bd<=0)return '';var t=lessonStart(cls,date);if(isNaN(t))return '';return ymd(new Date(t-bd*86400000));}
+  // Cancellation deadline: cancelHours = until how many hours before the start you may cancel (0 = always).
+  function cancelClosed(cls,date){var ch=cls&&cls.cancelHours;if(!ch||ch<=0)return false;var t=lessonStart(cls,date);return !isNaN(t)&&Date.now()>t-ch*3600000;}
+  // Readable date like "ma 23 jun 2026" from a YYYY-MM-DD string.
+  function fmtDate(dateStr){var p=(dateStr||'').split('-');if(p.length!==3)return dateStr||'';var d=new Date(+p[0],+p[1]-1,+p[2]);return DOW[d.getDay()]+' '+d.getDate()+' '+MON[d.getMonth()]+' '+d.getFullYear();}
+  function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+
+  function seed(){
+    var accs=bakedAccounts();
+    var firstT=accs.filter(function(a){return a.role==='teacher';})[0]||accs[0]||{};
+    return {
+      accounts:accs, session:null,
+      classes:[],   // leeg — de studio voegt zelf lessen toe
+      bookings:[],
+      members:[],    // leeg — de studio voegt zelf strippenkaarten/abonnementen toe
+      wallets:{},
+      pay:{tegoed:true,stripe:true},
+      sell:{strippenkaart:true,abonnement:true},
+      reminders:true,
+      purchases:[],  // Stripe-aankopen (strippenkaart/abonnement) zodat de admin kan terugbetalen
+      integrations:{stripe:false,paypal:false,mailchimp:false,gcal:false,zoom:false,zapier:false,api:false}
+    };
+  }
+  var S; try{S=JSON.parse(localStorage.getItem(KEY))||seed();}catch(e){S=seed();}
+  // Backfill fields added in later versions so an older saved state never crashes a panel
+  // (e.g. a state from before "integrations" existed would blank the Integraties tab).
+  (function(){var d=seed();for(var k in d){if(S[k]===undefined||S[k]===null)S[k]=d[k];}})();
+  if(!S.classes||!S.accounts)S=seed();
+  // Baked (chat-configured) accounts are authoritative; keep any teachers the admin added in-app.
+  (function(){var baked=bakedAccounts();if(baked.length){var extra=(S.accounts||[]).filter(function(a){return !baked.some(function(b){return b.email===a.email;});});S.accounts=baked.concat(extra);
+    if(S.session&&!S.accounts.some(function(a){return a.email===S.session.email&&a.password===(S.session.pw||a.password);}))S.session=null;}})();
+  function save(){if(SRV)return;try{localStorage.setItem(KEY,JSON.stringify(S));}catch(e){}}
+
+  // ── Stripe payment helpers ────────────────────────────────────────────────
+  function setPending(p){try{localStorage.setItem(KEY+'_pending',JSON.stringify(p));}catch(e){}}
+  function getPending(){try{return JSON.parse(localStorage.getItem(KEY+'_pending')||'null');}catch(e){return null;}}
+  function clearPending(){try{localStorage.removeItem(KEY+'_pending');}catch(e){}}
+  // Open a payment dialog with ONE reliable "Betaal met Stripe" link (Stripe can't be iframed,
+  // so it opens a new tab). The overlay blocks repeat-clicks. We stash what's being paid for;
+  // ONLY after returning (?betaald=1) AND server-verifying the payment are credits/booking granted.
+  function payViaStripe(kind,name,amount,pending){
+    if(!projId()){alert('Betalen werkt in de gepubliceerde app.');return;}
+    if(root.querySelector('#ba-pay-ov'))return; // al een betaalvenster open
+    setPending(pending);
+    var ov=document.createElement('div');ov.id='ba-pay-ov';
+    ov.style.cssText='position:fixed;inset:0;z-index:2147483647;background:rgba(15,23,42,.55);display:flex;align-items:center;justify-content:center;padding:20px';
+    ov.innerHTML='<div style="background:#fff;border-radius:14px;max-width:380px;width:100%;padding:22px;font:inherit;font-family:inherit;color:#1f2937"><h3 style="margin:0 0 4px;font-size:18px">Betalen</h3><p style="color:#6b7280;font-size:14px;margin:0 0 16px">'+esc(name)+' — €'+amount+'</p><div id="ba-pay-body" style="font-size:14px;color:#6b7280">Betaling voorbereiden…</div><div style="margin-top:18px;text-align:right"><button id="ba-pay-cancel" class="ba-btn ghost sm">Sluiten</button></div></div>';
+    root.appendChild(ov);
+    ov.querySelector('#ba-pay-cancel').onclick=function(){clearPending();ov.parentNode&&ov.parentNode.removeChild(ov);};
+    var base=location.href.replace(/[?&](betaald|geannuleerd)=1/g,'').replace(/[?&]session_id=[^&]*/g,'');
+    var sep=base.indexOf('?')>-1?'&':'?';
+    fetch(api('stripe/checkout'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kind:kind,name:name,amount:amount,successUrl:base+sep+'betaald=1&session_id={CHECKOUT_SESSION_ID}',cancelUrl:base+sep+'geannuleerd=1'})})
+      .then(function(r){return r.json();}).then(function(d){
+        var body=ov.querySelector('#ba-pay-body');if(!body)return;
+        if(d.url){body.innerHTML='<a href="'+d.url+'" target="_blank" rel="noopener" style="display:inline-block;background:var(--ba);color:#fff;text-decoration:none;font-weight:700;padding:10px 16px;border-radius:10px">Betaal met Stripe ↗</a><p style="color:#9ca3af;font-size:12px;margin:10px 0 0">Opent in een nieuw tabblad. Daarna kom je terug en wordt je aankoop bevestigd.</p>';}
+        else{clearPending();body.textContent=d.error||'Afrekenen mislukt.';}
+      }).catch(function(){clearPending();var body=ov.querySelector('#ba-pay-body');if(body)body.textContent='Afrekenen mislukt.';});
+  }
+
+  function teacherAccounts(){return S.accounts.filter(function(a){return a.role==='teacher';});}
+  function teacherOptions(sel){return teacherAccounts().map(function(a){return '<option value="'+esc(a.email)+'"'+(a.email===sel?' selected':'')+'>'+esc(a.name)+'</option>';}).join('');}
+  function accName(email){var a=S.accounts.filter(function(x){return x.email===email;})[0];return a?a.name:'';}
+  function accPhone(email){var a=S.accounts.filter(function(x){return x.email===email;})[0];return (a&&a.phone)||'';}
+  function isValidEmail(e){return /.+@.+\..+/.test(e);}
+
+  // occurrences for the next 14 days from recurring + one-off classes
+  function occurrences(){
+    var out=[],today=new Date();today.setHours(0,0,0,0);
+    // Concrete dated lessons that are today or in the future.
+    S.classes.forEach(function(c){
+      if(!c.recurring&&c.date){var dd=new Date(c.date+'T00:00:00');if(dd>=today)out.push({cls:c,date:c.date,dow:dd.getDay()});}
+    });
+    // Legacy recurring weekly lessons, expanded over the next 4 weeks.
+    for(var i=0;i<28;i++){
+      var d=new Date(today);d.setDate(today.getDate()+i);var key=ymd(d);
+      S.classes.forEach(function(c){if(c.recurring&&c.day===d.getDay())out.push({cls:c,date:key,dow:d.getDay()});});
+    }
+    out.sort(function(a,b){return (a.date+(a.cls.time||''))<(b.date+(b.cls.time||''))?-1:1;});
+    return out;
+  }
+  function booked(classId,date){if(SRV){var k=classId+'|'+date;return (S.counts&&S.counts[k]&&S.counts[k].booked)||0;}return S.bookings.filter(function(b){return b.classId===classId&&b.date===date&&b.status==='booked';}).length;}
+  function myEmail(){return (S.session&&S.session.email)||'';}
+  function mine(classId,date){var e=myEmail();var list=SRV?(S.myBookings||[]):S.bookings;return list.filter(function(b){return b.classId===classId&&b.date===date&&b.bookerEmail===e&&(b.status==='booked'||b.status==='waitlist');})[0];}
+  if(!S.wallets)S.wallets={};
+  if(!S.pay)S.pay={tegoed:true,stripe:true};
+  if(!S.sell)S.sell={strippenkaart:true,abonnement:true};
+  function walletFor(email){if(!S.wallets[email])S.wallets[email]={credits:0,membership:null,validUntil:null};return S.wallets[email];}
+  // A membership is "unlimited" when explicitly flagged, or (legacy) an abonnement without a lesson count.
+  function isUnlimited(m){return m.unlimited!=null?m.unlimited:(m.type==='abonnement'&&!m.credits);}
+  // ── booking-credit rules (strippenkaart credits / unlimited / X-per-maand membership) ──
+  // A membership has an expiry date (validUntil, YYYY-MM-DD); past that it no longer counts.
+  function membershipExpired(W){return !!(W&&W.validUntil&&W.validUntil<ymd(new Date()));}
+  // Monthly memberships ("8 lessen per maand") reset their allotment at the start of each month.
+  function ensureMonthlyReset(W){if(!W||!W.monthly)return;var nowM=ymd(new Date()).slice(0,7);
+    if(W.monthly.period!==nowM){W.monthly.period=nowM;W.monthly.remaining=W.monthly.limit;}}
+  // What can THIS wallet use to book right now? Returns {ok, reason, type}. type: credit|unlimited|monthly.
+  function bookingCredit(W){
+    if(W.credits>0)return {ok:true,type:'credit'};
+    if(W.membership){
+      if(membershipExpired(W))return {ok:false,reason:'Je abonnement is verlopen. Verleng het of betaal met Stripe.'};
+      // No card was imported with a Mindbody membership → a payment method must be linked first.
+      // TODO Stripe: when the studio links a Stripe payment method for this customer, clear needsPayment.
+      if(W.needsPayment)return {ok:false,reason:'Je abonnement heeft nog geen betaalmethode. Neem contact op met de studio om je betaling te koppelen.'};
+      if(W.monthly){ensureMonthlyReset(W);if(W.monthly.remaining>0)return {ok:true,type:'monthly'};
+        return {ok:false,reason:'Je maandtegoed is op. Volgende maand heb je weer '+W.monthly.limit+' lessen.'};}
+      return {ok:true,type:'unlimited'}; // unlimited (incl. legacy membership = string)
+    }
+    return {ok:false,reason:'Je hebt geen tegoed: geen strippenkaart-credits en geen lopend abonnement. Koop er een bij "Mijn strippenkaart" of betaal met Stripe.'};
+  }
+  // Human label for the current tegoed (credits / abonnement name / X per maand).
+  function walletLabel(W){
+    if(W.credits>0)return W.credits+' credits';
+    if(W.membership){if(membershipExpired(W))return 'abonnement verlopen';
+      if(W.monthly){ensureMonthlyReset(W);return esc(W.membership)+' ('+W.monthly.remaining+'/'+W.monthly.limit+' deze maand)';}
+      return esc(W.membership);}
+    return '';
+  }
+  function walletBadge(W){var l=walletLabel(W);return l?('<span class="ba-badge ok">'+l+'</span>'):'<span class="ba-badge">geen tegoed</span>';}
+  // Load Mindbody-imported entitlements into a customer's wallet (keyed by e-mail).
+  function applyEntitlements(email,ents){var W=walletFor(email);
+    (ents||[]).forEach(function(e){
+      if(e.kind==='class_pack'){W.credits+=(e.remaining||0);}
+      else if(e.kind==='membership'){W.membership=e.name||'Abonnement';W.needsPayment=!!e.needsPayment;
+        if(e.expiresAt){try{W.validUntil=ymd(new Date(e.expiresAt));}catch(x){}}
+        if(e.unlimited){W.unlimited=true;W.monthly=null;}
+        else if(e.perMonth){W.unlimited=false;W.monthly={limit:e.perMonth,remaining:(e.remaining!=null?e.remaining:e.perMonth),period:ymd(new Date()).slice(0,7)};}
+      }
+    });save();}
+  // Pending activation (from a Mindbody activation link) survives reloads until consumed by register/login.
+  function getAct(){try{return JSON.parse(localStorage.getItem(KEY+'_activation')||'null');}catch(e){return null;}}
+  function setAct(a){try{localStorage.setItem(KEY+'_activation',JSON.stringify(a));}catch(e){}}
+  function clearAct(){try{localStorage.removeItem(KEY+'_activation');}catch(e){}}
+  var activationMsg='',activationEmail='';
+  function waitN(classId,date){if(SRV){var k=classId+'|'+date;return (S.counts&&S.counts[k]&&S.counts[k].waitlist)||0;}return S.bookings.filter(function(b){return b.classId===classId&&b.date===date&&b.status==='waitlist';}).length;}
+  // Classes occurring on a specific day (recurring weekly or one-off), with bookability flag.
+  function classesOn(d){
+    var key=ymd(d),dow=d.getDay();var out=[];
+    S.classes.forEach(function(c){if(c.recurring?(c.day===dow):(c.date===key))out.push({cls:c,date:key,dow:dow,past:isPast(key,c.time)});});
+    out.sort(function(a,b){return a.cls.time<b.cls.time?-1:(a.cls.time>b.cls.time?1:0);});
+    return out;
+  }
+
+  // ---------- panels ----------
+  // One class occurrence rendered as an agenda appointment (time + card).
+  function apptBlock(o){
+    var b=booked(o.cls.id,o.date),free=o.cls.cap-b,full=free<=0,me=mine(o.cls.id,o.date);
+    var mineBooked=me&&me.status==='booked';
+    var status= mineBooked?'<span class="ba-badge ok">geboekt</span>': me&&me.status==='waitlist'?'<span class="ba-badge">wachtlijst</span>': full?'<span class="ba-badge full">vol'+(waitN(o.cls.id,o.date)?(' · '+waitN(o.cls.id,o.date)+' wachtlijst'):'')+'</span>':'<span class="ba-badge">'+free+' vrij</span>';
+    var bookLabel=(S.pay.tegoed?'tegoed':'stripe')==='stripe'?'Kopen':'Boeken';
+    var tooEarly=bookTooEarly(o.cls,o.date);
+    var btn;
+    if(mineBooked)btn=cancelClosed(o.cls,o.date)?'<button class="ba-btn sm" disabled>Annuleren gesloten</button>':'<button class="ba-btn warn sm" data-act="cancel" data-b="'+me.id+'">Annuleren</button>';
+    else if(me&&me.status==='waitlist')btn='<button class="ba-btn ghost sm" data-act="cancel" data-b="'+me.id+'">Van wachtlijst af</button>';
+    else if(o.past)btn='<button class="ba-btn sm" disabled>Verlopen</button>';
+    else if(tooEarly)btn='<button class="ba-btn sm" disabled>Boekbaar vanaf '+fmtDate(bookOpensOn(o.cls,o.date))+'</button>';
+    else if(full)btn='<button class="ba-btn ghost sm" data-act="wait" data-c="'+o.cls.id+'" data-d="'+o.date+'">Wachtlijst</button>';
+    else btn='<button class="ba-btn sm" data-act="book" data-c="'+o.cls.id+'" data-d="'+o.date+'">'+bookLabel+'</button>';
+    var payOpts='';
+    if(S.pay.tegoed)payOpts+='<option value="tegoed">Strippenkaart / abonnement</option>';
+    if(S.pay.stripe)payOpts+='<option value="stripe">Stripe</option>';
+    var paySel=(!mineBooked&&!(me&&me.status==='waitlist')&&!o.past&&!tooEarly&&!full&&S.pay.tegoed&&S.pay.stripe)?('<select class="ba-pay" data-c="'+o.cls.id+'" data-d="'+o.date+'" style="width:auto">'+payOpts+'</select>'):'';
+    var cls='ba-appt-card'+(mineBooked?' is-mine':(full?' is-full':''));
+    return '<div class="ba-appt"><div class="ba-appt-time">'+esc(o.cls.time)+'</div>'+
+      '<div class="'+cls+'"><div class="ba-appt-main"><b>'+esc(o.cls.title)+'</b> '+status+'<div class="ba-meta" style="margin:2px 0 0">'+esc(o.cls.teacher||'')+(o.cls.price?(' · €'+o.cls.price):'')+'</div></div>'+
+      '<div class="ba-row" style="gap:6px;justify-content:flex-end">'+paySel+btn+'</div></div></div>';
+  }
+  // Booking view = a WEEK agenda: all 7 days (empty days too), navigate week by week.
+  function pBoeken(){
+    var W=walletFor(myEmail());
+    var wallet=walletBadge(W);
+    var today=new Date();today.setHours(0,0,0,0);
+    var monOff=(today.getDay()+6)%7;                       // dagen sinds maandag
+    var start=new Date(today);start.setDate(today.getDate()-monOff+agendaWeek*7);
+    var end=new Date(start);end.setDate(start.getDate()+6);
+    var range=start.getDate()+' '+MON[start.getMonth()]+' – '+end.getDate()+' '+MON[end.getMonth()]+' '+end.getFullYear();
+    var h='<div class="ba-row" style="margin-bottom:12px"><div class="ba-meta" style="margin:0">Jouw tegoed: '+wallet+'</div></div>';
+    h+='<div class="ba-weeknav"><button class="ba-btn ghost sm" data-act="weekprev"'+(agendaWeek<=0?' disabled':'')+'>← Vorige week</button><b>'+range+'</b><button class="ba-btn ghost sm" data-act="weeknext">Volgende week →</button></div>';
+    h+='<div class="ba-agenda">';
+    for(var i=0;i<7;i++){
+      var d=new Date(start);d.setDate(start.getDate()+i);
+      var occ=classesOn(d);
+      var isToday=ymd(d)===ymd(new Date());
+      h+='<div class="ba-day"><div class="ba-day-h">'+DOWF[d.getDay()]+' '+d.getDate()+' '+MON[d.getMonth()]+' '+d.getFullYear()+(isToday?' <span class="ba-badge ok">vandaag</span>':'')+'</div>';
+      if(!occ.length)h+='<div class="ba-empty"><div class="ba-empty-card">Geen lessen</div></div>';
+      else occ.forEach(function(o){h+=apptBlock(o);});
+      h+='</div>';
+    }
+    return h+'</div>';
+  }
+  // Teacher agenda block: read-only schedule view (no booking buttons), shows bookings/capacity.
+  // Mode badge + an "open online les" link (for online/hybride classes). Used in teacher agenda + admin lists.
+  function modeBadge(c){return c.mode==='online'?'<span class="ba-badge">💻 Online</span>':c.mode==='hybride'?'<span class="ba-badge">🔀 Hybride</span>':'';}
+  function onlineLine(c){return ((c.mode==='online'||c.mode==='hybride')&&c.onlineLink)?'<div class="ba-meta" style="margin:4px 0 0">💻 <a href="'+esc(c.onlineLink)+'" target="_blank" rel="noopener" style="color:var(--ba);font-weight:600">Online les openen ↗</a>'+(c.onlineInfo?(' · '+esc(c.onlineInfo)):'')+'</div>':'';}
+  function teacherApptBlock(o){
+    var b=booked(o.cls.id,o.date),wl=waitN(o.cls.id,o.date);
+    var status='<span class="ba-badge'+(b>=o.cls.cap?' full':' ok')+'">'+b+'/'+o.cls.cap+' geboekt'+(wl?(' · '+wl+' wachtlijst'):'')+'</span>';
+    return '<div class="ba-appt"><div class="ba-appt-time">'+esc(o.cls.time)+'</div>'+
+      '<div class="ba-appt-card"><div class="ba-appt-main"><b>'+esc(o.cls.title)+'</b> '+modeBadge(o.cls)+' '+status+(o.past?' <span class="ba-meta">(geweest)</span>':'')+onlineLine(o.cls)+'</div></div></div>';
+  }
+  // Teacher's own week agenda — identical look to the booking agenda, but only THEIR lessons
+  // (the ones the admin assigned to them via teacherEmail).
+  function pMijnAgenda(){
+    var email=(S.session&&S.session.email)||'';
+    var today=new Date();today.setHours(0,0,0,0);
+    var monOff=(today.getDay()+6)%7;
+    var start=new Date(today);start.setDate(today.getDate()-monOff+agendaWeek*7);
+    var end=new Date(start);end.setDate(start.getDate()+6);
+    var range=start.getDate()+' '+MON[start.getMonth()]+' – '+end.getDate()+' '+MON[end.getMonth()]+' '+end.getFullYear();
+    var h='<div class="ba-row" style="margin-bottom:12px"><div class="ba-meta" style="margin:0">Jouw lesrooster — alleen lessen die aan jou zijn toegewezen.</div></div>';
+    h+='<div class="ba-weeknav"><button class="ba-btn ghost sm" data-act="weekprev"'+(agendaWeek<=0?' disabled':'')+'>← Vorige week</button><b>'+range+'</b><button class="ba-btn ghost sm" data-act="weeknext">Volgende week →</button></div>';
+    h+='<div class="ba-agenda">';
+    for(var i=0;i<7;i++){
+      var d=new Date(start);d.setDate(start.getDate()+i);
+      var occ=classesOn(d).filter(function(o){return o.cls.teacherEmail===email;});
+      var isToday=ymd(d)===ymd(new Date());
+      h+='<div class="ba-day"><div class="ba-day-h">'+DOWF[d.getDay()]+' '+d.getDate()+' '+MON[d.getMonth()]+' '+d.getFullYear()+(isToday?' <span class="ba-badge ok">vandaag</span>':'')+'</div>';
+      if(!occ.length)h+='<div class="ba-empty"><div class="ba-empty-card">Geen lessen</div></div>';
+      else occ.forEach(function(o){h+=teacherApptBlock(o);});
+      h+='</div>';
+    }
+    return h+'</div>';
+  }
+
+  function occOptions(sel){return occurrences().map(function(o){var v=o.cls.id+'|'+o.date;return '<option value="'+v+'"'+(v===sel?' selected':'')+'>'+esc(o.cls.title)+' — '+fmtDate(o.date)+' '+esc(o.cls.time)+'</option>';}).join('');}
+
+  // Reusable "create class" card. ownerEmail set => teacher mode (fixed owner); else admin (picks teacher).
+  function createClassCard(ownerEmail){
+    var teacherField = ownerEmail
+      ? '<input type="hidden" id="ba-cte" value="'+esc(ownerEmail)+'"><label class="ba-f">Docent</label><input value="'+esc(accName(ownerEmail))+'" disabled>'
+      : '<label class="ba-f">Docent</label><select id="ba-cte">'+teacherOptions('')+'</select>';
+    return '<div class="ba-card"><h4>Nieuwe les inplannen</h4>'+
+      '<label class="ba-f">Titel</label><input id="ba-ct" placeholder="bijv. Vinyasa Flow">'+
+      teacherField+
+      '<div class="ba-2"><div><label class="ba-f">Datum</label><input id="ba-cdate" type="date" value="'+ymd(new Date())+'" min="'+ymd(new Date())+'"></div>'+
+      '<div><label class="ba-f">Tijd</label><input id="ba-ctm" type="time" value="09:00"></div></div>'+
+      '<div class="ba-2"><div><label class="ba-f">Max. plekken</label><input id="ba-cc" type="number" value="12"></div>'+
+      '<div><label class="ba-f">Prijs per les (€, voor Stripe)</label><input id="ba-cp" type="number" step="0.01" value="15"></div></div>'+
+      '<div class="ba-2"><div><label class="ba-f">Boeken kan tot … dagen vooraf</label><input id="ba-cbook" type="number" min="0" value="14"><span class="ba-note" style="margin:0">0 = geen limiet</span></div>'+
+      '<div><label class="ba-f">Annuleren kan tot … uur voor de les</label><input id="ba-ccancel" type="number" min="0" value="12"><span class="ba-note" style="margin:0">0 = altijd mogelijk</span></div></div>'+
+      '<label class="ba-f">Type les</label>'+
+      '<div class="ba-row" style="justify-content:flex-start;gap:16px;margin:2px 0 4px">'+
+        '<label class="ba-f" style="margin:0;font-weight:500"><input type="radio" name="ba-cmode" value="fysiek" checked style="width:auto;margin-right:6px">Fysiek</label>'+
+        '<label class="ba-f" style="margin:0;font-weight:500"><input type="radio" name="ba-cmode" value="online" style="width:auto;margin-right:6px">Online</label>'+
+        '<label class="ba-f" style="margin:0;font-weight:500"><input type="radio" name="ba-cmode" value="hybride" style="width:auto;margin-right:6px">Hybride</label></div>'+
+      '<label class="ba-f">Online link (Zoom / Google Meet)</label><input id="ba-clink" placeholder="https://zoom.us/j/...">'+
+      '<label class="ba-f">Extra info (Meeting ID / wachtwoord / instructies)</label><textarea id="ba-cinfo" rows="2" placeholder="Meeting ID: 123 4567 · Wachtwoord: yoga" style="width:100%;box-sizing:border-box;resize:vertical;font:inherit;padding:10px 12px;border:1px solid #d1d5db;border-radius:11px"></textarea>'+
+      '<div style="margin-top:12px"><button class="ba-btn" data-act="addclass">Les toevoegen</button></div></div>';
+  }
+
+  function classRow(c){
+    return '<div class="ba-item"><div class="ba-row"><div><b>'+esc(c.title)+'</b> '+modeBadge(c)+'<div class="ba-meta" style="margin:0">'+(c.recurring?('elke '+DOWF[c.day]):fmtDate(c.date))+' · '+esc(c.time)+' · max '+c.cap+(c.teacher?(' · '+esc(c.teacher)):'')+'</div>'+onlineLine(c)+'</div>'+
+      '<div class="ba-row" style="gap:6px">€ <input type="number" step="0.01" min="0" data-act="classprice" data-c="'+c.id+'" value="'+(c.price||0)+'" title="Prijs per les aanpassen" style="width:78px;padding:6px 8px">'+
+      '<button class="ba-btn warn sm" data-act="delclass" data-c="'+c.id+'">Verwijderen</button></div></div></div>';
+  }
+
+  // Admin Studio-beheer: stats, create class (pick teacher), all classes, ALL bookings (move + attendance).
+  function pStudio(){
+    var totalBookings=S.bookings.filter(function(b){return b.status==='booked';}).length;
+    var h='<div class="ba-stats">'+
+      '<div class="ba-stat"><b>'+S.classes.length+'</b><span>actieve klassen</span></div>'+
+      '<div class="ba-stat"><b>'+totalBookings+'</b><span>totaal boekingen</span></div></div>';
+    h+='<div class="ba-2">'+createClassCard(null)+
+      '<div class="ba-card"><h4>Alle klassen</h4><div class="ba-list" style="margin-top:10px">'+
+      (S.classes.length?S.classes.map(classRow).join(''):'<p class="ba-meta">Nog geen klassen.</p>')+'</div></div></div>';
+    // Payment-method settings: admin can allow only Stripe, or remove strippenkaart/abonnement.
+    h+='<div class="ba-card" style="margin-top:16px"><h4>Betaalmethoden</h4><p class="ba-meta">Kies hoe klanten een les afrekenen.</p>'+
+      '<label class="ba-f"><input type="checkbox" data-act="togglepay" data-k="tegoed" '+(S.pay.tegoed?'checked':'')+' style="width:auto;margin-right:6px">Strippenkaart & abonnement</label>'+
+      '<label class="ba-f"><input type="checkbox" data-act="togglepay" data-k="stripe" '+(S.pay.stripe?'checked':'')+' style="width:auto;margin-right:6px">Stripe (per les afrekenen)</label>'+
+      (S.pay.tegoed?'':'<p class="ba-note">Strippenkaart/abonnement staat uit — klanten kopen losse lessen via Stripe.</p>')+'</div>';
+    // All bookings: who booked (account + e-mail) + reschedule + attendance + cancel
+    h+='<div class="ba-card" style="margin-top:16px"><h4>Alle boekingen — wie, verplaatsen & aanwezigheid</h4><div class="ba-list" style="margin-top:10px">';
+    var bs=S.bookings.filter(function(b){return b.status==='booked';});
+    if(!bs.length)h+='<p class="ba-meta">Nog geen boekingen.</p>';
+    bs.forEach(function(b){var c=S.classes.filter(function(x){return x.id===b.classId;})[0]||{};
+      h+='<div class="ba-item"><div class="ba-row"><div><b>'+esc(b.name)+'</b> <span class="ba-meta" style="margin:0">'+esc(b.bookerEmail||'')+' · '+esc(c.title||'?')+' · '+fmtDate(b.date)+' '+esc(c.time||'')+' · '+(b.payment==='stripe'?'Stripe':'tegoed')+'</span></div>'+
+         '<div class="ba-row" style="gap:6px"><select data-act="moveto" data-b="'+b.id+'" style="width:auto">'+occOptions(b.classId+'|'+b.date)+'</select>'+
+         '<button class="ba-btn '+(b.present?'':'ghost')+' sm" data-act="present" data-b="'+b.id+'">'+(b.present?'✓ aanwezig':'aanwezig')+'</button>'+
+         (b.payment==='stripe'&&b.paymentIntent&&!b.refunded?'<button class="ba-btn ghost sm" data-act="refundbk" data-b="'+b.id+'">Annuleer + terugbetalen</button>':'<button class="ba-btn warn sm" data-act="cancel" data-b="'+b.id+'">Annuleer</button>')+'</div></div></div>';});
+    h+='</div><p class="ba-note">Kies een andere les in het menu om een boeking te verplaatsen.</p></div>';
+    // Cancellations log (the admin can remove individual entries or clear the whole log)
+    var cx=S.bookings.filter(function(b){return b.status==='cancelled';});
+    h+='<div class="ba-card" style="margin-top:16px"><div class="ba-row"><h4>Annuleringen — '+cx.length+'</h4>'+
+       (cx.length?'<button class="ba-btn ghost sm" data-act="clearcancels">Alles wissen</button>':'')+'</div><div class="ba-list ba-scroll" style="margin-top:10px">';
+    if(!cx.length)h+='<p class="ba-meta">Nog geen annuleringen.</p>';
+    cx.forEach(function(b){var c=S.classes.filter(function(x){return x.id===b.classId;})[0]||{};
+      h+='<div class="ba-item"><div class="ba-row"><span><b>'+esc(b.name)+'</b> <span class="ba-meta">'+esc(b.bookerEmail||'')+'</span> — '+esc(c.title||'?')+' · les '+fmtDate(b.date)+(b.cancelledAt?(' · geannuleerd op '+fmtDate(b.cancelledAt)):'')+'</span>'+
+         '<div class="ba-row" style="gap:6px">'+(b.refunded?'<span class="ba-badge ok">terugbetaald</span>':(b.payment==='stripe'&&b.paymentIntent?'<button class="ba-btn ghost sm" data-act="refundbk" data-b="'+b.id+'">Terugbetalen</button>':''))+
+         '<button class="ba-btn warn sm" data-act="delcancel" data-b="'+b.id+'">Verwijderen</button></div></div></div>';});
+    h+='</div></div>';
+    // Stripe purchases (strippenkaart/abonnement) the admin can refund — partial amount allowed.
+    // Verkopen-overzicht: wie kocht een abonnement, strippenkaart of losse les (incl. telefoon).
+    var sales=[];
+    (S.purchases||[]).forEach(function(x){sales.push({email:x.email,kind:x.type==='abonnement'?'abonnement':'strippenkaart',label:x.name,amount:x.amount,date:x.date});});
+    (S.bookings||[]).forEach(function(b){if(b.payment==='stripe'&&b.amount){sales.push({email:b.bookerEmail,kind:'losse les',label:classMeta(b.classId).title,amount:b.amount,date:b.date});}});
+    sales.sort(function(a,b){return (b.date||'')<(a.date||'')?-1:1;});
+    h+='<div class="ba-card" style="margin-top:16px"><h4>Verkopen — wie kocht wat ('+sales.length+')</h4><p class="ba-meta">Abonnementen, strippenkaarten en losse lessen (via Stripe).</p><div class="ba-list ba-scroll" style="margin-top:10px">';
+    if(!sales.length)h+='<p class="ba-meta">Nog geen aankopen.</p>';
+    sales.forEach(function(s){var nm=accName(s.email)||s.email,ph=accPhone(s.email);
+      h+='<div class="ba-item"><div class="ba-row"><div><b>'+esc(nm)+'</b> <span class="ba-badge'+(s.kind==='abonnement'?' ok':'')+'">'+s.kind+'</span><div class="ba-meta" style="margin:0">'+esc(s.email)+(ph?(' · 📞 '+esc(ph)):'')+' · '+esc(s.label||'')+'</div></div><span class="ba-meta" style="margin:0">€'+s.amount+' · '+fmtDate(s.date)+'</span></div></div>';});
+    h+='</div></div>';
+    var pus=S.purchases||[];
+    h+='<div class="ba-card" style="margin-top:16px"><h4>Strippenkaarten & abonnementen — terugbetalen</h4><div class="ba-list ba-scroll" style="margin-top:10px">';
+    if(!pus.length)h+='<p class="ba-meta">Nog geen Stripe-aankopen.</p>';
+    pus.forEach(function(x){
+      if(x.refunded){h+='<div class="ba-item"><div class="ba-row"><span><b>'+esc(x.name)+'</b> <span class="ba-meta">'+esc(x.email||'')+' · '+(x.type==='abonnement'?'abonnement':'strippenkaart')+' · €'+x.amount+'</span></span><span class="ba-badge ok">terugbetaald'+(x.refundedAmount!=null?(' €'+x.refundedAmount):'')+'</span></div></div>';return;}
+      var ctrl=(x.type==='abonnement'&&x.subscription)
+        ? '<button class="ba-btn warn sm" data-act="refundpur" data-p="'+x.id+'">Opzeggen & terugbetalen</button>'
+        : '€ <input type="number" step="0.01" min="0" max="'+x.amount+'" id="ba-rf-'+x.id+'" value="'+x.amount+'" style="width:84px;padding:6px 8px"> <button class="ba-btn warn sm" data-act="refundpur" data-p="'+x.id+'">Terugbetalen</button>';
+      h+='<div class="ba-item"><div class="ba-row"><span><b>'+esc(x.name)+'</b> <span class="ba-meta">'+esc(x.email||'')+' · '+(x.type==='abonnement'?'abonnement':'strippenkaart')+' · €'+x.amount+'</span></span><div class="ba-row" style="gap:6px">'+ctrl+'</div></div></div>';
+    });
+    h+='</div><p class="ba-note">Bij een strippenkaart vul je zelf in hoeveel je terugstort (standaard het volledige bedrag).</p></div>';
+    // Facturenoverzicht — bekijken + downloaden als PDF.
+    h+='<div class="ba-card" style="margin-top:16px"><h4>Facturen</h4><p class="ba-meta">Automatisch aangemaakt bij elke betaling. Klik "PDF" om te bekijken/downloaden.</p><div id="ba-inv-list" class="ba-list ba-scroll" style="margin-top:10px"><p class="ba-meta">Laden…</p></div></div>';
+    return h;
+  }
+  // Load the invoice list into the Facturen card (admin Studio-beheer).
+  function refreshInvoices(){var box=q('ba-inv-list');if(!box||!projId())return;
+    fetch(api('invoices')).then(function(r){return r.json();}).then(function(rows){
+      if(!rows||!rows.length){box.innerHTML='<p class="ba-meta">Nog geen facturen.</p>';return;}
+      box.innerHTML=rows.map(function(i){return '<div class="ba-item"><div class="ba-row"><div><b>'+esc(i.number)+'</b> <span class="ba-meta" style="margin:0">'+esc(i.customerName||i.customerEmail||'')+' · '+esc(i.description||'')+' · €'+i.total+' · '+esc(i.date)+'</span></div>'+
+        '<a class="ba-btn ghost sm" href="'+api('invoice/'+i.id+'/pdf')+'" target="_blank" rel="noopener">⬇ PDF</a></div></div>';}).join('');
+    }).catch(function(){box.innerHTML='<p class="ba-meta">Kon facturen niet laden.</p>';});}
+
+  // Teacher "Mijn lessen": only own classes + their bookings/attendance.
+  function pMijn(){
+    var email=S.session.email;
+    var own=S.classes.filter(function(c){return c.teacherEmail===email;});
+    var ownIds={};own.forEach(function(c){ownIds[c.id]=1;});
+    var h='<div class="ba-stats">'+
+      '<div class="ba-stat"><b>'+own.length+'</b><span>jouw klassen</span></div>'+
+      '<div class="ba-stat"><b>'+S.bookings.filter(function(b){return b.status==='booked'&&ownIds[b.classId];}).length+'</b><span>boekingen op jouw lessen</span></div></div>';
+    h+='<div class="ba-2">'+createClassCard(email)+
+      '<div class="ba-card"><h4>Mijn klassen</h4><div class="ba-list" style="margin-top:10px">'+
+      (own.length?own.map(classRow).join(''):'<p class="ba-meta">Je hebt nog geen lessen.</p>')+'</div></div></div>';
+    h+='<div class="ba-card" style="margin-top:16px"><h4>Boekingen op mijn lessen — aanwezigheid</h4><div class="ba-list" style="margin-top:10px">';
+    var bs=S.bookings.filter(function(b){return b.status==='booked'&&ownIds[b.classId];});
+    if(!bs.length)h+='<p class="ba-meta">Nog geen boekingen op jouw lessen.</p>';
+    bs.forEach(function(b){var c=S.classes.filter(function(x){return x.id===b.classId;})[0]||{};
+      h+='<div class="ba-item"><div class="ba-row"><span>'+esc(b.name)+' — '+esc(c.title||'?')+' · '+fmtDate(b.date)+' '+esc(c.time||'')+'</span>'+
+         '<button class="ba-btn '+(b.present?'':'ghost')+' sm" data-act="present" data-b="'+b.id+'">'+(b.present?'✓ aanwezig':'markeer aanwezig')+'</button></div></div>';});
+    h+='</div></div>';
+    return h;
+  }
+
+  // Admin "Docenten": list + add + remove teacher accounts.
+  function pDocenten(){
+    var h='<div class="ba-2"><div class="ba-card"><h4>Docent toevoegen</h4><p class="ba-meta">Krijgt een eigen login en ziet alleen de eigen lessen.</p>'+
+      '<label class="ba-f">Naam</label><input id="dz-n">'+
+      '<label class="ba-f">E-mail</label><input id="dz-e" placeholder="docent@studio.nl">'+
+      '<label class="ba-f">Wachtwoord</label><input id="dz-p" type="password">'+
+      '<div style="margin-top:12px"><button class="ba-btn" data-act="addteacher">Docent toevoegen</button></div>'+
+      '<div id="dz-err" class="ba-note" style="color:#b91c1c"></div></div>'+
+      '<div class="ba-card"><h4>Team (beheerder & docenten) — '+S.accounts.filter(function(a){return a.role==='admin'||a.role==='teacher';}).length+'</h4><div class="ba-list ba-scroll" style="margin-top:10px">';
+    var me=(S.session&&S.session.email)||'';
+    // Staff only — clients are listed separately below. You can delete anyone (incl. other
+    // admins) EXCEPT the account you are logged in as.
+    var staff=S.accounts.filter(function(a){return a.role==='admin'||a.role==='teacher';});
+    staff.forEach(function(a){
+      var self=a.email===me;
+      h+='<div class="ba-item"><div class="ba-row"><div><b>'+esc(a.name)+'</b> <span class="ba-badge'+(a.role==='admin'?' ok':'')+'">'+(a.role==='admin'?'beheerder':'docent')+'</span><div class="ba-meta" style="margin:0">'+esc(a.email)+'</div></div>'+
+         (self?'<span class="ba-meta" style="margin:0">jij — actief</span>':'<button class="ba-btn warn sm" data-act="delacc" data-e="'+esc(a.email)+'">Verwijderen</button>')+'</div></div>';
+    });
+    h+='</div></div></div>';
+    // Registered customers (self-registered at login) — shown as KLANTEN, never as docenten.
+    var clients=S.accounts.filter(function(a){return a.role==='client';});
+    h+='<div class="ba-card" style="margin-top:16px"><h4>Klanten — '+clients.length+' totaal</h4><p class="ba-meta">Alle gegevens van zelf-geregistreerde klanten.</p><div class="ba-list ba-scroll" style="margin-top:10px">';
+    if(!clients.length)h+='<p class="ba-meta">Nog geen geregistreerde klanten.</p>';
+    clients.forEach(function(a){
+      var self=a.email===me;
+      var w=(S.wallets&&S.wallets[a.email])||{};
+      var tegoed=w.membership?('Abonnement: '+esc(w.membership)):((w.credits||0)+' credits');
+      var nBook=(S.bookings||[]).filter(function(b){return b.bookerEmail===a.email&&b.status==='booked';}).length;
+      var spent=0;
+      (S.purchases||[]).forEach(function(x){if(x.email===a.email)spent+=(x.amount||0);});
+      (S.bookings||[]).forEach(function(b){if(b.bookerEmail===a.email&&b.payment==='stripe'&&b.amount&&!b.refunded)spent+=(b.amount||0);});
+      h+='<div class="ba-item"><div class="ba-row"><div><b>'+esc(a.name)+'</b> <span class="ba-badge">klant</span>'+
+         '<div class="ba-meta" style="margin:2px 0 0">✉️ '+esc(a.email)+(a.phone?('  ·  📞 '+esc(a.phone)):'  ·  📞 —')+'</div>'+
+         '<div class="ba-meta" style="margin:2px 0 0">🎟️ '+tegoed+(w.validUntil?(' (geldig t/m '+fmtDate(w.validUntil)+')'):'')+'  ·  📅 '+nBook+' boeking(en)  ·  💶 €'+spent+' besteed</div></div>'+
+         (self?'<span class="ba-meta" style="margin:0">jij — actief</span>':'<button class="ba-btn warn sm" data-act="delacc" data-e="'+esc(a.email)+'">Verwijderen</button>')+'</div></div>';
+    });
+    h+='</div></div>';
+    return h;
+  }
+
+  function pLeden(){
+    var W=walletFor(myEmail());
+    var cur=walletBadge(W);
+    var h='<div class="ba-row" style="margin-bottom:14px"><div class="ba-meta" style="margin:0">Huidig: '+cur+(W.validUntil?(' · geldig t/m '+W.validUntil):'')+'</div></div><div class="ba-grid">';
+    if(!S.members.length)h+='<p class="ba-meta">Er zijn op dit moment geen lidmaatschappen te koop.</p>';
+    S.members.forEach(function(m){
+      var inhoud=isUnlimited(m)?'onbeperkt lessen':((m.credits||0)+' lessen'+(m.type==='abonnement'?' per maand':''));
+      h+='<div class="ba-card"><div class="ba-row"><h4>'+esc(m.name)+'</h4><span class="ba-badge">'+(m.type==='strippenkaart'?'strippenkaart':'abonnement')+'</span></div>'+
+         '<p class="ba-meta">'+inhoud+' · geldig '+m.validDays+' dagen'+(m.recurring?' · automatisch verlengd':'')+'</p>'+
+         '<div class="ba-row"><b style="font-size:20px">€'+m.price+(m.recurring?'<span class="ba-meta" style="font-size:12px"> /maand</span>':'')+'</b>'+
+         '<button class="ba-btn sm" data-act="buy" data-m="'+m.id+'">Kopen</button></div></div>';
+    });
+    h+='</div>';
+    // Only the studio admin can create new membership TYPES; clients just buy them.
+    if(S.session&&S.session.role==='admin'){
+      h+='<div class="ba-card" style="margin-top:16px"><h4>Nieuw lidmaatschap</h4>'+
+        '<div class="ba-2"><div><label class="ba-f">Naam</label><input id="ba-mn" placeholder="bijv. Maandabonnement"></div>'+
+        '<div><label class="ba-f">Type</label><select id="ba-mt"><option value="strippenkaart">Strippenkaart</option><option value="abonnement">Abonnement (maand)</option></select></div></div>'+
+        '<div class="ba-2"><div><label class="ba-f">Bij abonnement</label><select id="ba-ml"><option value="onbeperkt">Onbeperkte lessen</option><option value="aantal">Aantal lessen per maand</option></select></div>'+
+        '<div><label class="ba-f">Aantal lessen</label><input id="ba-mc" type="number" value="8"></div></div>'+
+        '<div class="ba-2"><div><label class="ba-f">Prijs (€)</label><input id="ba-mp" type="number" value="55"></div>'+
+        '<div><label class="ba-f">Geldig (dagen)</label><input id="ba-mv" type="number" value="30"></div></div>'+
+        '<div style="margin-top:12px"><button class="ba-btn" data-act="addmember">Toevoegen</button></div>'+
+        '<p class="ba-note">Strippenkaart = vast aantal lessen (eenmalig). Abonnement = maandelijks, onbeperkt óf een aantal lessen per maand. Echte betaling/recurring billing loopt via Stripe — zie Integraties.</p></div>';
+      // Manage existing membership types: the admin can delete any of them.
+      h+='<div class="ba-card" style="margin-top:16px"><h4>Bestaande lidmaatschappen — '+S.members.length+'</h4><div class="ba-list ba-scroll" style="margin-top:10px">';
+      if(!S.members.length)h+='<p class="ba-meta">Nog geen lidmaatschappen.</p>';
+      S.members.forEach(function(m){
+        var inhoud=isUnlimited(m)?'onbeperkt':((m.credits||0)+' lessen');
+        h+='<div class="ba-item"><div class="ba-row"><div><b>'+esc(m.name)+'</b> <span class="ba-badge">'+(m.type==='strippenkaart'?'strippenkaart':'abonnement')+'</span><div class="ba-meta" style="margin:0">'+inhoud+'</div></div>'+
+           '<div class="ba-row" style="gap:6px">€ <input type="number" step="0.01" min="0" data-act="memberprice" data-m="'+m.id+'" value="'+(m.price||0)+'" title="Prijs aanpassen" style="width:78px;padding:6px 8px">'+
+           '<button class="ba-btn warn sm" data-act="delmember" data-m="'+m.id+'">Verwijderen</button></div></div></div>';
+      });
+      h+='</div></div>';
+    }
+    return h;
+  }
+
+  function pComm(){
+    return '<div class="ba-2"><div class="ba-card"><h4>E-mail</h4>'+
+      '<div id="ba-comm-status" class="ba-note" style="margin:6px 0">Status laden…</div>'+
+      '<p class="ba-meta">Alle automatische e-mails (bevestiging, annulering, welkom, wachtwoord-reset, 24u-herinnering) worden centraal verstuurd.</p>'+
+      '<div class="ba-row" style="justify-content:flex-start;gap:8px;margin-top:8px"><button class="ba-btn sm" data-act="email-sendtest">Testmail versturen</button></div>'+
+      '<div id="ba-comm-out" class="ba-note" style="margin-top:8px"></div>'+
+      '<label class="ba-f" style="margin-top:16px"><input type="checkbox" id="ba-rem" '+(S.reminders?'checked':'')+' data-act="togglerem" style="width:auto;margin-right:6px">24u-herinnering voor elke geboekte les</label>'+
+      '<p class="ba-note" style="margin-top:8px">Facturen worden automatisch aangemaakt bij elke betaling — zie het overzicht in Studio-beheer.</p></div>'+
+      '<div class="ba-card"><h4>Bericht naar leden</h4>'+
+      '<p class="ba-meta">Schrijf zelf een bericht en stuur het als echte e-mail naar je leden.</p>'+
+      '<label class="ba-f">Ontvangers</label><select id="ba-bc-scope"><option value="klanten">Alle klanten</option><option value="boekers">Iedereen met een (actieve) boeking</option></select>'+
+      '<label class="ba-f">Onderwerp</label><input id="ba-bc-subj" placeholder="Onderwerp van je e-mail">'+
+      '<label class="ba-f">Bericht</label><textarea id="ba-bc-body" rows="7" placeholder="Schrijf hier je bericht…" style="width:100%;box-sizing:border-box;resize:vertical;font:inherit;padding:10px 12px;border:1px solid #d1d5db;border-radius:10px"></textarea>'+
+      '<div class="ba-row" style="justify-content:flex-start;margin-top:10px"><button class="ba-btn sm" data-act="broadcast">Versturen naar leden</button></div>'+
+      '<div id="ba-bc-out" class="ba-note" style="margin-top:8px"></div></div></div>';
+  }
+  // Recipients for "bericht naar leden": all client accounts, or everyone with an active booking.
+  function recipientEmails(scope){var m={};
+    if(scope==='boekers'){(S.bookings||[]).forEach(function(b){if(b.bookerEmail&&b.status!=='cancelled')m[b.bookerEmail.toLowerCase()]=1;});}
+    else{(S.accounts||[]).forEach(function(a){if(a.role==='client'&&a.email)m[a.email.toLowerCase()]=1;});}
+    return Object.keys(m);}
+  // Show from which central address mails are sent (configured by the platform, not per studio).
+  function refreshEmailStatus(){var st=q('ba-comm-status');if(!st||!projId())return;
+    fetch(api('email')).then(function(r){return r.json();}).then(function(d){
+      if(d&&d.configured){st.style.color='#15803d';st.innerHTML='E-mails worden verstuurd vanaf <b>'+esc(d.from||'')+'</b>.';}
+      else{st.style.color='#b45309';st.textContent='E-mail is nog niet ingesteld door de beheerder van het platform.';}
+    }).catch(function(){st.textContent='';});}
+
+  function pKoppel(){
+    // Real Stripe Connect onboarding (no demo) — money goes straight to the studio.
+    var h='<div class="ba-grid"><div class="ba-card"><div class="ba-row"><h4>Stripe</h4><span class="ba-badge" id="ba-stripe-badge">controleren…</span></div>'+
+      '<p class="ba-meta">Echte betalingen (iDEAL/creditcard). Het geld gaat rechtstreeks naar de studio.</p>'+
+      '<button class="ba-btn sm" data-act="stripe-onboard">Koppel met Stripe</button> <span id="ba-stripe-extra" class="ba-note" style="margin:0"></span></div></div>';
+    // Agenda koppelen: één .ics-feed waarop de studio zich abonneert in Google/Outlook/Apple.
+    h+='<div class="ba-card" style="margin-top:16px"><h4>Agenda koppelen</h4>'+
+      '<p class="ba-meta">Koppel je eigen agenda (Google, Outlook of Apple) aan de app. Elke nieuwe les verschijnt dan automatisch in je gekoppelde agenda.</p>'+
+      '<div class="ba-row" style="justify-content:flex-start"><button class="ba-btn sm" data-act="cal-connect">Agenda koppelen</button></div>'+
+      '<div id="ba-cal-box" style="margin-top:10px"></div></div>';
+    // Facturatie: studio vult wettelijke gegevens in → factuur gaat automatisch mee bij elke betaling.
+    h+='<div class="ba-card" style="margin-top:16px"><h4>Facturatie instellen</h4>'+
+      '<div id="ba-inv-status" class="ba-note" style="margin:4px 0 10px">Laden…</div>'+
+      '<p class="ba-meta">Deze gegevens komen op elke factuur (verplicht volgens de wet). Bij elke betaling krijgt de klant automatisch een betaalbevestiging met factuur.</p>'+
+      '<div class="ba-2"><div><label class="ba-f">Land</label><select id="ba-inv-country" data-act="inv-country"><option value="NL">Nederland (BTW / KvK)</option><option value="UK">Verenigd Koninkrijk (VAT)</option><option value="US">Verenigde Staten (Sales tax)</option></select></div>'+
+      '<div><label class="ba-f">&nbsp;</label><div id="ba-inv-cur" class="ba-note" style="margin:0;padding-top:10px">Valuta: EUR (€)</div></div></div>'+
+      '<label class="ba-f">Bedrijfsnaam</label><input id="ba-inv-company" placeholder="Saha Studio">'+
+      '<label class="ba-f">Adres</label><input id="ba-inv-address" placeholder="Yogaweg 10">'+
+      '<div class="ba-2"><div><label class="ba-f">Postcode</label><input id="ba-inv-postcode" placeholder="3061 AA"></div>'+
+      '<div><label class="ba-f">Plaats</label><input id="ba-inv-city" placeholder="Rotterdam"></div></div>'+
+      '<div class="ba-2"><div><label class="ba-f"><span id="ba-inv-reg-l">KvK-nummer</span></label><input id="ba-inv-kvk" placeholder="12345678"></div>'+
+      '<div><label class="ba-f"><span id="ba-inv-taxid-l">BTW-nummer</span></label><input id="ba-inv-vat" placeholder="NL123456789B01"></div></div>'+
+      '<div class="ba-2"><div><label class="ba-f"><span id="ba-inv-tax-l">BTW %</span></label><input id="ba-inv-vatp" type="number" value="21"></div>'+
+      '<div><label class="ba-f">Contact-e-mail (optioneel)</label><input id="ba-inv-email" placeholder="info@studio.nl"></div></div>'+
+      '<div class="ba-row" style="justify-content:flex-start;margin-top:12px"><button class="ba-btn sm" data-act="invoice-save">Opslaan</button></div>'+
+      '<div id="ba-inv-out" class="ba-note" style="margin-top:8px"></div></div>';
+    // Migratie vanuit andere boekingssoftware: upload de CSV-exports, zie een samenvatting + fouten, en stuur activatie-mails.
+    h+='<div class="ba-card" style="margin-top:16px"><h4>Importeren uit andere boekingssoftware</h4>'+
+      '<div id="ba-mb-status" class="ba-note" style="margin:4px 0 10px">Laden…</div>'+
+      '<p class="ba-meta">Stap je over van een ander systeem (zoals Mindbody, Momoyoga of Eversports)? Exporteer daar je klanten, strippenkaarten en abonnementen als CSV en upload ze hier. De kolomnamen worden automatisch herkend. Creditcardgegevens worden nooit geïmporteerd.</p>'+
+      '<p class="ba-meta" style="margin-bottom:4px"><b>Optie A — aparte bestanden</b> (per type één CSV):</p>'+
+      '<div class="ba-2"><div><label class="ba-f">1. Klanten (CSV)</label><input id="ba-mb-clients" type="file" accept=".csv,text/csv"></div>'+
+      '<div><label class="ba-f">2. Strippenkaarten (CSV)</label><input id="ba-mb-packs" type="file" accept=".csv,text/csv"></div></div>'+
+      '<div class="ba-2"><div><label class="ba-f">3. Abonnementen (CSV)</label><input id="ba-mb-members" type="file" accept=".csv,text/csv"></div><div></div></div>'+
+      '<div class="ba-row" style="justify-content:flex-start;gap:8px;margin-top:12px"><button class="ba-btn sm" data-act="mb-import">Importeren</button>'+
+      '<button class="ba-btn ghost sm" data-act="mb-send">Activatie-mails sturen</button></div>'+
+      '<div style="border-top:1px solid #e5e7eb;margin:16px 0 12px;text-align:center"><span class="ba-meta" style="background:#fff;padding:0 10px;position:relative;top:-11px">— of —</span></div>'+
+      '<p class="ba-meta" style="margin-bottom:4px"><b>Optie B — alles in één bestand</b> (klanten + strippenkaarten + abonnementen door elkaar):</p>'+
+      '<div class="ba-2"><div><label class="ba-f">Eén CSV met alles erin</label><input id="ba-mb-all" type="file" accept=".csv,text/csv"></div>'+
+      '<div><label class="ba-f">&nbsp;</label><button class="ba-btn sm" data-act="mb-import-all" style="margin-top:2px">Alles-in-één importeren</button></div></div>'+
+      '<p class="ba-note" style="margin-top:2px">Elke rij wordt automatisch herkend als klant, strippenkaart of abonnement (op basis van een type-kolom of de productnaam).</p>'+
+      '<div id="ba-mb-out" class="ba-note" style="margin-top:10px"></div>'+
+      '<p class="ba-note" style="margin-top:6px">Klanten krijgen een mail met een eenmalige activatielink. Daarmee maken ze een wachtwoord aan en staan hun strippenkaart/abonnement meteen klaar.</p></div>';
+    return h;
+  }
+  // One readable line per import summary (with the first few row errors, if any).
+  function mbSummaryLine(s){
+    var label=s.type==='clients'?'Klanten':s.type==='class_packs'?'Strippenkaarten':s.type==='memberships'?'Abonnementen':'Alles-in-één';
+    var parts=[s.rows+' rijen',s.created+' nieuw',s.updated+' bijgewerkt'];
+    if(s.type==='class_packs'||s.type==='combined')parts.push(s.packsActive+' strippenkaarten');
+    if(s.type==='memberships'||s.type==='combined')parts.push(s.membershipsFound+' abonnementen');
+    if(s.expiredOrDepleted)parts.push(s.expiredOrDepleted+' verlopen/leeg');
+    var line='<b>'+label+':</b> '+esc(parts.join(' · '));
+    if(s.errors&&s.errors.length)line+=' — <span style="color:#b45309">'+s.errors.length+' fout(en): '+esc(s.errors.slice(0,3).map(function(e){return 'rij '+e.row+' ('+e.message+')';}).join(', '))+(s.errors.length>3?'…':'')+'</span>';
+    return line;
+  }
+  // Aggregate import status for the admin (customers / activated / active packs+memberships).
+  function refreshImportStatus(){var st=q('ba-mb-status');if(!st||!projId())return;
+    fetch(api('import/summary')).then(function(r){return r.json();}).then(function(d){
+      if(!d||d.error){st.textContent='';return;}st.style.color='#374151';
+      st.textContent=d.customers+' klant(en) geïmporteerd · '+d.activated+' geactiveerd · '+d.packsActive+' strippenkaarten · '+d.membershipsActive+' abonnementen actief'+(d.expiredOrDepleted?(' · '+d.expiredOrDepleted+' verlopen/leeg'):'');
+    }).catch(function(){st.textContent='';});}
+  // Per-land factuurconfig (labels/valuta/standaardtarief). KvK is NL-only; UK = VAT + company no.;
+  // US = EIN + sales tax (vaak 0% op diensten). Houdt gelijke tred met COUNTRIES in lib/invoice.ts.
+  var INVC={
+    NL:{reg:'KvK-nummer',taxid:'BTW-nummer',tax:'BTW %',regph:'12345678',taxph:'NL123456789B01',dft:21,cur:'EUR (€)'},
+    UK:{reg:'Company number',taxid:'VAT registration no.',tax:'VAT %',regph:'12345678',taxph:'GB123456789',dft:20,cur:'GBP (£)'},
+    US:{reg:'EIN (Employer ID)',taxid:'Tax ID (optioneel)',tax:'Sales tax %',regph:'12-3456789',taxph:'optioneel',dft:0,cur:'USD ($)'}
+  };
+  // Relabel the invoice fields for the chosen country; setTax=true also resets the % to that country's default.
+  function applyInvoiceCountry(country,setTax){var k=INVC[country]||INVC.NL;
+    var lbl=function(id,t){var el=q(id);if(el)el.textContent=t;};
+    lbl('ba-inv-reg-l',k.reg);lbl('ba-inv-taxid-l',k.taxid);lbl('ba-inv-tax-l',k.tax);
+    var reg=q('ba-inv-kvk');if(reg)reg.placeholder=k.regph;
+    var tid=q('ba-inv-vat');if(tid)tid.placeholder=k.taxph;
+    var cur=q('ba-inv-cur');if(cur)cur.textContent='Valuta: '+k.cur;
+    if(setTax){var vp=q('ba-inv-vatp');if(vp)vp.value=k.dft;}}
+  // Load/save the studio's invoice (Facturatie) settings.
+  function refreshInvoiceSettings(){var st=q('ba-inv-status');if(!st||!projId())return;
+    fetch(api('invoice-settings')).then(function(r){return r.json();}).then(function(d){
+      if(!d)return;var setv=function(id,v){var el=q(id);if(el&&v!=null)el.value=v;};
+      var country=d.country||'NL';setv('ba-inv-country',country);
+      setv('ba-inv-company',d.company);setv('ba-inv-address',d.address);setv('ba-inv-postcode',d.postcode);setv('ba-inv-city',d.city);setv('ba-inv-kvk',d.kvk);setv('ba-inv-vat',d.vat);setv('ba-inv-vatp',d.vatPercent);setv('ba-inv-email',d.email);
+      applyInvoiceCountry(country,false);
+      st.style.color=d.configured?'#15803d':'#b45309';st.textContent=d.configured?'Facturatie ingesteld — facturen gaan automatisch mee.':'Nog niet ingesteld — vul je bedrijfsgegevens in voor wettelijke facturen.';
+    }).catch(function(){st.textContent='';});}
+
+  // Client dashboard: a permanent overview of THIS customer's booked lessons, with the online
+  // link + meeting info for online/hybride classes, and all other details.
+  function pClientDash(){
+    var email=myEmail();
+    var mineB=(S.bookings||[]).filter(function(b){return b.bookerEmail===email&&(b.status==='booked'||b.status==='waitlist');});
+    mineB.sort(function(a,b){var ca=classMeta(a.classId),cb=classMeta(b.classId);return ((a.date||'')+ (ca.time||''))<((b.date||'')+(cb.time||''))?-1:1;});
+    var W=walletFor(email);
+    var wallet=walletBadge(W);
+    var h='<div class="ba-row" style="margin-bottom:14px"><div class="ba-meta" style="margin:0">Jouw tegoed: '+wallet+'</div></div>';
+    h+='<div class="ba-card"><h4>Mijn geboekte lessen</h4><div class="ba-list" style="margin-top:10px">';
+    if(!mineB.length)h+='<p class="ba-meta">Je hebt nog geen lessen geboekt. Ga naar "Lessen boeken".</p>';
+    mineB.forEach(function(b){var c=classMeta(b.classId);
+      var fc=(S.classes||[]).filter(function(x){return x.id===b.classId;})[0]||{};
+      var modeBadge=c.mode==='online'?'<span class="ba-badge">💻 Online</span>':c.mode==='hybride'?'<span class="ba-badge">🔀 Hybride</span>':'<span class="ba-badge">📍 Fysiek</span>';
+      var statusBadge=b.status==='waitlist'?'<span class="ba-badge">wachtlijst</span>':'<span class="ba-badge ok">geboekt</span>';
+      var past=isPast(b.date,c.time);
+      var locked=b.status==='booked'&&cancelClosed(fc,b.date);
+      var online=((c.mode==='online'||c.mode==='hybride')&&c.link)?('<div class="ba-meta" style="margin:6px 0 0">💻 <a href="'+esc(c.link)+'" target="_blank" rel="noopener" style="color:var(--ba);font-weight:600">Online deelnemen ↗</a>'+(c.info?('<div style="margin-top:4px">'+esc(c.info)+'</div>'):'')+'</div>'):'';
+      h+='<div class="ba-item"><div class="ba-row"><div><b>'+esc(c.title)+'</b> '+modeBadge+' '+statusBadge+(past?' <span class="ba-meta">(geweest)</span>':'')+
+        '<div class="ba-meta" style="margin:2px 0 0">📅 '+fmtDate(b.date)+' · '+esc(c.time||'')+(c.teacher?(' · '+esc(c.teacher)):'')+'</div>'+online+'</div>'+
+        (past?'':(locked?'<button class="ba-btn sm" disabled>Annuleren gesloten</button>':'<button class="ba-btn warn sm" data-act="cancel" data-b="'+b.id+'">Annuleren</button>'))+'</div></div>';
+    });
+    h+='</div></div>';
+    return h;
+  }
+
+  var PANELS={boeken:pBoeken,agenda:pMijnAgenda,dashboard:pClientDash,studio:pStudio,mijn:pMijn,docenten:pDocenten,leden:pLeden,comm:pComm,koppel:pKoppel};
+  function tabsFor(role){
+    if(role==='admin'){var t=[['boeken','Lessen boeken'],['studio','Studio-beheer'],['docenten','Docenten']];if(S.pay.tegoed)t.push(['leden','Lidmaatschappen']);t.push(['comm','Communicatie'],['koppel','Integraties']);return t;}
+    if(role==='teacher')return [['agenda','Mijn agenda'],['mijn','Mijn lessen'],['boeken','Lessen boeken']];
+    var c=[['dashboard','Mijn lessen'],['boeken','Lessen boeken']];if(S.pay.tegoed)c.push(['leden','Mijn strippenkaart']);return c; // client
+  }
+  function toast(msg){var o=root.querySelector('#ba-comm-out');if(o)o.textContent=msg;}
+  function q(id){return root.querySelector('#'+id);}
+  function projId(){var m=(location.pathname||'').match(/projects\\/(\\d+)/);return m?m[1]:'';}
+  function api(p){return '/api/projects/'+projId()+'/'+p;}
+  // ── Server API (step 3: booking data moves server-side). Only the SESSION TOKEN is kept in
+  // localStorage — never accounts/passwords/bookings. These helpers are wired into the UI in 3b. ──
+  var SKEY=KEY+'_token';
+  function srvToken(){try{return localStorage.getItem(SKEY)||'';}catch(e){return '';}}
+  function setSrvToken(t){try{if(t)localStorage.setItem(SKEY,t);else localStorage.removeItem(SKEY);}catch(e){}}
+  function sapi(p){return '/api/projects/'+projId()+'/studio/'+p;}
+  function sget(p){return fetch(sapi(p),{headers:{'Authorization':'Bearer '+srvToken()}}).then(function(r){return r.json().then(function(d){return{ok:r.ok,status:r.status,d:d};}).catch(function(){return{ok:r.ok,status:r.status,d:{}};});});}
+  function spost(p,bodyObj){return fetch(sapi(p),{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+srvToken()},body:JSON.stringify(bodyObj||{})}).then(function(r){return r.json().then(function(d){return{ok:r.ok,status:r.status,d:d};}).catch(function(){return{ok:r.ok,status:r.status,d:{}};});});}
+  function sdel(p){return fetch(sapi(p),{method:'DELETE',headers:{'Authorization':'Bearer '+srvToken()}}).then(function(r){return r.json().then(function(d){return{ok:r.ok,status:r.status,d:d};}).catch(function(){return{ok:r.ok,status:r.status,d:{}};});});}
+  // Map a server booking/state into the in-memory S object (render functions keep reading S as before).
+  function srvBk(b){return {id:b.id,classId:b.classId,date:b.date,bookerEmail:b.bookerEmail,name:b.name,status:b.status,payment:b.payment,usedCredit:!!b.usedCredit,usedMonthly:!!b.usedMonthly,present:!!b.present,amount:b.amount,paymentIntent:b.paymentIntent,refunded:!!b.refunded,refundedAmount:b.refundedAmount};}
+  function applyServerState(d){
+    if(!d)return;
+    S.session=d.user?{email:d.user.email,role:d.user.role,name:d.user.name}:null;
+    S.classes=(d.classes||[]).map(function(c){return {id:c.id,title:c.title,teacherEmail:c.teacherEmail,teacher:c.teacher,date:c.date,time:c.time,cap:c.cap,price:c.price,mode:c.mode,onlineLink:c.onlineLink,onlineInfo:c.onlineInfo,bookDays:c.bookDays,cancelHours:c.cancelHours,recurring:false};});
+    S.members=(d.members||[]).map(function(m){return {id:m.id,name:m.name,type:m.type,unlimited:m.unlimited,credits:m.credits,price:m.price,validDays:m.validDays,recurring:m.recurring};});
+    S.counts=d.counts||{};
+    S.myBookings=(d.myBookings||[]).map(srvBk);
+    S.bookings=(d.bookings||[]).map(srvBk);   // admin/teacher: alle; klant: leeg (privacy → counts gebruikt)
+    S.purchases=d.purchases||[];
+    S.accounts=d.users?d.users.map(function(u){return {role:u.role,name:u.name,email:u.email,phone:u.phone};}):(d.user?[{role:d.user.role,name:d.user.name,email:d.user.email,phone:d.user.phone}]:[]);
+    S.wallets={};
+    if(d.user&&d.wallet){var nowM=ymd(new Date()).slice(0,7);S.wallets[d.user.email]={credits:d.wallet.credits||0,membership:d.wallet.membership||null,unlimited:!!d.wallet.unlimited,monthly:(d.wallet.monthlyLimit!=null?{limit:d.wallet.monthlyLimit,remaining:d.wallet.monthlyRemaining,period:nowM}:null),validUntil:d.wallet.validUntil||null,needsPayment:!!d.wallet.needsPayment};}
+  }
+  // After a server mutation: re-fetch the snapshot and re-render. 401 → session expired → back to login.
+  function refreshAndRender(){return sget('state').then(function(r){if(r.status===401){S.session=null;setSrvToken('');}else if(r.ok)applyServerState(r.d);render();});}
+  // Fire-and-forget transactional e-mail (booking/cancel/welcome). Server schedules the 24h
+  // reminder for bookings and cancels it on cancel. No-op server-side if SMTP isn't configured.
+  function notify(type,to,d){try{if(!to||!projId())return;d=d||{};
+    fetch(api('notify'),{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({type:type,to:to,name:d.name||'',studio:(BAKED&&BAKED.title)||'',classTitle:d.classTitle||'',date:d.date||'',time:d.time||'',bookingId:d.bookingId||'',password:d.password||'',mode:d.mode||'',onlineLink:d.onlineLink||'',onlineInfo:d.onlineInfo||''})}).catch(function(){});}catch(e){}}
+  // Fire-and-forget: generate an invoice + payment-confirmation e-mail for a Stripe payment.
+  function genInvoice(p){try{if(!projId())return;fetch(api('invoice'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)}).catch(function(){});}catch(e){}}
+  // Push the current lessons to the server so the subscribed calendar feed (.ics) stays up to date.
+  function syncCalendar(){try{if(!projId())return;
+    var ls=(S.classes||[]).filter(function(c){return c.date;}).map(function(c){return {id:c.id,title:c.title,date:c.date,time:c.time,mode:c.mode||'fysiek',onlineLink:c.onlineLink||'',onlineInfo:c.onlineInfo||'',teacher:c.teacher||''};});
+    fetch(api('calendar/sync'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lessons:ls})}).catch(function(){});}catch(e){}}
+  // Look up a class by id → {title,time} for e-mail content.
+  function classMeta(cid){var c=(S.classes||[]).filter(function(x){return x.id===cid;})[0];return c?{title:c.title||'les',time:c.time||'',mode:c.mode||'fysiek',link:c.onlineLink||'',info:c.onlineInfo||''}:{title:'les',time:'',mode:'fysiek',link:'',info:''};}
+  // Real Stripe refund (to the customer's bank/card). done(ok, data).
+  function refund(payload,done){fetch(api('stripe/refund'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
+    .then(function(r){return r.json().then(function(d){return{ok:r.ok,d:d};});})
+    .then(function(x){done(x.ok&&x.d&&x.d.ok,x.d||{});}).catch(function(){done(false,{});});}
+  function refreshStripeStatus(){var b=root.querySelector('#ba-stripe-badge');if(!b||!projId())return;
+    fetch(api('stripe/status')).then(function(r){return r.json();}).then(function(d){
+      if(d.connected&&d.chargesEnabled){b.textContent='gekoppeld';b.className='ba-badge ok';}
+      else if(d.connected){b.textContent='onboarding afronden';b.className='ba-badge';}
+      else{b.textContent='niet gekoppeld';b.className='ba-badge';}
+    }).catch(function(){b.textContent='—';});}
+
+  // ---------- screens ----------
+  // Landing page shown first: site logo + welcome + a "Begin hier" button → login.
+  function vHome(){
+    var bg=!!(BAKED&&BAKED.bg);
+    // Always a nice background: the site's image when available, else an accent-colour gradient.
+    var heroClass=bg?'ba-hero':'ba-hero-grad';
+    var logo=(BAKED&&BAKED.logo)?'<img src="'+BAKED.logo+'" alt="logo" style="max-height:150px;max-width:360px;object-fit:contain;display:block;margin:0 auto 28px;filter:drop-shadow(0 2px 12px rgba(0,0,0,.35))">':'';
+    var studio=(BAKED&&BAKED.studio)?esc(BAKED.studio):'onze studio';
+    var sh='text-shadow:0 2px 14px rgba(0,0,0,.45)';
+    return '<div class="'+heroClass+'" style="position:fixed;inset:0;z-index:5;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px;color:#fff">'+logo+
+      '<h1 style="font-size:52px;font-weight:800;margin:0 0 12px;line-height:1.08;max-width:900px;'+sh+'">Welcome to our booking system</h1>'+
+      '<p style="font-size:22px;margin:0 0 34px;opacity:.95;'+sh+'">Easily book your classes at '+studio+'.</p>'+
+      '<button class="ba-btn" data-act="begin" style="padding:17px 46px;font-size:19px;border-radius:14px">Get started</button></div>';
+  }
+  // Plain login — what everyone (incl. customers) sees. No role labels are shown here.
+  // Customers can self-register a (client) account right here.
+  function vAuth(){
+    if(authView==='home')return vHome();
+    if(authView==='register'){
+      var act=getAct();
+      var banner=act?'<div class="ba-note" style="background:#ecfdf5;border:1px solid #a7f3d0;color:#065f46;padding:10px 12px;border-radius:8px;margin-bottom:12px">Je gegevens zijn gevonden. Maak een wachtwoord aan om je strippenkaart/abonnement te activeren.</div>':'';
+      return '<div class="ba-auth"><h2>Account aanmaken</h2><p class="ba-meta">Maak een account om lessen te boeken.</p>'+
+        '<div class="ba-card" style="max-width:400px">'+banner+'<label class="ba-f">Naam</label><input id="rg-n" placeholder="Voor- en achternaam" value="'+esc((act&&act.name)||'')+'">'+
+        '<label class="ba-f">E-mailadres</label><input id="rg-e" type="email" placeholder="naam@voorbeeld.nl" value="'+esc((act&&act.email)||'')+'"'+(act&&act.email?' readonly style="background:#f3f4f6"':'')+'>'+
+        '<label class="ba-f">Telefoonnummer</label><input id="rg-tel" type="tel" placeholder="06 12345678" value="'+esc((act&&act.phone)||'')+'">'+
+        '<label class="ba-f">Wachtwoord</label><input id="rg-p" type="password">'+
+        '<div style="margin-top:14px"><button class="ba-btn" data-act="register">Account aanmaken</button></div>'+
+        '<div id="rg-err" class="ba-note" style="color:#b91c1c"></div>'+
+        '<p class="ba-note" style="margin-top:12px">Al een account? <a href="#" data-act="gologin" style="color:var(--ba);font-weight:600">Inloggen</a></p></div></div>';
+    }
+    if(authView==='reset'){
+      return '<div class="ba-auth"><h2>Wachtwoord vergeten</h2><p class="ba-meta">Vul je e-mailadres in; we sturen je een nieuw wachtwoord.</p>'+
+        '<div class="ba-card" style="max-width:400px"><label class="ba-f">E-mailadres</label><input id="rs-e" type="email" placeholder="naam@voorbeeld.nl">'+
+        '<div style="margin-top:14px"><button class="ba-btn" data-act="dorestpw">Nieuw wachtwoord sturen</button></div>'+
+        '<div id="rs-out" class="ba-note" style="margin-top:10px"></div>'+
+        '<p class="ba-note" style="margin-top:12px"><a href="#" data-act="gologin" style="color:var(--ba);font-weight:600">← Terug naar inloggen</a></p></div></div>';
+    }
+    var noStaff=!S.accounts.some(function(a){return a.role==='admin'||a.role==='teacher';});
+    var actBanner=activationMsg?'<div class="ba-note" style="background:#ecfdf5;border:1px solid #a7f3d0;color:#065f46;padding:10px 12px;border-radius:8px;margin-bottom:12px">'+esc(activationMsg)+'</div>':'';
+    return '<div class="ba-auth"><h2>Inloggen</h2><p class="ba-meta">Log in om verder te gaan.</p>'+
+      '<div class="ba-card" style="max-width:400px">'+actBanner+'<label class="ba-f">E-mailadres</label><input id="lg-e" type="email" placeholder="naam@voorbeeld.nl" value="'+esc(activationEmail||'')+'">'+
+      '<label class="ba-f">Wachtwoord</label><input id="lg-p" type="password">'+
+      '<div style="margin-top:14px"><button class="ba-btn" data-act="login">Inloggen</button></div>'+
+      '<div id="lg-err" class="ba-note" style="color:#b91c1c"></div>'+
+      '<p class="ba-note" style="margin-top:10px"><a href="#" data-act="goreset" style="color:var(--ba);font-weight:600">Wachtwoord vergeten?</a></p>'+
+      (noStaff?'<p class="ba-note" style="margin-top:12px">De studio stelt de beheerder- en docent-logins in. Klant? Maak hieronder een account aan.</p>':'')+
+      '<p class="ba-note" style="margin-top:12px">Nog geen account? <a href="#" data-act="goregister" style="color:var(--ba);font-weight:600">Registreren</a> · <a href="#" data-act="gohome" style="color:#9ca3af">← Terug</a></p></div></div>';
+  }
+  function vApp(){
+    var u=S.session,tabs=tabsFor(u.role);
+    if(!tabs.some(function(t){return t[0]===activeTab;}))activeTab=tabs[0][0];
+    var tb=tabs.map(function(t){return '<button class="ba-tab'+(t[0]===activeTab?' is-on':'')+'" data-tab="'+t[0]+'">'+t[1]+'</button>';}).join('');
+    return '<div class="ba-row" style="margin-bottom:14px"><div><div class="ba-h" style="font-size:22px">Boekingen</div><div class="ba-meta" style="margin:0">Ingelogd als '+esc(u.name)+'</div></div><button class="ba-btn ghost sm" data-act="logout">Uitloggen</button></div>'+
+      '<div class="ba-tabs">'+tb+'</div><div class="ba-host"></div>';
+  }
+  function renderHost(){var host=root.querySelector('.ba-host');if(host){host.innerHTML=(PANELS[activeTab]||pBoeken)();if(activeTab==='koppel'){refreshStripeStatus();refreshInvoiceSettings();refreshImportStatus();}if(activeTab==='comm')refreshEmailStatus();if(activeTab==='studio')refreshInvoices();}}
+  function render(){
+    var sc=!S.session?'login':'app';
+    ['login','app'].forEach(function(name){
+      var el=root.querySelector('[data-screen="'+name+'"]');if(!el)return;
+      el.style.display=name===sc?'':'none';
+      if(name===sc)el.innerHTML=name==='login'?vAuth():vApp();
+    });
+    if(sc==='app')renderHost();
+  }
+
+  // ---------- events ----------
+  root.addEventListener('change',function(e){
+    var tg=e.target;
+    // Payment choice changes the action button: Stripe => "Kopen" (pay per class), else "Boeken".
+    if(tg.classList&&tg.classList.contains('ba-pay')){
+      var row=tg.closest('.ba-row');var bb=row&&row.querySelector('[data-act="book"]');
+      if(bb)bb.textContent=(tg.value==='stripe')?'Kopen':'Boeken';
+      return;
+    }
+    var a=tg.closest&&tg.closest('[data-act]');if(!a)return;
+    var act=a.getAttribute('data-act');
+    if(act==='moveto'){
+      var bid=a.getAttribute('data-b'),parts=a.value.split('|');
+      var bk=S.bookings.filter(function(b){return b.id===bid;})[0];
+      if(bk){bk.classId=parts[0];bk.date=parts[1];save();renderHost();}
+    } else if(act==='classprice'){
+      var c=S.classes.filter(function(x){return x.id===a.getAttribute('data-c');})[0];
+      if(c){c.price=Math.max(0,parseFloat(a.value)||0);save();renderHost();}
+    } else if(act==='memberprice'){
+      var m=S.members.filter(function(x){return x.id===a.getAttribute('data-m');})[0];
+      if(m){m.price=Math.max(0,parseFloat(a.value)||0);save();renderHost();}
+    } else if(act==='inv-country'){
+      applyInvoiceCountry(a.value,true); // wissel land → labels + standaard belastingtarief
+    }
+  });
+  root.addEventListener('click',function(e){
+    var t=e.target.closest('[data-tab]');
+    if(t){activeTab=t.getAttribute('data-tab');render();return;}
+    var a=e.target.closest('[data-act]'); if(!a)return; var act=a.getAttribute('data-act');
+
+    // auth
+    if(act==='begin'){authView='login';render();return;}
+    if(act==='gohome'){if(e.preventDefault)e.preventDefault();authView='home';render();return;}
+    if(act==='goregister'){if(e.preventDefault)e.preventDefault();authView='register';render();return;}
+    if(act==='gologin'){if(e.preventDefault)e.preventDefault();authView='login';render();return;}
+    if(act==='goreset'){if(e.preventDefault)e.preventDefault();authView='reset';render();return;}
+    if(act==='dorestpw'){if(e.preventDefault)e.preventDefault();
+      var rse=(q('rs-e')||{value:''}).value.trim().toLowerCase(),rso=q('rs-out');
+      if(!isValidEmail(rse)){if(rso){rso.style.color='#b91c1c';rso.textContent='Vul een geldig e-mailadres in.';}return;}
+      if(SRV){spost('reset',{email:rse}).then(function(){if(rso){rso.style.color='#15803d';rso.textContent='Als er een account bij dit e-mailadres hoort, is er een nieuw wachtwoord verstuurd. Check je inbox.';}});return;}
+      var acc=S.accounts.filter(function(x){return x.email===rse;})[0];
+      if(acc){
+        // Genereer een nieuw tijdelijk wachtwoord, sla het op en mail het (echte e-mail via /notify).
+        var np=Math.random().toString(36).slice(2,6)+Math.random().toString(36).slice(2,6);
+        acc.password=np;save();
+        notify('reset',rse,{name:acc.name,password:np});
+      }
+      // Altijd dezelfde melding (lekt niet of een account bestaat).
+      if(rso){rso.style.color='#15803d';rso.textContent='Als er een account bij dit e-mailadres hoort, is er een nieuw wachtwoord verstuurd. Check je inbox.';}
+      return;}
+    if(act==='register'){var rn=q('rg-n').value.trim(),re=q('rg-e').value.trim().toLowerCase(),rtel=(q('rg-tel')?q('rg-tel').value:'').trim(),rp=q('rg-p').value,rerr=q('rg-err');
+      if(!rn||!isValidEmail(re)||!rp){if(rerr)rerr.textContent='Vul je naam, een geldig e-mailadres en een wachtwoord in.';return;}
+      if(!rtel||rtel.replace(/[^0-9]/g,'').length<8){if(rerr)rerr.textContent='Vul een geldig telefoonnummer in.';return;}
+      if(SRV){spost('register',{name:rn,email:re,phone:rtel,password:rp}).then(function(r){
+        if(!r.ok){if(rerr)rerr.textContent=(r.d&&r.d.error)||'Registreren mislukt.';return;}
+        setSrvToken(r.d.token);activationMsg='';activationEmail='';authView='login';activeTab='dashboard';refreshAndRender();});return;}
+      if(S.accounts.some(function(x){return x.email===re;})){if(rerr)rerr.textContent='Er bestaat al een account met dit e-mailadres.';return;}
+      S.accounts.push({role:'client',name:rn,email:re,phone:rtel,password:rp});
+      notify('welcome',re,{name:rn});
+      var pa=getAct();if(pa&&pa.email===re){applyEntitlements(re,pa.entitlements);clearAct();} // Mindbody tegoed
+      activationMsg='';activationEmail='';
+      S.session={email:re,role:'client',name:rn};activeTab='dashboard';authView='login';save();render();return;}
+    if(act==='login'){var le=q('lg-e').value.trim().toLowerCase(),lp=q('lg-p').value;
+      if(SRV){spost('login',{email:le,password:lp}).then(function(r){
+        if(!r.ok){var lee=q('lg-err');if(lee)lee.textContent=(r.d&&r.d.error)||'Inloggen mislukt.';return;}
+        setSrvToken(r.d.token);activationMsg='';activationEmail='';
+        activeTab=r.d.user.role==='admin'?'boeken':r.d.user.role==='teacher'?'agenda':'dashboard';refreshAndRender();});return;}
+      var acc=S.accounts.filter(function(x){return x.email===le&&x.password===lp;})[0];
+      if(!acc){var le2=q('lg-err');if(le2)le2.textContent='Onjuist e-mailadres of wachtwoord.';return;}
+      var pl=getAct();if(pl&&pl.email===acc.email){applyEntitlements(acc.email,pl.entitlements);clearAct();} // Mindbody tegoed
+      activationMsg='';activationEmail='';
+      S.session={email:acc.email,role:acc.role,name:acc.name};activeTab=acc.role==='admin'?'boeken':acc.role==='teacher'?'agenda':'dashboard';save();render();return;}
+    if(act==='logout'){if(SRV){spost('logout',{}).catch(function(){});setSrvToken('');S.session=null;authView='home';render();return;}S.session=null;authView='home';save();render();return;}
+
+    // teacher management (admin)
+    if(act==='addteacher'){var n=q('dz-n').value.trim(),em=q('dz-e').value.trim().toLowerCase(),pw=q('dz-p').value,de=q('dz-err');
+      if(!n||!isValidEmail(em)||!pw){if(de)de.textContent='Vul naam, geldig e-mail en wachtwoord in.';return;}
+      if(SRV){spost('seed-staff',{accounts:[{role:'teacher',name:n,email:em,password:pw}]}).then(function(r){
+        if(!r.ok){if(de)de.textContent=(r.d&&r.d.error)||'Toevoegen mislukt.';return;}
+        if((r.d&&r.d.created)===0){if(de)de.textContent='Dit e-mailadres bestaat al.';return;}refreshAndRender();});return;}
+      if(S.accounts.some(function(x){return x.email===em;})){if(de)de.textContent='Dit e-mailadres bestaat al.';return;}
+      S.accounts.push({role:'teacher',name:n,email:em,password:pw});save();renderHost();return;}
+    if(act==='delacc'){var dem=a.getAttribute('data-e');
+      if(dem===((S.session&&S.session.email)||'')){alert('Je kunt het account waarop je nu bent ingelogd niet verwijderen.');return;}
+      if(SRV){alert('Accounts verwijderen koppelen we binnenkort aan de server.');return;}
+      S.accounts=S.accounts.filter(function(x){return x.email!==dem;});save();renderHost();return;}
+
+    // agenda week navigation
+    if(act==='weekprev'){if(agendaWeek>0)agendaWeek--;renderHost();return;}
+    if(act==='weeknext'){agendaWeek++;renderHost();return;}
+
+    // booking
+    if(act==='book'||act==='wait'){
+      var cid=a.getAttribute('data-c'),date=a.getAttribute('data-d');
+      var clsW=S.classes.filter(function(c){return c.id==cid;})[0]||{};
+      if(bookTooEarly(clsW,date)){alert('Boeken kan pas vanaf '+fmtDate(bookOpensOn(clsW,date))+' ('+clsW.bookDays+' dagen voor de les).');return;}
+      var sel=root.querySelector('.ba-pay[data-c="'+cid+'"][data-d="'+date+'"]');var pay=sel?sel.value:(S.pay.tegoed?'tegoed':'stripe');
+      if(SRV){
+        if(act==='book'&&pay==='stripe'){
+          if(!clsW.price||clsW.price<0.5){alert('Deze les heeft nog geen prijs. De studio stelt die in bij Studio-beheer.');return;}
+          payViaStripe('les',clsW.title,clsW.price,{kind:'book',classId:cid,date:date}); // afronden via /studio/stripe/finalize bij terugkeer
+          return;
+        }
+        spost('book',{classId:cid,date:date,waitlist:(act==='wait'),payment:'tegoed'}).then(function(r){
+          if(!r.ok){alert((r.d&&r.d.error)||'Boeken mislukt.');return;}refreshAndRender();});
+        return;
+      }
+      if(act==='book'&&pay==='stripe'){
+        // Real payment via Stripe Checkout; the booking is created on return (?betaald=1).
+        var cls=S.classes.filter(function(c){return c.id===cid;})[0]||{};
+        if(!cls.price||cls.price<0.5){alert('Deze les heeft nog geen prijs. De studio stelt die in bij Studio-beheer.');return;}
+        payViaStripe('les',cls.title,cls.price,{kind:'book',classId:cid,date:date,name:(S.session&&S.session.name)||'Gast',bookerEmail:myEmail()});
+        return;
+      }
+      var MW=walletFor(myEmail());
+      var usedCredit=false,usedMonthly=false;
+      if(act==='book'&&pay==='tegoed'){
+        var bc=bookingCredit(MW);
+        if(!bc.ok){alert(bc.reason);return;}
+        if(bc.type==='credit'){MW.credits--;usedCredit=true;}            // strippenkaart: 1 credit eraf
+        else if(bc.type==='monthly'){MW.monthly.remaining--;usedMonthly=true;} // X/maand: maandtegoed eraf
+        // unlimited abonnement = geen aftrek
+      }
+      var nb={id:uid(),classId:cid,date:date,name:(S.session&&S.session.name)||'Gast',bookerEmail:myEmail(),status:act==='book'?'booked':'waitlist',payment:pay,usedCredit:usedCredit,usedMonthly:usedMonthly,present:false};
+      S.bookings.push(nb);
+      if(act==='book'){var cm=classMeta(cid);notify('booking',myEmail(),{name:nb.name,classTitle:cm.title,date:date,time:cm.time,bookingId:nb.id,mode:cm.mode,onlineLink:cm.link,onlineInfo:cm.info});}
+      save();renderHost();return;
+    }
+    if(act==='cancel'){var bid=a.getAttribute('data-b');
+      if(SRV){spost('cancel',{bookingId:bid}).then(function(r){if(!r.ok){alert((r.d&&r.d.error)||'Annuleren mislukt.');return;}refreshAndRender();});return;}
+      var bk=S.bookings.filter(function(b){return b.id===bid;})[0];
+      if(bk){
+        // Annuleringsdeadline (alleen voor geboekte lessen; de admin mag altijd annuleren).
+        var bcls=S.classes.filter(function(c){return c.id===bk.classId;})[0]||{};
+        if(bk.status==='booked'&&cancelClosed(bcls,bk.date)&&!(S.session&&S.session.role==='admin')){alert('Annuleren kan tot '+bcls.cancelHours+' uur voor de les — die termijn is verstreken. Neem contact op met de studio.');return;}
+        var wasBooked=bk.status==='booked';
+        if(wasBooked&&bk.usedCredit)walletFor(bk.bookerEmail||myEmail()).credits++;
+        if(wasBooked&&bk.usedMonthly){var RW=walletFor(bk.bookerEmail||myEmail());if(RW.monthly){ensureMonthlyReset(RW);RW.monthly.remaining=Math.min(RW.monthly.limit,(RW.monthly.remaining||0)+1);}}
+        // Keep the record (status 'cancelled') so the admin can see cancellations; it no longer counts.
+        bk.status='cancelled';bk.cancelledAt=ymd(new Date());
+        notify('cancel',bk.bookerEmail||myEmail(),{name:bk.name,classTitle:classMeta(bk.classId).title,date:bk.date,bookingId:bk.id});
+        // A spot opened up → promote the FIRST waitlister and e-mail them automatically.
+        if(wasBooked){var w=S.bookings.filter(function(b){return b.classId===bk.classId&&b.date===bk.date&&b.status==='waitlist';})[0];
+          if(w){w.status='booked';w.promotedAt=ymd(new Date());var pm=classMeta(w.classId);
+            notify('promoted',w.bookerEmail,{name:w.name,classTitle:pm.title,date:w.date,time:pm.time,bookingId:w.id,mode:pm.mode,onlineLink:pm.link,onlineInfo:pm.info});}}
+      }
+      save();renderHost();return;}
+    if(act==='addclass'){
+      var title=q('ba-ct').value.trim();if(!title){alert('Geef de les een titel.');return;}
+      var cdate=q('ba-cdate')?q('ba-cdate').value:'';if(!cdate){alert('Kies een datum.');return;}
+      var temail=q('ba-cte')?q('ba-cte').value:'';
+      var cmodeEl=root.querySelector('input[name="ba-cmode"]:checked');var cmode=cmodeEl?cmodeEl.value:'fysiek';
+      var clink=(q('ba-clink')?q('ba-clink').value:'').trim(),cinfo=(q('ba-cinfo')?q('ba-cinfo').value:'').trim();
+      var cbook=Math.max(0,parseInt(q('ba-cbook')?q('ba-cbook').value:'0',10)||0);
+      var ccancel=Math.max(0,parseInt(q('ba-ccancel')?q('ba-ccancel').value:'0',10)||0);
+      var ccap=Math.max(1,parseInt(q('ba-cc').value,10)||12),cprice=Math.max(0,parseFloat(q('ba-cp')?q('ba-cp').value:'0')||0),ctime=q('ba-ctm').value||'09:00';
+      if(SRV){spost('classes',{title:title,teacherEmail:temail,date:cdate,time:ctime,cap:ccap,price:cprice,mode:cmode,onlineLink:clink,onlineInfo:cinfo,bookDays:cbook,cancelHours:ccancel}).then(function(r){
+        if(!r.ok){alert((r.d&&r.d.error)||'Les toevoegen mislukt.');return;}refreshAndRender().then(syncCalendar);});return;}
+      S.classes.push({id:uid(),title:title,teacherEmail:temail,teacher:accName(temail),date:cdate,time:ctime,cap:ccap,price:cprice,mode:cmode,onlineLink:clink,onlineInfo:cinfo,bookDays:cbook,cancelHours:ccancel,recurring:false});
+      save();renderHost();syncCalendar();return;}
+    if(act==='delclass'){var id=a.getAttribute('data-c');
+      if(SRV){sdel('classes/'+id).then(function(r){if(!r.ok){alert((r.d&&r.d.error)||'Verwijderen mislukt.');return;}refreshAndRender().then(syncCalendar);});return;}
+      S.classes=S.classes.filter(function(c){return c.id!==id;});save();renderHost();syncCalendar();return;}
+    if(act==='present'){var bid2=a.getAttribute('data-b');
+      if(SRV){spost('present',{bookingId:bid2}).then(function(r){if(r.ok)refreshAndRender();});return;}
+      var b2=S.bookings.filter(function(b){return b.id===bid2;})[0];if(b2)b2.present=!b2.present;save();renderHost();return;}
+    if(act==='buy'){var m=S.members.filter(function(x){return x.id==a.getAttribute('data-m');})[0];if(!m)return;
+      // Pay via Stripe; the strippenkaart/abonnement is granted on return (server-mode: /studio/stripe/finalize).
+      payViaStripe(m.type,m.name,m.price,{kind:'buy',memberId:m.id,bookerEmail:myEmail()});
+      return;}
+    if(act==='addmember'){var nm=q('ba-mn').value.trim();if(!nm){alert('Geef een naam op.');return;}
+      var type=q('ba-mt').value;var lim=q('ba-ml')?q('ba-ml').value:'aantal';var lessons=parseInt(q('ba-mc').value,10)||0;
+      var unlimited=(type==='abonnement'&&lim==='onbeperkt');
+      if(SRV){spost('members',{name:nm,type:type,unlimited:unlimited,lim:lim,credits:lessons,price:parseInt(q('ba-mp').value,10)||0,validDays:parseInt(q('ba-mv').value,10)||0}).then(function(r){
+        if(!r.ok){alert((r.d&&r.d.error)||'Toevoegen mislukt.');return;}refreshAndRender();});return;}
+      S.members.push({id:uid(),name:nm,type:type,unlimited:unlimited,credits:unlimited?null:(lessons||(type==='strippenkaart'?10:8)),price:parseInt(q('ba-mp').value,10)||0,validDays:parseInt(q('ba-mv').value,10)||(type==='abonnement'?30:180),recurring:type==='abonnement'});
+      save();renderHost();return;}
+    if(act==='togglerem'){S.reminders=!S.reminders;save();return;}
+    // Stripe terugbetalen — losse les (annuleer + terugstort)
+    if(act==='refundbk'){if(SRV){if(!confirm('Deze boeking terugbetalen aan de klant?'))return;a.disabled=true;a.textContent='Bezig…';
+        spost('refund-booking',{bookingId:a.getAttribute('data-b')}).then(function(r){if(!r.ok){a.disabled=false;a.textContent='Terugbetalen';alert((r.d&&r.d.error)||'Terugbetalen mislukt.');return;}alert('Terugbetaald: €'+(r.d.amount||0)+'.');refreshAndRender();});return;}
+      var rid=a.getAttribute('data-b');var rbk=S.bookings.filter(function(b){return b.id===rid;})[0];
+      if(!rbk||!rbk.paymentIntent){alert('Geen Stripe-betaling om terug te storten.');return;}
+      if(!confirm('€'+(rbk.amount||0)+' terugbetalen aan '+(rbk.bookerEmail||'de klant')+'?'))return;
+      a.disabled=true;a.textContent='Bezig…';
+      refund({paymentIntent:rbk.paymentIntent,amount:rbk.amount},function(ok,d){
+        if(ok){rbk.refunded=true;rbk.refundedAmount=(d&&d.amount!=null)?d.amount:rbk.amount;
+          if(rbk.status==='booked'){rbk.status='cancelled';rbk.cancelledAt=ymd(new Date());notify('cancel',rbk.bookerEmail||myEmail(),{name:rbk.name,classTitle:classMeta(rbk.classId).title,date:rbk.date,bookingId:rbk.id});}
+          save();renderHost();alert('Terugbetaald: €'+rbk.refundedAmount+'.');}
+        else{a.disabled=false;a.textContent='Terugbetalen';alert((d&&d.error)||'Terugbetalen mislukt.');}});return;}
+    // Stripe terugbetalen — strippenkaart (eigen bedrag) of abonnement (opzeggen + terugstort)
+    if(act==='refundpur'){if(SRV){var spid=a.getAttribute('data-p');var spu=(S.purchases||[]).filter(function(x){return x.id==spid;})[0];var sbody={purchaseId:spid};
+        if(spu&&!(spu.type==='abonnement'&&spu.subscription)){var sinp=q('ba-rf-'+spid);var samt=sinp?parseFloat(sinp.value):(spu?spu.amount:0);if(!(samt>0)){alert('Vul een geldig bedrag in.');return;}sbody.amount=samt;}
+        if(!confirm('Terugbetalen aan de klant?'))return;a.disabled=true;a.textContent='Bezig…';
+        spost('refund-purchase',sbody).then(function(r){if(!r.ok){a.disabled=false;a.textContent='Terugbetalen';alert((r.d&&r.d.error)||'Terugbetalen mislukt.');return;}alert('Terugbetaald: €'+(r.d.amount||0)+'.');refreshAndRender();});return;}
+      var puid=a.getAttribute('data-p');var pu=(S.purchases||[]).filter(function(x){return x.id===puid;})[0];if(!pu)return;
+      var payload,amt;
+      if(pu.type==='abonnement'&&pu.subscription){if(!confirm('Abonnement opzeggen en de laatste betaling terugstorten?'))return;payload={subscription:pu.subscription};}
+      else{if(!pu.paymentIntent){alert('Geen betaling gevonden.');return;}var rinp=q('ba-rf-'+puid);amt=rinp?parseFloat(rinp.value):pu.amount;
+        if(!(amt>0)){alert('Vul een geldig bedrag in.');return;}if(amt>pu.amount+0.001){alert('Bedrag is hoger dan betaald (€'+pu.amount+').');return;}
+        if(!confirm('€'+amt+' terugbetalen aan '+(pu.email||'de klant')+'?'))return;payload={paymentIntent:pu.paymentIntent,amount:amt};}
+      a.disabled=true;a.textContent='Bezig…';
+      refund(payload,function(ok,d){if(ok){pu.refunded=true;pu.refundedAmount=(d&&d.amount!=null)?d.amount:amt;save();renderHost();alert('Terugbetaald'+((d&&d.amount!=null)?(': €'+d.amount):'')+'.');}
+        else{a.disabled=false;a.textContent='Terugbetalen';alert((d&&d.error)||'Terugbetalen mislukt.');}});return;}
+    // Testmail vanuit Communicatie (gebruikt de centrale e-mailconfig)
+    if(act==='email-sendtest'){var so=q('ba-comm-out');if(so){so.style.color='';so.textContent='Testmail versturen…';}
+      fetch(api('email/test'),{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})
+        .then(function(r){return r.json().then(function(d){return{ok:r.ok,d:d};});})
+        .then(function(x){if(so){if(x.ok&&x.d&&x.d.ok){so.style.color='#15803d';so.textContent='Testmail verstuurd ✓ Check de inbox.';}else{so.style.color='#b91c1c';so.textContent=(x.d&&x.d.error)||'Versturen mislukt.';}}})
+        .catch(function(){if(so){so.style.color='#b91c1c';so.textContent='Versturen mislukt.';}});return;}
+    // Bericht naar leden (echte e-mail)
+    if(act==='broadcast'){var scope=(q('ba-bc-scope')||{value:'klanten'}).value,subj=(q('ba-bc-subj')||{value:''}).value.trim(),bd=(q('ba-bc-body')||{value:''}).value.trim(),bo=q('ba-bc-out');
+      if(!subj||!bd){if(bo){bo.style.color='#b91c1c';bo.textContent='Vul een onderwerp en een bericht in.';}return;}
+      var rcpts=recipientEmails(scope);
+      if(!rcpts.length){if(bo){bo.style.color='#b91c1c';bo.textContent='Geen ontvangers gevonden voor deze selectie.';}return;}
+      if(bo){bo.style.color='';bo.textContent='Versturen naar '+rcpts.length+' ontvanger(s)…';}
+      fetch(api('email/broadcast'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({subject:subj,body:bd,recipients:rcpts})})
+        .then(function(r){return r.json().then(function(d){return{ok:r.ok,d:d};});})
+        .then(function(x){if(x.ok&&x.d&&x.d.ok){if(bo){bo.style.color='#15803d';bo.textContent='Verstuurd naar '+x.d.sent+' van '+x.d.total+' ontvanger(s).';}var sj=q('ba-bc-subj'),bb=q('ba-bc-body');if(sj)sj.value='';if(bb)bb.value='';}
+          else if(bo){bo.style.color='#b91c1c';bo.textContent=(x.d&&x.d.error)||'Versturen mislukt.';}})
+        .catch(function(){if(bo){bo.style.color='#b91c1c';bo.textContent='Versturen mislukt.';}});return;}
+    if(act==='togglepay'){var pk=a.getAttribute('data-k'),other=pk==='tegoed'?'stripe':'tegoed';
+      if(!a.checked&&!S.pay[other]){a.checked=true;alert('Minstens één betaalmethode moet aan staan.');return;}
+      S.pay[pk]=a.checked;save();render();return;}
+    if(act==='delmember'){var mid=a.getAttribute('data-m');
+      if(SRV){sdel('members/'+mid).then(function(r){if(r.ok)refreshAndRender();});return;}
+      S.members=S.members.filter(function(x){return x.id!==mid;});save();renderHost();return;}
+    if(act==='delcancel'){var cbid=a.getAttribute('data-b');S.bookings=S.bookings.filter(function(b){return !(b.id===cbid&&b.status==='cancelled');});save();renderHost();return;}
+    if(act==='clearcancels'){S.bookings=S.bookings.filter(function(b){return b.status!=='cancelled';});save();renderHost();return;}
+    if(act==='stripe-onboard'){var ex=root.querySelector('#ba-stripe-extra');if(ex)ex.textContent='Bezig…';
+      var w=null;try{w=window.open('about:blank','_blank');}catch(e){} // open SYNC binnen de klik (Safari)
+      fetch(api('stripe/onboard'),{method:'POST'}).then(function(r){return r.json();}).then(function(d){
+        if(d.url){
+          try{if(w)w.location.href=d.url;}catch(e){}
+          // Altijd ook een klikbare link tonen (één klik werkt altijd, ook als de pop-up wordt geblokkeerd).
+          if(ex)ex.innerHTML='<a href="'+d.url+'" target="_blank" rel="noopener" style="color:var(--ba);font-weight:700">Open Stripe-onboarding ↗</a> — daarna Integraties opnieuw openen om de status te verversen.';
+        } else { if(w){try{w.close();}catch(e){}} if(ex)ex.textContent=d.error||'Koppelen mislukt.'; }
+      }).catch(function(){if(w){try{w.close();}catch(e){}}if(ex)ex.textContent='Koppelen mislukt.';});return;}
+    if(act==='cal-connect'){var cbox=q('ba-cal-box');if(cbox)cbox.textContent='Koppelen…';syncCalendar();
+      fetch(api('calendar')).then(function(r){return r.json();}).then(function(d){if(!cbox)return;var url=d.url||'';
+        cbox.innerHTML='<label class="ba-f">Jouw agenda-feed (abonneer hierop):</label>'+
+          '<div class="ba-row" style="gap:6px;justify-content:flex-start"><input id="ba-cal-url" readonly value="'+esc(url)+'" style="flex:1;min-width:0"><button class="ba-btn ghost sm" data-act="cal-copy">Kopieer</button></div>'+
+          '<div class="ba-card" style="background:#f8fafc;margin-top:10px;font-size:13px;line-height:1.55">'+
+            '<b>Google Agenda</b><ol style="margin:6px 0 10px;padding-left:18px"><li>Open <a href="https://calendar.google.com" target="_blank" rel="noopener" style="color:var(--ba)">calendar.google.com</a></li><li>Links naast “Andere agenda’s” → <b>+</b> → <b>Via URL</b></li><li>Plak de link → <b>Agenda toevoegen</b></li></ol>'+
+            '<b>Apple Agenda</b><ol style="margin:6px 0 10px;padding-left:18px"><li>iPhone: Instellingen → Agenda → Accounts → Account toevoegen → <b>Anders</b> → <b>Agenda-abonnement toevoegen</b> → plak de link</li><li>Mac: Agenda → Archief → <b>Nieuw agenda-abonnement</b> → plak de link</li></ol>'+
+            '<b>Outlook / Microsoft 365</b><ol style="margin:6px 0 0;padding-left:18px"><li>Open je Outlook-agenda → <b>Agenda toevoegen</b> → <b>Abonneren via internet</b></li><li>Plak de link → <b>Importeren</b></li></ol>'+
+          '</div>'+
+          '<p class="ba-note" style="margin-top:8px">Werkt zodra de app op een openbaar webadres draait (een agendadienst kan localhost niet bereiken). Nieuwe lessen verschijnen na de eerstvolgende verversing van je agenda (meestal enkele uren).</p>';
+      }).catch(function(){if(cbox)cbox.textContent='Koppelen mislukt.';});return;}
+    if(act==='cal-copy'){var cu=q('ba-cal-url');if(cu){try{cu.select();}catch(e){}try{navigator.clipboard.writeText(cu.value);}catch(e){}a.textContent='Gekopieerd ✓';setTimeout(function(){a.textContent='Kopieer';},1500);}return;}
+    if(act==='invoice-save'){var io=q('ba-inv-out');if(io){io.style.color='';io.textContent='Opslaan…';}
+      var gv=function(id){var el=q(id);return el?el.value.trim():'';};
+      var vpRaw=parseInt(gv('ba-inv-vatp'),10);var vp=isNaN(vpRaw)?null:vpRaw; // 0% mag (US) — server vult standaard in bij leeg
+      fetch(api('invoice-settings'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({country:gv('ba-inv-country')||'NL',company:gv('ba-inv-company'),address:gv('ba-inv-address'),postcode:gv('ba-inv-postcode'),city:gv('ba-inv-city'),kvk:gv('ba-inv-kvk'),vat:gv('ba-inv-vat'),vatPercent:vp,email:gv('ba-inv-email')})})
+        .then(function(r){return r.json().then(function(d){return{ok:r.ok,d:d};});})
+        .then(function(x){if(io){if(x.ok){io.style.color='#15803d';io.textContent='Facturatie-gegevens opgeslagen ✓';refreshInvoiceSettings();}else{io.style.color='#b91c1c';io.textContent=(x.d&&x.d.error)||'Opslaan mislukt.';}}})
+        .catch(function(){if(io){io.style.color='#b91c1c';io.textContent='Opslaan mislukt.';}});return;}
+
+    // Mindbody import: read each selected CSV and POST it (sequentially), then show a per-type summary.
+    if(act==='mb-import'){var out=q('ba-mb-out');if(out){out.style.color='#6b7280';out.textContent='Bezig met importeren…';}
+      var jobs=[['clients','ba-mb-clients'],['class_packs','ba-mb-packs'],['memberships','ba-mb-members']];var results=[];
+      var run=function(i){
+        if(i>=jobs.length){if(out){if(!results.length){out.style.color='#b45309';out.textContent='Selecteer minstens één CSV-bestand.';}
+          else{out.style.color='#15803d';out.innerHTML=results.map(mbSummaryLine).join('<br>');}}refreshImportStatus();return;}
+        var inp=q(jobs[i][1]);var f=inp&&inp.files&&inp.files[0];if(!f){run(i+1);return;}
+        var rd=new FileReader();rd.onload=function(){
+          fetch(api('import/mindbody'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({type:jobs[i][0],csv:String(rd.result||'')})})
+            .then(function(x){return x.json();}).then(function(d){if(d&&!d.error)results.push(d);else if(out){out.style.color='#b91c1c';out.textContent=(d&&d.error)||'Import mislukt.';}run(i+1);})
+            .catch(function(){run(i+1);});};
+        rd.onerror=function(){run(i+1);};rd.readAsText(f);
+      };run(0);return;}
+    // Alles-in-één: één CSV waarin elke rij automatisch geclassificeerd wordt (klant/strippenkaart/abonnement).
+    if(act==='mb-import-all'){var oa=q('ba-mb-out');var inp=q('ba-mb-all');var f=inp&&inp.files&&inp.files[0];
+      if(!f){if(oa){oa.style.color='#b45309';oa.textContent='Selecteer eerst een CSV-bestand.';}return;}
+      if(oa){oa.style.color='#6b7280';oa.textContent='Bezig met importeren…';}
+      var rd=new FileReader();rd.onload=function(){
+        fetch(api('import/mindbody'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({type:'combined',csv:String(rd.result||'')})})
+          .then(function(x){return x.json();}).then(function(d){
+            if(oa){if(d&&!d.error){oa.style.color='#15803d';oa.innerHTML=mbSummaryLine(d);}else{oa.style.color='#b91c1c';oa.textContent=(d&&d.error)||'Import mislukt.';}}refreshImportStatus();})
+          .catch(function(){if(oa){oa.style.color='#b91c1c';oa.textContent='Import mislukt.';}});};
+      rd.onerror=function(){if(oa){oa.style.color='#b91c1c';oa.textContent='Kon bestand niet lezen.';}};rd.readAsText(f);return;}
+    if(act==='mb-send'){var mo=q('ba-mb-out');if(mo){mo.style.color='#6b7280';mo.textContent='Activatie-mails versturen…';}
+      fetch(api('import/send-activations'),{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}).then(function(r){return r.json();}).then(function(d){
+        if(mo){if(d&&d.ok){mo.style.color='#15803d';mo.textContent=d.sent+' van '+d.total+' activatie-mail(s) verstuurd'+(d.errors&&d.errors.length?(' · '+d.errors.length+' mislukt'):'')+'.';}else{mo.style.color='#b91c1c';mo.textContent=(d&&d.error)||'Versturen mislukt.';}}
+        refreshImportStatus();
+      }).catch(function(){if(mo){mo.style.color='#b91c1c';mo.textContent='Versturen mislukt.';}});return;}
+  });
+
+  // Finalize a Stripe payment after returning from Checkout (?betaald=1): grant the booking
+  // or the strippenkaart/abonnement from the stashed pending action. Cleared so a refresh
+  // can't double-apply.
+  // Stripe return (?betaald=1): we stash the pending action; boot() finalizes it once SRV is known
+  // (server-side via /studio/stripe/finalize, or the local fallback below).
+  var stripeReturn=null;
+  (function(){
+    if(!/[?&]betaald=1(&|$)/.test(location.search||''))return;
+    var p=getPending();var sid=(location.search.match(/[?&]session_id=([^&]+)/)||[])[1];
+    if(!p)return; if(!sid){clearPending();return;}
+    stripeReturn={p:p,sid:decodeURIComponent(sid)};clearPending();
+  })();
+  // Local-mode grant (server-mode uses /studio/stripe/finalize — see finalizeStripeReturn).
+  function localStripeGrant(p,sid){
+    fetch(api('stripe/verify?session_id='+encodeURIComponent(sid))).then(function(r){return r.json();}).then(function(d){
+      if(d&&d.paid){
+        if(p.kind==='book'){var sb={id:uid(),classId:p.classId,date:p.date,name:p.name||'Gast',bookerEmail:p.bookerEmail||'',status:'booked',payment:'stripe',usedCredit:false,present:false,paymentIntent:d.paymentIntent||'',amount:(d.amountTotal||0)/100};S.bookings.push(sb);var scm=classMeta(p.classId);notify('booking',p.bookerEmail||myEmail(),{name:p.name,classTitle:scm.title,date:p.date,time:scm.time,bookingId:sb.id,mode:scm.mode,onlineLink:scm.link,onlineInfo:scm.info});
+          genInvoice({email:p.bookerEmail||myEmail(),name:p.name||accName(p.bookerEmail||myEmail()),description:'Losse les — '+scm.title+(p.date?(' '+p.date):''),amount:(d.amountTotal||0)/100,method:'Stripe'});}
+        else if(p.kind==='buy'){var m=S.members.filter(function(x){return x.id===p.memberId;})[0];if(m){var BW=walletFor(p.bookerEmail||myEmail());if(isUnlimited(m)){BW.membership=m.name;}else{BW.credits+=(m.credits||0);BW.membership=null;}var dt=new Date();dt.setDate(dt.getDate()+(m.validDays||30));BW.validUntil=ymd(dt);
+          if(!S.purchases)S.purchases=[];S.purchases.push({id:uid(),email:p.bookerEmail||myEmail(),type:m.type,name:m.name,amount:(d.amountTotal||0)/100,paymentIntent:d.paymentIntent||'',subscription:d.subscription||'',date:ymd(new Date()),refunded:false});
+          genInvoice({email:p.bookerEmail||myEmail(),name:accName(p.bookerEmail||myEmail()),description:(m.type==='abonnement'?'Abonnement':'Strippenkaart')+' — '+m.name,amount:(d.amountTotal||0)/100,method:'Stripe'});}}
+        save();render();setTimeout(function(){alert('Betaling gelukt! Je boeking/aankoop is bevestigd.');},60);
+      } else { setTimeout(function(){alert('Betaling kon niet bevestigd worden — er is niets toegekend.');},60); }
+    }).catch(function(){});
+  }
+  // Called by boot once SRV is known: finalize a stashed Stripe return server-side or locally.
+  function finalizeStripeReturn(){
+    if(!stripeReturn)return;var p=stripeReturn.p,sid=stripeReturn.sid;stripeReturn=null;
+    if(SRV){
+      spost('stripe/finalize',{session_id:sid,kind:p.kind,classId:p.classId,date:p.date,memberId:p.memberId}).then(function(r){
+        if(r.ok){refreshAndRender();setTimeout(function(){alert('Betaling gelukt! Je boeking/aankoop is bevestigd.');},60);}
+        else setTimeout(function(){alert((r.d&&r.d.error)||'Betaling kon niet bevestigd worden — er is niets toegekend.');},60);
+      });
+    } else { localStripeGrant(p,sid); }
+  }
+
+  // Mindbody activation bridge: an e-mailed link carries ?activate=<token>. We consume it once at the
+  // server (marks the customer activated + returns their entitlements), then either pre-fill the
+  // register screen (new account) or apply the tegoed to an existing account and ask them to log in.
+  (function(){
+    var m=(location.search||'').match(/[?&]activate=([^&]+)/);if(!m||!projId())return;
+    var token=decodeURIComponent(m[1]);
+    fetch(api('import/activate'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:token})})
+      .then(function(r){return r.json();}).then(function(d){
+        if(!d||!d.ok){activationMsg=(d&&d.error)||'De activatielink is ongeldig of al gebruikt.';authView='login';render();return;}
+        var existing=S.accounts.some(function(x){return x.email===d.email;});
+        if(existing){applyEntitlements(d.email,d.entitlements||[]);clearAct();activationEmail=d.email;
+          activationMsg='Je gegevens zijn geactiveerd. Log in met je bestaande account om verder te gaan.';authView='login';}
+        else{setAct({email:d.email,name:((d.firstName||'')+' '+(d.lastName||'')).trim(),phone:d.phone||'',entitlements:d.entitlements||[]});authView='register';}
+        render();
+      }).catch(function(){});
+  })();
+
+  // ── Boot ──────────────────────────────────────────────────────────────────
+  // With a project we use the server (seed staff once, then hydrate from /studio/state). If the
+  // server can't be reached we fall back to the existing localStorage behaviour so nothing breaks.
+  (function boot(){
+    if(!projId()){render();finalizeStripeReturn();return;}  // editor preview zonder project → localStorage
+    spost('seed-staff',{accounts:(BAKED&&BAKED.accounts)||[]}).catch(function(){})
+      .then(function(){return sget('state');})
+      .then(function(r){
+        if(r&&(r.ok||r.status===401)){SRV=true;if(r.ok)applyServerState(r.d);else{S.session=null;setSrvToken('');}}
+        else{SRV=false;}                                   // server bereikbaar maar fout → fallback
+        render();finalizeStripeReturn();
+      })
+      .catch(function(){SRV=false;render();finalizeStripeReturn();});  // server onbereikbaar → fallback
+  })();
+})();
+</script>
+</section>`;
+
+const escH = (s: string) => String(s ?? "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c] as string));
+const escA = (s: string) => String(s ?? "").replace(/["&<>]/g, (c) => ({ '"': "&quot;", "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c] as string));
+
+export type BookingAccount = { role: "admin" | "teacher"; name: string; email: string; password: string };
+export type BookingAppOpts = { title?: string; accent?: string; navLinks?: { label: string; href: string }[]; accounts?: BookingAccount[]; logo?: string; homeBg?: string };
+
+/**
+ * Build the booking-app page as a CLEAN, self-contained document. We deliberately do NOT
+ * inject it into the imported site's shell: that shell loads the site's own CSS/JS (Bootstrap,
+ * preloaders, fixed-nav overlap) which hid the app and broke its buttons. A standalone page
+ * guarantees the app renders and its JavaScript works, while a slim header reuses the site's
+ * menu links + primary colour so it still feels part of the site (and navigation keeps working
+ * in the preview). localStorage works because the page has a real origin.
+ */
+export function buildBookingAppPage(opts: BookingAppOpts = {}): string {
+  const accent = (opts.accent && /^#[0-9a-fA-F]{3,8}$/.test(opts.accent)) ? opts.accent : "#1f6f78";
+  const title = (opts.title || "Studio").trim() || "Studio";
+  // Header shows ONLY the studio name + a single Home link — we deliberately do NOT copy the
+  // site's menu items (they'd clutter every booking app with that site's headings).
+  // Accounts are configured IN THE CHAT (the AI asks). A fresh app starts with NO accounts —
+  // the studio sets the admin/teacher logins via the chat; customers self-register at login.
+  const accounts: BookingAccount[] = (opts.accounts && opts.accounts.length) ? opts.accounts : [];
+  const logo = (opts.logo && /^https?:\/\//i.test(opts.logo)) ? opts.logo : "";
+  const bg = (opts.homeBg && /^(data:image\/|https?:\/\/)/i.test(opts.homeBg)) ? opts.homeBg : "";
+  // Bake only a FLAG (not the data URI) so the image is inlined ONCE — in the CSS var below.
+  const baked = JSON.stringify({ studio: title, accounts, logo, bg: bg ? "1" : "" });
+  // When a background is set: put it on the whole app (fixed, softened with a light overlay so
+  // text/cards stay readable), make the top bar transparent (no white bar), float the cards,
+  // and define .ba-hero for the full-screen home. The image is inlined exactly once here.
+  const bgCss = bg ? `
+:root{--ba-img:url("${bg}")}
+body{background:linear-gradient(rgba(247,248,250,.88),rgba(247,248,250,.90)),var(--ba-img) center/cover fixed !important}
+.ba-top{background:transparent !important;border-bottom:none !important}
+.ba-top .ba-brand,.ba-top nav a{text-shadow:0 1px 6px rgba(255,255,255,.6)}
+#booking-app .ba-card,#booking-app .ba-stat,#booking-app .ba-item{background:rgba(255,255,255,.93) !important;backdrop-filter:blur(3px)}
+.ba-hero{background:linear-gradient(rgba(15,23,42,.42),rgba(15,23,42,.58)),var(--ba-img) center/cover !important}
+` : "";
+  const appMain = BOOKING_APP_MAIN.replace("var BAKED=__BAKED__;", () => "var BAKED=" + baked + ";");
+  return `<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Boekingen — ${escH(title)}</title>
+<style>
+:root{--buildly-primary:${accent}}
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1f2937;background:#f5f6f8}
+.ba-top{position:sticky;top:0;z-index:30;background:transparent;display:flex;align-items:center;justify-content:center;padding:14px;pointer-events:none}
+.ba-home{pointer-events:auto;display:inline-flex;align-items:center;gap:8px;background:rgba(255,255,255,.92);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);color:#1f2937;font-weight:700;font-size:15px;text-decoration:none;padding:10px 24px;border-radius:999px;box-shadow:0 6px 22px rgba(0,0,0,.18);transition:transform .16s ease,box-shadow .16s ease}
+.ba-home:hover{transform:scale(1.06);box-shadow:0 10px 28px rgba(0,0,0,.26)}
+.ba-home:active{transform:scale(.97)}
+.ba-hero-grad{background:linear-gradient(135deg,${accent},#1f2937) !important}
+${bgCss}</style>
+</head>
+<body>
+<header class="ba-top"><a class="ba-home" href="index.html">Home</a></header>
+${appMain}
+</body>
+</html>`;
+}

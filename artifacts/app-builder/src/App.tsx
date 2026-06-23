@@ -9,7 +9,14 @@ import { AiEditor } from "@/pages/ai-editor";
 import { ProjectWorkspace } from "@/pages/project-workspace";
 import NotFound from "@/pages/not-found";
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 5 * 60 * 1000,
+      gcTime: 30 * 60 * 1000,
+    },
+  },
+});
 
 function Router() {
   return (

@@ -99,7 +99,7 @@
   --chart-3: 160 100% 50%;
   --chart-4: 280 100% 60%;
   --chart-5: 340 100% 60%;
-  
+
   --sidebar: 240 10% 6%;
   --sidebar-foreground: 0 0% 98%;
   --sidebar-border: 240 10% 12%;
@@ -113,7 +113,7 @@
   --app-font-serif: Georgia, serif;
   --app-font-mono: 'JetBrains Mono', 'Fira Code', Menlo, monospace;
   --radius: 0.5rem;
-  
+
   --shadow-2xs: 0px 2px 0px 0px hsl(0 0% 0% / 0.5);
   --shadow-xs: 0px 2px 0px 0px hsl(0 0% 0% / 0.5);
   --shadow-sm: 0px 2px 0px 0px hsl(0 0% 0% / 0.5), 0px 1px 2px -1px hsl(0 0% 0% / 0.5);
