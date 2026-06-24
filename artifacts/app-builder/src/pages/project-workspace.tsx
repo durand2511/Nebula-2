@@ -2782,6 +2782,45 @@ export function ProjectWorkspace() {
                     {selectMode ? "Klaar met selecteren" : "Selecteer & bewerk"}
                   </Button>
                 )}
+                {/* Visuele editor — pagina-wisselaar (tabbladen) + nieuwe pagina toevoegen (AI-vrij). */}
+                {!isStreaming && activeTab === "preview" && previewHtml && (() => {
+                  const sitePages = (files ?? []).filter((f) => f.path.endsWith(".html") && !f.path.startsWith("components/") && f.path !== "booking-app.html");
+                  return (
+                    <>
+                      {sitePages.length > 1 && (
+                        <select
+                          className="h-8 rounded-md border border-border bg-background px-2 text-sm text-muted-foreground"
+                          value={previewPage ?? "index.html"}
+                          onChange={(e) => { setPreviewPage(e.target.value); setPreviewKey((k) => k + 1); }}
+                          title="Wissel tussen pagina's"
+                          data-testid="select-page"
+                        >
+                          {sitePages.map((f) => (<option key={f.path} value={f.path}>{f.path}</option>))}
+                        </select>
+                      )}
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 text-muted-foreground hover:text-foreground"
+                        title="Voeg een nieuwe pagina/tabblad toe (zonder AI)"
+                        data-testid="button-add-page"
+                        onClick={async () => {
+                          const name = window.prompt("Naam van de nieuwe pagina (bijv. Over ons):");
+                          if (!name || !name.trim()) return;
+                          const label = name.trim();
+                          const slug = label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "nieuwe-pagina";
+                          const ok = await postAction({ action: "create_page", name: label, navLabel: label });
+                          if (!ok) { window.alert("Pagina toevoegen mislukt."); return; }
+                          await refreshAfterEdit();
+                          setPreviewPage(`${slug}.html`);
+                          setPreviewKey((k) => k + 1);
+                        }}
+                      >
+                        + Pagina
+                      </Button>
+                    </>
+                  );
+                })()}
                 {!isStreaming && activeTab === "preview" && previewHtml && (
                   <Button
                     variant="ghost"
