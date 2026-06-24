@@ -5196,6 +5196,13 @@ function validateAction(p: Record<string, unknown>): BuilderAction {
         ? { action: "edit_element", page: s("page"), selector: s("selector"), op, value: typeof p.value === "string" ? (p.value as string) : "" }
         : { action: "none", reason: "missing edit_element params" };
     }
+    case "add_section": {
+      const kinds = ["heading", "text", "image-text", "gallery", "cta"] as const;
+      const kind = s("kind") as (typeof kinds)[number];
+      return s("page") && (kinds as readonly string[]).includes(kind)
+        ? { action: "add_section", page: s("page"), kind }
+        : { action: "none", reason: "missing add_section params" };
+    }
     case "add_booking_app":
       return parseBookingAccounts(p).length ? { action: "add_booking_app", accounts: parseBookingAccounts(p) } : { action: "add_booking_app" };
     case "set_booking_logins": {

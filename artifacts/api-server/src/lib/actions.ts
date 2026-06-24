@@ -26,6 +26,7 @@ export type BuilderAction =
   | { action: "replace_image"; match: ImageMatch; src: string }
   | { action: "change_font"; family: string }
   | { action: "edit_element"; page: string; selector: string; op: "text" | "image" | "color" | "background"; value: string }
+  | { action: "add_section"; page: string; kind: SectionKind }
   | { action: "add_booking_app"; accounts?: BookingAccount[] }
   | { action: "set_booking_logins"; accounts: BookingAccount[] }
   | { action: "undo"; reason: string }
@@ -37,6 +38,7 @@ export const ACTION_CATALOGUE = [
   { action: "remove_nav_item", params: ["label"], when: "remove/delete a tab or link from the navigation" },
   { action: "rename_nav_item", params: ["from", "to"], when: "rename/change the text of an existing nav tab" },
   { action: "create_page", params: ["name", "navLabel"], when: "create a new page/tab (a new file) and add it to the nav" },
+  { action: "add_section", params: ["page", "kind"], when: "add a new content section (heading/text/image-text/gallery/cta) to a page" },
   { action: "change_color", params: ["target", "color"], when: "change a colour of the site (background, text, buttons, links, nav/header bar, headings, or the primary/brand colour)" },
   { action: "change_text", params: ["from", "to"], when: "replace a specific piece of visible text with new text (the user gives both the old and the new text)" },
   { action: "replace_image", params: ["match", "src"], when: "replace/swap an image (logo, hero, or all images) with a new image URL" },
@@ -329,6 +331,64 @@ export function replaceImage(html: string, match: ImageMatch, src: string): stri
 }
 
 /** A minimal, clean standalone page (used by create_page). Self-contained, no framework deps. */
+// ── Manual section blocks (visual editor, no AI) ──────────────────────────────
+// Self-contained, inline-styled sections so they look clean on ANY imported site. Text + images
+// are editable afterwards via "Selecteer & bewerk". Light, editorial house style.
+export type SectionKind = "heading" | "text" | "image-text" | "gallery" | "cta";
+
+const IMG = (seed: string) => `https://images.unsplash.com/photo-${seed}?auto=format&fit=crop&w=900&q=70`;
+const SECTION_TEMPLATES: Record<SectionKind, string> = {
+  heading: `<section style="padding:72px 24px;background:#faf9f6;text-align:center">
+  <div style="max-width:760px;margin:0 auto">
+    <h2 style="font-size:34px;font-weight:700;color:#1f2937;margin:0 0 14px">Nieuwe titel</h2>
+    <p style="font-size:18px;line-height:1.7;color:#4b5563;margin:0">Beschrijvende tekst die je hier aanpast. Klik op de tekst met "Selecteer &amp; bewerk".</p>
+  </div>
+</section>`,
+  text: `<section style="padding:56px 24px;background:#fff">
+  <div style="max-width:720px;margin:0 auto">
+    <p style="font-size:18px;line-height:1.8;color:#374151;margin:0">Schrijf hier je tekst. Dit is een eenvoudig tekstblok dat je kunt aanpassen via "Selecteer &amp; bewerk".</p>
+  </div>
+</section>`,
+  "image-text": `<section style="padding:64px 24px;background:#fff">
+  <div style="max-width:1080px;margin:0 auto;display:flex;flex-wrap:wrap;gap:40px;align-items:center">
+    <img src="${IMG("1545205597-3d9d02c29597")}" alt="" style="flex:1 1 320px;width:100%;max-width:520px;border-radius:16px;object-fit:cover;aspect-ratio:4/3">
+    <div style="flex:1 1 320px">
+      <h2 style="font-size:28px;font-weight:700;color:#1f2937;margin:0 0 12px">Titel naast afbeelding</h2>
+      <p style="font-size:17px;line-height:1.7;color:#4b5563;margin:0">Vertel hier iets over je studio of dienst. Vervang de afbeelding en pas de tekst aan.</p>
+    </div>
+  </div>
+</section>`,
+  gallery: `<section style="padding:64px 24px;background:#faf9f6">
+  <div style="max-width:1080px;margin:0 auto">
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:18px">
+      <img src="${IMG("1518611012118-696072aa579a")}" alt="" style="width:100%;border-radius:14px;object-fit:cover;aspect-ratio:1/1">
+      <img src="${IMG("1599901860904-17e6ed7083a0")}" alt="" style="width:100%;border-radius:14px;object-fit:cover;aspect-ratio:1/1">
+      <img src="${IMG("1506126613408-eca07ce68773")}" alt="" style="width:100%;border-radius:14px;object-fit:cover;aspect-ratio:1/1">
+    </div>
+  </div>
+</section>`,
+  cta: `<section style="padding:72px 24px;background:#1f2937;text-align:center">
+  <div style="max-width:680px;margin:0 auto">
+    <h2 style="font-size:30px;font-weight:700;color:#fff;margin:0 0 14px">Klaar om te beginnen?</h2>
+    <p style="font-size:17px;line-height:1.7;color:#d1d5db;margin:0 0 26px">Een korte, wervende zin die bezoekers aanzet tot actie.</p>
+    <a href="#" style="display:inline-block;background:#fff;color:#1f2937;font-weight:700;text-decoration:none;padding:14px 30px;border-radius:999px">Neem contact op</a>
+  </div>
+</section>`,
+};
+
+/** Insert a section block into a page: before <footer>, else before </main>/</body>, else append. */
+export function addSection(html: string, kind: SectionKind): string {
+  const block = "\n" + (SECTION_TEMPLATES[kind] || SECTION_TEMPLATES.text) + "\n";
+  const lower = html.toLowerCase();
+  const footer = lower.indexOf("<footer");
+  if (footer !== -1) return html.slice(0, footer) + block + html.slice(footer);
+  const mainClose = lower.lastIndexOf("</main>");
+  if (mainClose !== -1) return html.slice(0, mainClose) + block + html.slice(mainClose);
+  const bodyClose = lower.lastIndexOf("</body>");
+  if (bodyClose !== -1) return html.slice(0, bodyClose) + block + html.slice(bodyClose);
+  return html + block;
+}
+
 export function buildBlankPage(title: string, navLabel: string): string {
   return `<!DOCTYPE html>
 <html lang="nl">
@@ -559,6 +619,14 @@ export function applyAction(action: BuilderAction, files: ProjectFile[]): Action
       }
       mapHtml((h) => addNavItem(h, action.navLabel, path));
       return { changed, created, summary: `Pagina "${path}" aangemaakt en als "${action.navLabel}" in de navigatie gezet.` };
+    }
+
+    case "add_section": {
+      const target = files.find((f) => f.path === action.page) || files.find((f) => f.path.toLowerCase().endsWith("index.html"));
+      if (!target) return { changed, created, summary: "Pagina niet gevonden." };
+      const updated = addSection(target.content, action.kind);
+      if (updated !== target.content) changed.push({ path: target.path, content: updated });
+      return { changed, created, summary: `Sectie toegevoegd aan ${target.path}.` };
     }
 
     case "change_color":

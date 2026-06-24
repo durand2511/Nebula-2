@@ -2818,6 +2818,27 @@ export function ProjectWorkspace() {
                       >
                         + Pagina
                       </Button>
+                      <select
+                        className="h-8 rounded-md border border-border bg-background px-2 text-sm text-muted-foreground"
+                        value=""
+                        title="Voeg een sectie toe aan deze pagina (zonder AI)"
+                        data-testid="select-add-section"
+                        onChange={async (e) => {
+                          const kind = e.target.value;
+                          e.currentTarget.selectedIndex = 0;
+                          if (!kind) return;
+                          const ok = await postAction({ action: "add_section", page: currentPagePath(), kind });
+                          if (!ok) { window.alert("Sectie toevoegen mislukt."); return; }
+                          await refreshAfterEdit();
+                        }}
+                      >
+                        <option value="">+ Sectie…</option>
+                        <option value="heading">Titel + tekst</option>
+                        <option value="text">Tekstblok</option>
+                        <option value="image-text">Afbeelding + tekst</option>
+                        <option value="gallery">Galerij (3 foto's)</option>
+                        <option value="cta">Oproep (knop)</option>
+                      </select>
                     </>
                   );
                 })()}
