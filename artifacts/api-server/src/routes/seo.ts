@@ -6,9 +6,22 @@ import { Router, json } from "express";
 import { db, projectSeo, seoArticles } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { logger } from "../lib/logger";
-import { publishArticle, publishedToday, improveArticle, publishDraft } from "../lib/seo.js";
+import { publishArticle, publishedToday, improveArticle, publishDraft, publishManualArticle } from "../lib/seo.js";
 
 const router = Router();
+
+// Manually publish a blog post (no AI): the studio writes title + body (+ optional image).
+router.post("/projects/:id/blog/manual", json({ limit: "512kb" }), async (req, res) => {
+  const projectId = Number(req.params.id);
+  if (isNaN(projectId)) { res.status(400).json({ error: "Invalid project ID" }); return; }
+  const title = String(req.body?.title ?? "").trim();
+  const body = String(req.body?.body ?? "").trim();
+  if (!title || !body) { res.status(400).json({ error: "Titel en tekst zijn verplicht." }); return; }
+  try {
+    const r = await publishManualArticle(projectId, { title, body, image: typeof req.body?.image === "string" ? req.body.image : "" }, new Date().toISOString());
+    res.json({ ok: true, slug: r.slug });
+  } catch (err) { logger.error({ err, projectId }, "[seo] manual blog failed"); res.status(500).json({ error: "Publiceren mislukt." }); }
+});
 
 router.get("/projects/:id/seo", async (req, res) => {
   const projectId = Number(req.params.id);

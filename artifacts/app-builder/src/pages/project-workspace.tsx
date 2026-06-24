@@ -1153,6 +1153,12 @@ export function ProjectWorkspace() {
   // Visual "select & edit" mode: click an element in the preview to edit it directly
   // (deterministic, coupled to the code — no AI vision). `selection` holds the clicked element.
   const [selectMode, setSelectMode] = useState(false);
+  // Manual blog editor (no AI): a small modal with title + body (+ optional image).
+  const [blogOpen, setBlogOpen] = useState(false);
+  const [blogTitle, setBlogTitle] = useState("");
+  const [blogBody, setBlogBody] = useState("");
+  const [blogImage, setBlogImage] = useState("");
+  const [blogBusy, setBlogBusy] = useState(false);
   const selectModeRef = useRef(false);
   selectModeRef.current = selectMode;
   type Selection = { kind: "text" | "image"; tag: string; selector: string; cls?: string; text?: string; src?: string; file?: string; alt?: string; w?: number; h?: number };
@@ -2839,6 +2845,16 @@ export function ProjectWorkspace() {
                         <option value="gallery">Galerij (3 foto's)</option>
                         <option value="cta">Oproep (knop)</option>
                       </select>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 text-muted-foreground hover:text-foreground"
+                        title="Schrijf zelf een blogpost (zonder AI)"
+                        data-testid="button-add-blog"
+                        onClick={() => { setBlogTitle(""); setBlogBody(""); setBlogImage(""); setBlogOpen(true); }}
+                      >
+                        + Blog
+                      </Button>
                     </>
                   );
                 })()}
@@ -3230,6 +3246,41 @@ export function ProjectWorkspace() {
                       <Minimize2 className="h-3.5 w-3.5 mr-1.5" />
                       Sluiten
                     </Button>
+                  )}
+
+                  {/* Manual blog editor (no AI) */}
+                  {blogOpen && (
+                    <div className="absolute inset-0 z-[80] flex items-center justify-center bg-black/40 p-4" onClick={() => { if (!blogBusy) setBlogOpen(false); }}>
+                      <div className="w-[min(560px,94%)] rounded-xl bg-background border shadow-2xl p-5" onClick={(e) => e.stopPropagation()}>
+                        <h3 className="text-base font-semibold mb-3">Nieuwe blogpost</h3>
+                        <label className="block text-xs text-muted-foreground mb-1">Titel</label>
+                        <input className="w-full mb-3 rounded-md border bg-background px-3 py-2 text-sm" value={blogTitle} onChange={(e) => setBlogTitle(e.target.value)} placeholder="bijv. 5 tips voor beginners" data-testid="input-blog-title" />
+                        <label className="block text-xs text-muted-foreground mb-1">Tekst</label>
+                        <textarea className="w-full mb-3 rounded-md border bg-background px-3 py-2 text-sm h-48 resize-y" value={blogBody} onChange={(e) => setBlogBody(e.target.value)} placeholder="Schrijf hier je blog… (een lege regel = nieuwe alinea)" data-testid="input-blog-body" />
+                        <label className="block text-xs text-muted-foreground mb-1">Afbeelding-URL (optioneel)</label>
+                        <input className="w-full mb-4 rounded-md border bg-background px-3 py-2 text-sm" value={blogImage} onChange={(e) => setBlogImage(e.target.value)} placeholder="https://…" data-testid="input-blog-image" />
+                        <div className="flex justify-end gap-2">
+                          <Button variant="ghost" size="sm" disabled={blogBusy} onClick={() => setBlogOpen(false)}>Annuleren</Button>
+                          <Button
+                            size="sm"
+                            disabled={blogBusy || !blogTitle.trim() || !blogBody.trim()}
+                            data-testid="button-publish-blog"
+                            onClick={async () => {
+                              setBlogBusy(true);
+                              try {
+                                const res = await fetch(`/api/projects/${projectId}/blog/manual`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: blogTitle, body: blogBody, image: blogImage }) });
+                                const d = await res.json();
+                                if (res.ok && d.ok) { setBlogOpen(false); await refreshAfterEdit(); setPreviewPage("blog.html"); setPreviewKey((k) => k + 1); }
+                                else window.alert(d.error || "Publiceren mislukt.");
+                              } catch { window.alert("Publiceren mislukt."); }
+                              finally { setBlogBusy(false); }
+                            }}
+                          >
+                            {blogBusy ? "Bezig…" : "Publiceren"}
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
                   )}
 
                   {/* Select & edit mode: hint banner + click-to-edit popover */}

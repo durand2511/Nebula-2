@@ -444,6 +444,38 @@ export async function publishDraft(projectId: number, articleId: number, isoDate
   return true;
 }
 
+/** Publish a MANUAL blog post (no AI): the user provides a title + body text (+ optional image). */
+export async function publishManualArticle(projectId: number, input: { title: string; body: string; image?: string }, isoDate: string): Promise<{ slug: string }> {
+  const rows = await db.select().from(projectFiles).where(eq(projectFiles.projectId, projectId));
+  const ctx = deriveContext(rows.map((f) => ({ path: f.path, content: f.content })));
+  const title = String(input.title || "").trim() || "Nieuw artikel";
+  const slug = slugify(title);
+  const plain = String(input.body || "").trim();
+  // Plain text → paragraphs (blank line separates paragraphs; single newline → <br>).
+  const paras = plain.split(/\n{2,}/).map((p) => `<p>${esc(p).replace(/\n/g, "<br>")}</p>`).join("\n");
+  const img = input.image && /^https?:\/\//i.test(input.image)
+    ? `<img src="${esc(input.image)}" alt="${esc(title)}" style="width:100%;border-radius:14px;margin:0 0 22px;object-fit:cover;max-height:380px">` : "";
+  const bodyHtml = img + (paras || "<p></p>");
+  const metaDescription = plain.replace(/\s+/g, " ").slice(0, 155).trim() || title;
+  const brief: Brief = {
+    keyword: title, searchIntent: "informational", secondaryKeywords: [], audience: "",
+    title, metaTitle: title, metaDescription,
+    outline: [], faqQuestions: [], faq: [], internalLinkIdeas: [], externalSources: [],
+    schemaType: "Article", needsDisclaimer: false, disclaimerText: "", authorName: ctx.studio, authorBio: "",
+  };
+  const related = (await db.select().from(seoArticles).where(and(eq(seoArticles.projectId, projectId), eq(seoArticles.status, "published")))).slice(-5).map((p) => ({ title: p.title, slug: p.slug }));
+  const payload = JSON.stringify({ manual: true, title, slug, metaDescription, articleHtml: bodyHtml });
+  // Update an existing post with the same slug, else insert a new one (avoids duplicate index entries).
+  const [existing] = await db.select().from(seoArticles).where(and(eq(seoArticles.projectId, projectId), eq(seoArticles.slug, slug)));
+  if (existing) await db.update(seoArticles).set({ title, status: "published", source: "manual", score: 100, payload, updatedAt: new Date() }).where(eq(seoArticles.id, existing.id));
+  else await db.insert(seoArticles).values({ projectId, title, slug, query: title, source: "manual", status: "published", score: 100, intent: "informational", payload });
+  const byPath = new Map(rows.map((f) => [f.path, { id: f.id }]));
+  await writeFileFor(projectId, byPath, `blog/${slug}.html`, articleHtml(ctx, brief, bodyHtml, [], related, isoDate));
+  await syncPublishedAux(projectId, ctx, rows.map((f) => ({ path: f.path, id: f.id, content: f.content })));
+  logger.info({ projectId, slug }, "[seo] manual blog published");
+  return { slug };
+}
+
 /** Update/refresh an existing published article (re-writes the body, bumps the date). */
 export async function improveArticle(projectId: number, isoDate: string, articleId?: number): Promise<{ title: string; slug: string } | null> {
   const pub = await db.select().from(seoArticles).where(and(eq(seoArticles.projectId, projectId), eq(seoArticles.status, "published")));
