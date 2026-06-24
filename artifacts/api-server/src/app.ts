@@ -4,6 +4,7 @@ import pinoHttp from "pino-http";
 import path from "node:path";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
+import { timingSafeEqual } from "node:crypto";
 import router from "./routes";
 import { logger } from "./lib/logger";
 import { isReserved, findActiveByHost, PLATFORM_HOST } from "./lib/domains";
@@ -43,6 +44,31 @@ app.use((req, res, next) => {
   return standardJson(req, res, next);
 });
 app.use(express.urlencoded({ extended: true, limit: "1mb" }));
+
+// ── Password lock for the platform (the builder console) ──
+// When SITE_PASSWORD is set, the platform host (nebulabookings.com + www) requires HTTP Basic Auth.
+// Left open: /api/healthz (Render healthcheck) and connected customer booking sites (their own
+// domains aren't "reserved"), so studios' customers can still book. No password set → no lock.
+const SITE_PASSWORD = process.env.SITE_PASSWORD || "";
+function passwordOk(authHeader: string): boolean {
+  if (!authHeader.startsWith("Basic ")) return false;
+  try {
+    const decoded = Buffer.from(authHeader.slice(6), "base64").toString("utf8");
+    const given = Buffer.from(decoded.slice(decoded.indexOf(":") + 1)); // user:pass → take pass
+    const want = Buffer.from(SITE_PASSWORD);
+    return given.length === want.length && timingSafeEqual(given, want);
+  } catch {
+    return false;
+  }
+}
+app.use((req, res, next) => {
+  if (!SITE_PASSWORD) return next();                 // lock disabled when no password configured
+  if (req.path === "/api/healthz") return next();    // Render healthcheck must always pass
+  if (!isReserved(req.headers.host || "")) return next(); // customer booking sites stay public
+  if (passwordOk(String(req.headers.authorization || ""))) return next();
+  res.setHeader("WWW-Authenticate", 'Basic realm="Nebula", charset="UTF-8"');
+  res.status(401).send("Wachtwoord vereist.");
+});
 
 // Custom-domain host routing (runs before the API). For a request on a CONNECTED customer domain
 // we serve that project's site; an UNKNOWN custom domain redirects to the platform. Platform hosts
