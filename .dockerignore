@@ -1,0 +1,12 @@
+# Keep the build context clean + correct. Crucial: never copy the local (Mac) node_modules into the
+# linux image — that would ship wrong-arch native binaries. pnpm install rebuilds them in-image.
+node_modules
+**/node_modules
+**/dist
+artifacts/*/dist
+.git
+.env
+.env.*
+test-output
+backup.tar.gz
+*.log
