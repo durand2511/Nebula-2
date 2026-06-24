@@ -16,9 +16,15 @@ WORKDIR /app
 # .dockerignore keeps node_modules/.env/.git out so we get a clean, correct-arch install.
 COPY . .
 
-# Install workspace deps against the frozen lockfile, then bundle the API server (esbuild → dist/).
+# Install workspace deps against the frozen lockfile.
 RUN pnpm install --frozen-lockfile
+
+# Build the builder frontend (Vite → artifacts/app-builder/dist/public). BASE_PATH=/ so assets load
+# from the domain root; PORT is only required because vite.config validates it at build time.
+RUN NODE_ENV=production BASE_PATH=/ PORT=8080 pnpm --filter @workspace/app-builder run build
+
+# Bundle the API server (esbuild → artifacts/api-server/dist). It also serves the frontend above.
 RUN pnpm --filter @workspace/api-server run build
 
-# Railway injects PORT at runtime; the server reads process.env.PORT.
+# Render/Railway inject PORT at runtime; the server reads process.env.PORT.
 CMD ["node", "artifacts/api-server/dist/index.mjs"]

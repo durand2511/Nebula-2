@@ -1,6 +1,9 @@
 import express, { type Express } from "express";
 import cors from "cors";
 import pinoHttp from "pino-http";
+import path from "node:path";
+import fs from "node:fs";
+import { fileURLToPath } from "node:url";
 import router from "./routes";
 import { logger } from "./lib/logger";
 import { isReserved, findActiveByHost, PLATFORM_HOST } from "./lib/domains";
@@ -56,5 +59,23 @@ app.use((req, res, next) => {
 });
 
 app.use("/api", router);
+
+// Serve the builder frontend (the app-builder SPA) for platform hosts, so visiting the platform
+// domain opens the app instead of "Cannot GET /". Customer domains are already served above; every
+// /api path stays the API. If the frontend wasn't built (e.g. local API-only dev), this is skipped
+// so behaviour is unchanged.
+const FRONTEND_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "app-builder", "dist", "public");
+if (fs.existsSync(path.join(FRONTEND_DIR, "index.html"))) {
+  app.use(express.static(FRONTEND_DIR));
+  // SPA fallback (Express 5-safe: a path-less middleware, not app.get("*")). Any non-/api GET that
+  // wasn't a real static file returns index.html so client-side routing (wouter) takes over.
+  app.use((req, res, next) => {
+    if (req.method !== "GET" || req.path.startsWith("/api")) return next();
+    res.sendFile(path.join(FRONTEND_DIR, "index.html"));
+  });
+  logger.info({ dir: FRONTEND_DIR }, "[frontend] serving builder SPA at /");
+} else {
+  logger.warn({ dir: FRONTEND_DIR }, "[frontend] build not found — serving API only");
+}
 
 export default app;
