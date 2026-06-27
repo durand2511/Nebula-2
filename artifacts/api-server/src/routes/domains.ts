@@ -1,10 +1,24 @@
 /** Custom-domain management API (per project; open like the rest of the API for now). */
 import { Router, json } from "express";
+import { db, projectFiles } from "@workspace/db";
+import { eq } from "drizzle-orm";
 import { logger } from "../lib/logger";
 import { addDomain, listDomains, deleteDomain, verifyDomain, publishSubdomain, getSubdomain, CUSTOMERS_TARGET, PLATFORM_HOST } from "../lib/domains.js";
 import { publishSite, isPublished, hasUnpublishedChanges } from "../lib/site-publish.js";
+import { rebuildBookingApp } from "../lib/actions.js";
 
 const router = Router();
+
+// Rebuild booking-app.html from the LATEST template (keeps accounts/branding) so every publish ships
+// the newest booking app — incl. the window.__BA_PID__ fix that makes server features work on a
+// custom domain/subdomain. No-op if the project has no booking app.
+async function refreshBookingApp(projectId: number): Promise<void> {
+  const files = await db.select().from(projectFiles).where(eq(projectFiles.projectId, projectId));
+  const rebuilt = rebuildBookingApp(files.map((f) => ({ path: f.path, content: f.content })));
+  if (!rebuilt) return;
+  const ex = files.find((f) => f.path === rebuilt.path);
+  if (ex) await db.update(projectFiles).set({ content: rebuilt.content, updatedAt: new Date() }).where(eq(projectFiles.id, ex.id));
+}
 
 // Publish status: the free Nebula subdomain (if any) + custom domains + draft/publish state.
 router.get("/projects/:id/publish", async (req, res) => {
@@ -27,7 +41,8 @@ router.post("/projects/:id/publish", json({ limit: "16kb" }), async (req, res) =
   if (isNaN(projectId)) { res.status(400).json({ error: "Invalid project ID" }); return; }
   try {
     const row = await publishSubdomain(projectId, req.body?.slug ? String(req.body.slug) : undefined);
-    await publishSite(projectId); // snapshot current files as the live published site
+    await refreshBookingApp(projectId);  // upgrade the booking app to the latest template first
+    await publishSite(projectId);        // then snapshot current files as the live published site
     res.json({ ok: true, subdomain: row, url: "https://" + row.domain });
   } catch (err) { res.status(400).json({ error: (err as Error)?.message || "Publiceren mislukt." }); }
 });
