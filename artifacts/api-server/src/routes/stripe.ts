@@ -10,9 +10,10 @@
  */
 import { Router, type IRouter, raw } from "express";
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { db, projectStripe } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { db, projectStripe, studioVideoAccess, studioPurchases, studioWallets } from "@workspace/db";
+import { eq, and } from "drizzle-orm";
 import { logger } from "../lib/logger";
+import { sendBookingEmail } from "../lib/email.js";
 
 const router: IRouter = Router();
 
@@ -70,6 +71,16 @@ export async function verifyStripeSession(projectId: number, sessionId: string):
   const paid = session.payment_status === "paid" || session.status === "complete";
   return { paid, paymentIntent: session.payment_intent ?? null, subscription: session.subscription ?? null, amountTotal: typeof session.amount_total === "number" ? session.amount_total : null };
 }
+
+/** Cancel a recurring subscription at period end (no refund) — used to "opzeggen" a video plan. */
+export async function cancelStripeSubscription(projectId: number, subscriptionId: string): Promise<boolean> {
+  const acct = await stripeAccountId(projectId);
+  if (!acct || !subscriptionId) return false;
+  await stripeReq("POST", `subscriptions/${encodeURIComponent(subscriptionId)}`, { cancel_at_period_end: true }, acct);
+  return true;
+}
+
+const ymdUTC = (d: Date) => d.toISOString().slice(0, 10);
 
 /** Refund a one-off payment (optionally partial) or cancel+refund a subscription. */
 export async function stripeRefund(projectId: number, opts: { paymentIntent?: string; subscription?: string; amount?: number }): Promise<{ ok: boolean; refunded: boolean; amount: number; cancelled?: boolean; error?: string }> {
@@ -249,7 +260,7 @@ router.post("/projects/:id/stripe/refund", async (req, res) => {
 });
 
 // ── 4. Webhook: Stripe confirms payments server-side (source of truth) ──
-router.post("/stripe/webhook", raw({ type: "*/*" }), (req, res) => {
+router.post("/stripe/webhook", raw({ type: "*/*" }), async (req, res) => {
   const secret = process.env.STRIPE_WEBHOOK_SECRET;
   const sig = req.headers["stripe-signature"];
   const payload: Buffer = Buffer.isBuffer(req.body) ? req.body : Buffer.from(String(req.body ?? ""));
@@ -261,10 +272,60 @@ router.post("/stripe/webhook", raw({ type: "*/*" }), (req, res) => {
   }
   try {
     const event = JSON.parse(payload.toString("utf8"));
-    if (event.type === "checkout.session.completed") {
+    // Recurring video subscriptions: each automatic monthly charge extends access; deletion stops it.
+    if (event.type === "invoice.paid" || event.type === "invoice.payment_succeeded") {
+      const sub = event.data?.object?.subscription || event.data?.object?.lines?.data?.[0]?.subscription;
+      if (sub) {
+        const validUntil = ymdUTC(new Date(Date.now() + 32 * 86400000));
+        // Video access: extend each subscribed category.
+        await db.update(studioVideoAccess).set({ validUntil, updatedAt: new Date() }).where(eq(studioVideoAccess.subscription, String(sub)));
+        // Class (lessen) abonnement: bump the buyer's wallet so the recurring membership stays active.
+        const purch = await db.select().from(studioPurchases).where(eq(studioPurchases.subscription, String(sub)));
+        for (const p of purch) {
+          if (p.type !== "abonnement") continue;
+          await db.update(studioWallets).set({ validUntil, updatedAt: new Date() }).where(and(eq(studioWallets.projectId, p.projectId), eq(studioWallets.email, p.email)));
+        }
+        logger.info({ sub }, "[stripe] subscription renewed (video + class access extended)");
+      }
+    } else if (event.type === "invoice.payment_failed") {
+      // Dunning: a recurring charge failed. E-mail the customer with a link to fix their card,
+      // and after 3 failed attempts cancel the subscription + flag the wallet as needing payment.
+      const obj = event.data?.object || {};
+      const sub = obj.subscription || obj.lines?.data?.[0]?.subscription;
+      const attempts = Number(obj.attempt_count || 1);
+      const payUrl = obj.hosted_invoice_url || "";
+      if (sub) {
+        // Resolve project + customer e-mail from our records (class abonnement or video sub).
+        let projectId = 0; let email = String(obj.customer_email || "");
+        const [pp] = await db.select().from(studioPurchases).where(eq(studioPurchases.subscription, String(sub)));
+        if (pp) { projectId = pp.projectId; email = email || pp.email; }
+        if (!projectId) { const [va] = await db.select().from(studioVideoAccess).where(eq(studioVideoAccess.subscription, String(sub))); if (va) { projectId = va.projectId; email = email || va.email; } }
+        if (projectId && email) {
+          try { await sendBookingEmail(projectId, email, "paymentfailed", { url: payUrl, credits: attempts }); } catch { /* best-effort */ }
+        }
+        if (attempts >= 3) {
+          try { await cancelStripeSubscription(projectId, String(sub)); } catch { /* best-effort */ }
+          await db.update(studioVideoAccess).set({ subscription: "", updatedAt: new Date() }).where(eq(studioVideoAccess.subscription, String(sub)));
+          for (const p of await db.select().from(studioPurchases).where(eq(studioPurchases.subscription, String(sub)))) {
+            await db.update(studioWallets).set({ needsPayment: "true", updatedAt: new Date() }).where(and(eq(studioWallets.projectId, p.projectId), eq(studioWallets.email, p.email)));
+          }
+          await db.update(studioPurchases).set({ subscription: "" }).where(eq(studioPurchases.subscription, String(sub)));
+          logger.info({ sub, attempts }, "[stripe] subscription cancelled after repeated payment failure");
+        } else {
+          logger.info({ sub, attempts }, "[stripe] payment failed — dunning e-mail sent");
+        }
+      }
+    } else if (event.type === "customer.subscription.deleted") {
+      const sub = event.data?.object?.id;
+      if (sub) {
+        await db.update(studioVideoAccess).set({ subscription: "", updatedAt: new Date() }).where(eq(studioVideoAccess.subscription, String(sub)));
+        await db.update(studioPurchases).set({ subscription: "" }).where(eq(studioPurchases.subscription, String(sub)));
+        logger.info({ sub }, "[stripe] subscription cancelled");
+      }
+    } else if (event.type === "checkout.session.completed") {
       logger.info({ session: event.data?.object?.id, account: event.account }, "[stripe] payment completed");
     }
-  } catch { /* ignore parse errors */ }
+  } catch (err) { logger.warn({ err }, "[stripe] webhook handling error"); }
   res.json({ received: true });
 });
 

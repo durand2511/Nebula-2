@@ -100,7 +100,45 @@ function main() {
   ok("payment finalizes booking/credits on return (?betaald=1)", a.includes("betaald=1") && a.includes("getPending") && a.includes("clearPending"));
   ok("payment is server-verified before granting (anti-fake)", a.includes("stripe/verify?session_id=") && a.includes("CHECKOUT_SESSION_ID") && a.includes("d.paid"));
   ok("payment uses a single dialog + reliable link (no click-spam tabs)", a.includes("ba-pay-ov") && a.includes("Betaal met Stripe") && a.includes("al een betaalvenster open"));
-  ok("credits are ONLY granted in the verified finalize (no free grant on buy)", a.includes("payViaStripe(m.type,m.name,m.price") && !a.includes("Aankoop gelukt (demo)"));
+  ok("credits are ONLY granted in the verified finalize (no free grant on buy)", a.includes("payWithCode(m.type,m.name,m.price") && !a.includes("Aankoop gelukt (demo)"));
+
+  // Discount codes / gift cards: a code is validated server-side, the discounted amount is paid,
+  // and code+discount ride along in the pending so finalize can redeem it.
+  ok("payWithCode validates a code via /code/validate", a.includes("function payWithCode") && a.includes("code/validate"));
+  ok("payWithCode passes code+discount into the pending", a.includes("{code:c||'',discount:disc||0}"));
+  ok("finalize forwards code+discount to the server", a.includes("code:p.code,discount:p.discount"));
+  ok("admin can create + delete discount codes", a.includes("data-act=\"addcode\"") && a.includes("data-act=\"delcode\"") && a.includes("spost('codes'"));
+  ok("video subscribe also goes through payWithCode (code-eligible)", a.includes("payWithCode('abonnement','Video-abonnement"));
+
+  // No-show: admin/teacher marks a no-show via the API; the client forfeits the consumed credit.
+  ok("no-show button posts to /noshow", a.includes("data-act=\"noshow\"") && a.includes("spost('noshow'"));
+  ok("no-show local toggle also clears present", a.includes("b3.noShow=!b3.noShow") && a.includes("if(b3.noShow)b3.present=false"));
+  ok("stats counts no-shows this month", a.includes("noShowMonth") && a.includes("No-shows deze maand"));
+
+  // i18n: NL source + EN/DE/FR/ES dictionary, DOM translation pass + language switcher.
+  ok("ships a 5-language switcher (nl/en/de/fr/es)", a.includes("var LANGS=") && a.includes("English") && a.includes("Deutsch") && a.includes("Espa"));
+  ok("has translation engine (TR dict, trText, translateDOM, langSelect)", a.includes("var TR=") && a.includes("function trText(") && a.includes("function translateDOM(") && a.includes("function langSelect("));
+  ok("interpolation regexes survived the template literal (\\d not d)", a.includes("(\\d+) lessen") && a.includes("\\bWeek (\\d+)") && !a.includes("(d+) lessen"));
+  ok("language change re-renders + persists", a.includes("act==='setlang'") && a.includes("setLangPref(lang)") && a.includes("applyDateLang()"));
+  ok("alert/confirm/prompt are translated (shadowed)", a.includes("function alert(m){return window.alert(trText") && a.includes("function confirm(m){return window.confirm(trText"));
+  ok("dates are localized per language", a.includes("var DATE_L=") && a.includes("applyDateLang") && a.includes("Sonntag") && a.includes("dimanche"));
+
+  // Multi-location: optional locations, class location select, client location filter.
+  ok("admin can add + delete locations", a.includes("data-act=\"addloc\"") && a.includes("data-act=\"delloc\"") && a.includes("spost('locations'"));
+  ok("class create sends a locationId", a.includes("locationId:cloc") && a.includes("ba-cloc"));
+  ok("client booking view filters by location", a.includes("data-act=\"setbookloc\"") && a.includes("bookLoc==='all'"));
+  ok("location is optional/additive (only shows when locations exist)", a.includes("(S.locations&&S.locations.length)") && a.includes("S.locations=d.locations"));
+
+  // Revenue + Excel export of invoices over a chosen period (1–12 months).
+  ok("invoice card has a 1–12 month period selector", a.includes("data-act=\"invperiod\"") && a.includes("ba-inv-period"));
+  ok("shows revenue for the chosen period", a.includes("function updateInvPeriod") && a.includes("Omzet in deze periode") && a.includes("ba-inv-revval"));
+  ok("download-Excel button hits the export route with months", a.includes("invoices/export?months=") && a.includes("Download Excel"));
+  ok("VAT report button hits the vat-report route with months", a.includes("invoices/vat-report?months=") && a.includes("BTW-overzicht"));
+
+  ok("teacher payout export with period + rate", a.includes("teacher-payout?months=") && a.includes("Docenten-uitbetaling") && a.includes("ba-pay-rate"));
+  ok("owner report cadence setting", a.includes("data-act=\"setownerreport\"") && a.includes("Automatisch rapport") && a.includes("Wekelijks"));
+  ok("google review link setting", a.includes("data-act=\"savereview\"") && a.includes("ba-review-url") && a.includes("Google-review-link"));
+  ok("subscriber payment-status overview", a.includes("Abonnementen — betaalstatus") && a.includes("betalende abonnees") && a.includes("S.subscribers"));
 
   // Automatic e-mails: the app fires /notify on register (welcome), book (confirmation +
   // 24h reminder scheduled server-side), Stripe-finalized book, and cancel.

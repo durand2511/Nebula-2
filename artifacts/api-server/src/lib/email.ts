@@ -48,8 +48,8 @@ function shell(brand: EmailBrand, heading: string, bodyHtml: string): string {
 </div>`;
 }
 
-export type EmailKind = "booking" | "cancel" | "welcome" | "reminder" | "reset" | "test" | "promoted";
-export type EmailData = { studio?: string; name?: string; classTitle?: string; date?: string; time?: string; password?: string; mode?: string; onlineLink?: string; onlineInfo?: string };
+export type EmailKind = "booking" | "cancel" | "welcome" | "reminder" | "reset" | "test" | "promoted" | "lowcredits" | "renewal" | "winback" | "paymentfailed" | "ownerreport" | "review";
+export type EmailData = { studio?: string; name?: string; classTitle?: string; date?: string; time?: string; password?: string; mode?: string; onlineLink?: string; onlineInfo?: string; credits?: number; url?: string; report?: { periodLabel: string; revenue: number; bookings: number; noShows: number; classes: number; currency: string } };
 
 export type BuiltEmail = { subject: string; html: string; text: string; fromName: string };
 
@@ -73,6 +73,74 @@ export function buildEmail(kind: EmailKind, d: EmailData, brand?: EmailBrand): B
       html: shell(b, "Test geslaagd ✓", `<p style="margin:0 0 14px">Dit is een testmail van <b>${esc(studio)}</b>. De e-mailkoppeling werkt — automatische e-mails worden vanaf dit adres verstuurd. 🎉</p>`),
       text: txt("Test geslaagd", [`Dit is een testmail van ${studio}. De e-mailkoppeling werkt.`]),
     };
+  }
+
+  // Review request: thank the client after their first class and ask for a Google review.
+  if (kind === "review") {
+    const ac = b.accent || "#7a00df";
+    const heading = "Hoe was je les? ⭐";
+    const intro = `bedankt voor je les bij ${studio}! We hopen dat je genoten hebt. Zou je ons een korte review willen geven? Het helpt ons enorm en kost maar een minuutje. 🙏`;
+    const btn = d.url ? `<a href="${esc(d.url)}" style="display:inline-block;margin:6px 0 4px;background:${ac};color:#fff;text-decoration:none;font-weight:700;padding:11px 20px;border-radius:10px">⭐ Laat een review achter</a>` : "";
+    return { subject: `Hoe was je les bij ${studio}? ⭐`, fromName: studio,
+      html: shell(b, heading, hi + `<p style="margin:0 0 14px">${esc(intro)}</p>` + btn + (d.url ? `<div style="font-size:13px;color:#9ca3af;word-break:break-all;margin-top:8px">${esc(d.url)}</div>` : "")),
+      text: txt(heading, [!!d.name && `Hoi ${d.name},`, intro, d.url && ("Review: " + d.url)]) };
+  }
+
+  // Owner report: periodic studio summary e-mailed to the admin(s).
+  if (kind === "ownerreport") {
+    const r = d.report || { periodLabel: "", revenue: 0, bookings: 0, noShows: 0, classes: 0, currency: "EUR" };
+    const sym = r.currency === "GBP" ? "£" : r.currency === "USD" ? "$" : "€";
+    const money = sym + (Math.round(r.revenue * 100) / 100).toFixed(2).replace(".", ",");
+    const heading = `Overzicht ${studio}`;
+    const stat = (label: string, val: string) =>
+      `<div style="display:inline-block;min-width:130px;margin:6px 10px 6px 0;padding:14px 16px;background:#f9fafb;border:1px solid #eef0f2;border-radius:12px;vertical-align:top"><div style="font-size:12px;color:#9ca3af;text-transform:uppercase;letter-spacing:.06em">${esc(label)}</div><div style="font-size:22px;font-weight:800;margin-top:4px">${esc(val)}</div></div>`;
+    const body = hi + `<p style="margin:0 0 16px">hier is je overzicht voor ${esc(r.periodLabel)} bij <b>${esc(studio)}</b>.</p>` +
+      stat("Omzet", money) + stat("Boekingen", String(r.bookings)) + stat("Lessen", String(r.classes)) + stat("No-shows", String(r.noShows));
+    return { subject: `Je overzicht (${r.periodLabel}) — ${studio}`, fromName: studio,
+      html: shell(b, heading, body),
+      text: txt(heading, [!!d.name && `Hoi ${d.name},`, `Overzicht ${r.periodLabel}:`, `Omzet: ${money}`, `Boekingen: ${r.bookings}`, `Lessen: ${r.classes}`, `No-shows: ${r.noShows}`]) };
+  }
+
+  // Dunning: a recurring payment failed — ask the customer to update their card.
+  if (kind === "paymentfailed") {
+    const ac = b.accent || "#7a00df";
+    const last = (d.credits || 1) >= 3;
+    const heading = last ? "Je abonnement is gepauzeerd" : "Betaling mislukt";
+    const intro = last
+      ? `het is meerdere keren niet gelukt om je abonnement bij ${studio} te innen, dus we hebben het voorlopig gepauzeerd. Werk je betaalgegevens bij om weer toegang te krijgen.`
+      : `de automatische incasso van je abonnement bij ${studio} is mislukt. Werk je betaalgegevens bij, dan proberen we het opnieuw — je toegang loopt gewoon door.`;
+    const btn = d.url ? `<a href="${esc(d.url)}" style="display:inline-block;margin:6px 0 4px;background:${ac};color:#fff;text-decoration:none;font-weight:700;padding:11px 20px;border-radius:10px">Betaalgegevens bijwerken</a>` : "";
+    return { subject: last ? `Je abonnement bij ${studio} is gepauzeerd` : `Betaling mislukt — ${studio}`, fromName: studio,
+      html: shell(b, heading, hi + `<p style="margin:0 0 14px">${esc(intro)}</p>` + btn + (d.url ? `<div style="font-size:13px;color:#9ca3af;word-break:break-all;margin-top:8px">${esc(d.url)}</div>` : "")),
+      text: txt(heading, [!!d.name && `Hoi ${d.name},`, intro, d.url && ("Betaalgegevens bijwerken: " + d.url)]) };
+  }
+
+  // Smart reminders (sent by the daily nudge scanner) — self-contained copy, like test/reset.
+  if (kind === "lowcredits" || kind === "renewal" || kind === "winback") {
+    const ac = b.accent || "#7a00df";
+    const card = (label: string, big: string, sub?: string) =>
+      `<div style="margin:20px 0;padding:18px 20px;background:#f9fafb;border:1px solid #eef0f2;border-radius:14px"><div style="font-size:12px;color:#9ca3af;text-transform:uppercase;letter-spacing:.06em">${esc(label)}</div><div style="font-size:22px;font-weight:800;margin-top:5px;color:${ac}">${esc(big)}</div>${sub ? `<div style="color:#6b7280;margin-top:3px;font-size:15px">${esc(sub)}</div>` : ""}</div>`;
+    if (kind === "lowcredits") {
+      const n = d.credits || 0;
+      const heading = "Je strippenkaart raakt op";
+      const intro = `je hebt nog ${n} beurt${n === 1 ? "" : "en"} op je strippenkaart bij ${studio}. Boek je volgende les of haal alvast een nieuwe kaart, dan zit je goed. 💪`;
+      return { subject: `Nog ${n} beurt${n === 1 ? "" : "en"} over bij ${studio}`, fromName: studio,
+        html: shell(b, heading, hi + `<p style="margin:0 0 14px">${esc(intro)}</p>` + card("Resterende beurten", String(n))),
+        text: txt(heading, [!!d.name && `Hoi ${d.name},`, intro]) };
+    }
+    if (kind === "renewal") {
+      const heading = "Je abonnement verlengt binnenkort";
+      const intro = `je abonnement bij ${studio} verlengt automatisch${d.date ? ` rond ${fmtNL(d.date)}` : ""}. Je hoeft niets te doen — je toegang loopt gewoon door. Wil je wijzigen of opzeggen? Dat kan in de app.`;
+      return { subject: `Je abonnement bij ${studio} verlengt binnenkort`, fromName: studio,
+        html: shell(b, heading, hi + `<p style="margin:0 0 14px">${esc(intro)}</p>` + (d.date ? card("Verlengt op", fmtNL(d.date)) : "")),
+        text: txt(heading, [!!d.name && `Hoi ${d.name},`, intro]) };
+    }
+    // winback
+    const heading = "We missen je 💜";
+    const intro = `we hebben je een tijdje niet gezien bij ${studio}. Kom je weer eens op de mat? We hebben een plekje voor je vrij. Log in en bekijk het rooster — tot snel!`;
+    return { subject: `We missen je bij ${studio} 💜`, fromName: studio,
+      html: shell(b, heading, hi + `<p style="margin:0 0 14px">${esc(intro)}</p>`),
+      text: txt(heading, [!!d.name && `Hoi ${d.name},`, intro]) };
   }
 
   const c = (b.copy && b.copy[kind]) || defaultBrand(studio).copy[kind];

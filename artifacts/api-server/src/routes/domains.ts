@@ -1,9 +1,36 @@
 /** Custom-domain management API (per project; open like the rest of the API for now). */
 import { Router, json } from "express";
 import { logger } from "../lib/logger";
-import { addDomain, listDomains, deleteDomain, verifyDomain, CUSTOMERS_TARGET } from "../lib/domains.js";
+import { addDomain, listDomains, deleteDomain, verifyDomain, publishSubdomain, getSubdomain, CUSTOMERS_TARGET, PLATFORM_HOST } from "../lib/domains.js";
+import { publishSite, isPublished, hasUnpublishedChanges } from "../lib/site-publish.js";
 
 const router = Router();
+
+// Publish status: the free Nebula subdomain (if any) + custom domains + draft/publish state.
+router.get("/projects/:id/publish", async (req, res) => {
+  const projectId = Number(req.params.id);
+  if (isNaN(projectId)) { res.status(400).json({ error: "Invalid project ID" }); return; }
+  try {
+    const sub = await getSubdomain(projectId);
+    const all = await listDomains(projectId);
+    res.json({
+      platformHost: PLATFORM_HOST, target: CUSTOMERS_TARGET, subdomain: sub,
+      domains: all.filter((d) => !d.domain.endsWith("." + PLATFORM_HOST)),
+      published: await isPublished(projectId), hasChanges: await hasUnpublishedChanges(projectId),
+    });
+  } catch (err) { logger.error({ err, projectId }, "[publish] status failed"); res.status(500).json({ error: "Ophalen mislukt." }); }
+});
+
+// Publish: snapshot the current site live AND ensure a free Nebula subdomain. Optional custom slug.
+router.post("/projects/:id/publish", json({ limit: "16kb" }), async (req, res) => {
+  const projectId = Number(req.params.id);
+  if (isNaN(projectId)) { res.status(400).json({ error: "Invalid project ID" }); return; }
+  try {
+    const row = await publishSubdomain(projectId, req.body?.slug ? String(req.body.slug) : undefined);
+    await publishSite(projectId); // snapshot current files as the live published site
+    res.json({ ok: true, subdomain: row, url: "https://" + row.domain });
+  } catch (err) { res.status(400).json({ error: (err as Error)?.message || "Publiceren mislukt." }); }
+});
 
 router.get("/projects/:id/domains", async (req, res) => {
   const projectId = Number(req.params.id);

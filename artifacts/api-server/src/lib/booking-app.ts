@@ -47,6 +47,7 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
 #booking-app .ba-badge{display:inline-flex;align-items:center;gap:4px;font-size:12px;font-weight:600;padding:3px 10px;border-radius:999px;background:var(--ba-bg);color:#374151;border:1px solid transparent}
 #booking-app .ba-badge.full{background:#fef2f2;color:#b91c1c;border-color:#fecaca}
 #booking-app .ba-badge.ok{background:#ecfdf5;color:#047857;border-color:#a7f3d0}
+#booking-app .ba-badge.warn{background:#fffbeb;color:#b45309;border-color:#fde68a}
 #booking-app .ba-row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
 #booking-app label.ba-f{display:block;font-size:13px;font-weight:600;color:#374151;margin:12px 0 5px}
 #booking-app input,#booking-app select,#booking-app textarea{font:inherit;font-size:14px;width:100%;min-height:42px;padding:10px 12px;border:1px solid var(--ba-line);border-radius:11px;background:#fff;color:var(--ba-ink);transition:border-color .15s ease,box-shadow .15s ease}
@@ -89,13 +90,28 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
   var KEY=(function(){var id='';try{var m=(location.pathname||'').match(/projects\\/(\\d+)/);if(m)id=m[1];}catch(e){}
     if(!id){try{id=(location.hostname||'')+(location.pathname||'');}catch(e){}}
     return 'ba_state_v3_'+(id||'default').replace(/[^a-zA-Z0-9_-]+/g,'-');})();
-  var DOW=['zo','ma','di','wo','do','vr','za'];
-  var DOWF=['zondag','maandag','dinsdag','woensdag','donderdag','vrijdag','zaterdag'];
-  var MON=['jan','feb','mrt','apr','mei','jun','jul','aug','sep','okt','nov','dec'];
+  // ── i18n: meertalige klant- + beheer-interface (NL is de bron, rest via woordenboek) ──
+  var LANGS={nl:'Nederlands',en:'English',de:'Deutsch',fr:'Fran\\u00e7ais',es:'Espa\\u00f1ol'};
+  function getLang(){try{var v=localStorage.getItem('ba_lang');if(v&&LANGS[v])return v;}catch(e){}return 'nl';}
+  function setLangPref(l){try{localStorage.setItem('ba_lang',l);}catch(e){}}
+  var lang=getLang();
+  var DATE_L={
+    nl:{DOW:['zo','ma','di','wo','do','vr','za'],DOWF:['zondag','maandag','dinsdag','woensdag','donderdag','vrijdag','zaterdag'],MON:['jan','feb','mrt','apr','mei','jun','jul','aug','sep','okt','nov','dec']},
+    en:{DOW:['Sun','Mon','Tue','Wed','Thu','Fri','Sat'],DOWF:['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'],MON:['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']},
+    de:{DOW:['So','Mo','Di','Mi','Do','Fr','Sa'],DOWF:['Sonntag','Montag','Dienstag','Mittwoch','Donnerstag','Freitag','Samstag'],MON:['Jan','Feb','M\\u00e4r','Apr','Mai','Jun','Jul','Aug','Sep','Okt','Nov','Dez']},
+    fr:{DOW:['dim','lun','mar','mer','jeu','ven','sam'],DOWF:['dimanche','lundi','mardi','mercredi','jeudi','vendredi','samedi'],MON:['janv','f\\u00e9vr','mars','avr','mai','juin','juil','ao\\u00fbt','sept','oct','nov','d\\u00e9c']},
+    es:{DOW:['dom','lun','mar','mi\\u00e9','jue','vie','s\\u00e1b'],DOWF:['domingo','lunes','martes','mi\\u00e9rcoles','jueves','viernes','s\\u00e1bado'],MON:['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic']}
+  };
+  var DOW,DOWF,MON;
+  function applyDateLang(){var L=DATE_L[lang]||DATE_L.nl;DOW=L.DOW;DOWF=L.DOWF;MON=L.MON;}
+  applyDateLang();
   var activeTab='boeken';
   var authView='home';
   var SRV=false; // server-mode: data komt van de API i.p.v. localStorage (gezet tijdens boot)
+  var videoCat='yoga'; // gekozen categorie in de Video's-tab
   var agendaWeek=0; // 0 = deze week; navigeren met de week-knoppen
+  var bookLoc='all'; // locatiefilter in de boekweergave ('all' of een locationId)
+  var _invRows=[]; // geladen facturen (admin) voor de omzet + Excel-export per periode
   // Accounts are configured VIA THE CHAT (the AI asks) and baked into the line below by
   // buildBookingAppPage, so customers never see a setup screen — only a plain login.
   var BAKED=__BAKED__;
@@ -116,6 +132,234 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
   function fmtDate(dateStr){var p=(dateStr||'').split('-');if(p.length!==3)return dateStr||'';var d=new Date(+p[0],+p[1]-1,+p[2]);return DOW[d.getDay()]+' '+d.getDate()+' '+MON[d.getMonth()]+' '+d.getFullYear();}
   function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
 
+  // ---------- i18n engine ----------
+  // TR: exact phrase (Dutch source) -> [en,de,fr,es]. SUB: regex rules for interpolated/embedded
+  // text. Anything not found stays Dutch (graceful fallback). Apostrophes use \\u2019 (’) so they
+  // never close the single-quoted strings.
+  function LIDX(){return {en:0,de:1,fr:2,es:3}[lang];}
+  var TR={
+    // tabs
+    'Lessen boeken':['Book classes','Kurse buchen','Réserver des cours','Reservar clases'],
+    'Studio-beheer':['Studio admin','Studio-Verwaltung','Gestion du studio','Administración del estudio'],
+    'Docenten':['Teachers','Lehrer','Enseignants','Profesores'],
+    'Lidmaatschappen':['Memberships','Mitgliedschaften','Abonnements','Membresías'],
+    'Videos':['Videos','Videos','Vidéos','Vídeos'],
+    'Statistieken':['Statistics','Statistiken','Statistiques','Estadísticas'],
+    'Communicatie':['Communication','Kommunikation','Communication','Comunicación'],
+    'Integraties':['Integrations','Integrationen','Intégrations','Integraciones'],
+    'Mijn agenda':['My calendar','Mein Kalender','Mon agenda','Mi agenda'],
+    'Mijn lessen':['My classes','Meine Kurse','Mes cours','Mis clases'],
+    'Mijn strippenkaart':['My class pass','Meine Karte','Ma carte','Mi bono'],
+    'Abonnementen':['Subscriptions','Abonnements','Abonnements','Suscripciones'],
+    // header / auth
+    'Boekingen':['Bookings','Buchungen','Réservations','Reservas'],
+    'Uitloggen':['Log out','Abmelden','Se déconnecter','Cerrar sesión'],
+    'Inloggen':['Log in','Anmelden','Se connecter','Iniciar sesión'],
+    'Log in om verder te gaan.':['Log in to continue.','Melde dich an, um fortzufahren.','Connectez-vous pour continuer.','Inicia sesión para continuar.'],
+    'E-mailadres':['Email address','E-Mail-Adresse','Adresse e-mail','Correo electrónico'],
+    'Wachtwoord':['Password','Passwort','Mot de passe','Contraseña'],
+    'Wachtwoord vergeten?':['Forgot password?','Passwort vergessen?','Mot de passe oublié ?','¿Olvidaste la contraseña?'],
+    'Wachtwoord vergeten':['Forgot password','Passwort vergessen','Mot de passe oublié','Contraseña olvidada'],
+    'Vul je e-mailadres in; we sturen je een nieuw wachtwoord.':['Enter your email; we’ll send you a new password.','Gib deine E-Mail ein; wir senden dir ein neues Passwort.','Saisissez votre e-mail ; nous vous enverrons un nouveau mot de passe.','Introduce tu correo; te enviaremos una nueva contraseña.'],
+    'Nieuw wachtwoord sturen':['Send new password','Neues Passwort senden','Envoyer un nouveau mot de passe','Enviar nueva contraseña'],
+    '← Terug naar inloggen':['← Back to login','← Zurück zur Anmeldung','← Retour à la connexion','← Volver al inicio de sesión'],
+    'De studio stelt de beheerder- en docent-logins in. Klant? Maak hieronder een account aan.':['The studio sets up admin and teacher logins. A customer? Create an account below.','Das Studio richtet die Admin- und Lehrer-Logins ein. Kunde? Erstelle unten ein Konto.','Le studio configure les accès admin et enseignant. Client ? Créez un compte ci-dessous.','El estudio configura los accesos de administrador y profesor. ¿Cliente? Crea una cuenta abajo.'],
+    'Nog geen account?':['No account yet?','Noch kein Konto?','Pas encore de compte ?','¿Aún no tienes cuenta?'],
+    'Registreren':['Sign up','Registrieren','S’inscrire','Registrarse'],
+    '← Terug':['← Back','← Zurück','← Retour','← Volver'],
+    'Account aanmaken':['Create account','Konto erstellen','Créer un compte','Crear cuenta'],
+    'Maak een account om lessen te boeken.':['Create an account to book classes.','Erstelle ein Konto, um Kurse zu buchen.','Créez un compte pour réserver des cours.','Crea una cuenta para reservar clases.'],
+    'Naam':['Name','Name','Nom','Nombre'],
+    'Telefoonnummer':['Phone number','Telefonnummer','Numéro de téléphone','Número de teléfono'],
+    'Al een account?':['Already have an account?','Schon ein Konto?','Déjà un compte ?','¿Ya tienes cuenta?'],
+    'Je gegevens zijn gevonden. Maak een wachtwoord aan om je strippenkaart/abonnement te activeren.':['We found your details. Create a password to activate your class pass/membership.','Wir haben deine Daten gefunden. Erstelle ein Passwort, um deine Karte/Mitgliedschaft zu aktivieren.','Vos données ont été trouvées. Créez un mot de passe pour activer votre carte/abonnement.','Encontramos tus datos. Crea una contraseña para activar tu bono/membresía.'],
+    'Welcome to our booking system':['Welcome to our booking system','Willkommen in unserem Buchungssystem','Bienvenue dans notre système de réservation','Bienvenido a nuestro sistema de reservas'],
+    'Get started':['Get started','Loslegen','Commencer','Empezar'],
+    // booking flow
+    'geen tegoed':['no credit','kein Guthaben','aucun crédit','sin crédito'],
+    'geboekt':['booked','gebucht','réservé','reservado'],
+    'wachtlijst':['waitlist','Warteliste','liste d’attente','lista de espera'],
+    'Wachtlijst':['Waitlist','Warteliste','Liste d’attente','Lista de espera'],
+    'Annuleren gesloten':['Cancellation closed','Stornierung geschlossen','Annulation fermée','Cancelación cerrada'],
+    'Annuleren':['Cancel','Stornieren','Annuler','Cancelar'],
+    'Van wachtlijst af':['Leave waitlist','Warteliste verlassen','Quitter la liste d’attente','Salir de la lista de espera'],
+    'Verlopen':['Expired','Abgelaufen','Expiré','Caducado'],
+    'Boeken':['Book','Buchen','Réserver','Reservar'],
+    'Kopen':['Buy','Kaufen','Acheter','Comprar'],
+    'vandaag':['today','heute','aujourd’hui','hoy'],
+    'Geen lessen':['No classes','Keine Kurse','Aucun cours','Sin clases'],
+    '← Vorige week':['← Previous week','← Vorige Woche','← Semaine précédente','← Semana anterior'],
+    'Volgende week →':['Next week →','Nächste Woche →','Semaine suivante →','Semana siguiente →'],
+    '💻 Online':['💻 Online','💻 Online','💻 En ligne','💻 En línea'],
+    '🔀 Hybride':['🔀 Hybrid','🔀 Hybrid','🔀 Hybride','🔀 Híbrido'],
+    '📍 Fysiek':['📍 In person','📍 Vor Ort','📍 Sur place','📍 Presencial'],
+    'Fysiek':['In person','Vor Ort','Sur place','Presencial'],
+    'Online':['Online','Online','En ligne','En línea'],
+    'Hybride':['Hybrid','Hybrid','Hybride','Híbrido'],
+    'Online les openen ↗':['Open online class ↗','Online-Kurs öffnen ↗','Ouvrir le cours en ligne ↗','Abrir clase en línea ↗'],
+    'Online deelnemen ↗':['Join online ↗','Online teilnehmen ↗','Participer en ligne ↗','Unirse en línea ↗'],
+    'Video openen ↗':['Open video ↗','Video öffnen ↗','Ouvrir la vidéo ↗','Abrir vídeo ↗'],
+    '(geweest)':['(past)','(vorbei)','(passé)','(pasado)'],
+    // client dashboard / memberships
+    'Mijn geboekte lessen':['My booked classes','Meine gebuchten Kurse','Mes cours réservés','Mis clases reservadas'],
+    'Er zijn op dit moment geen lidmaatschappen te koop.':['There are currently no memberships for sale.','Derzeit sind keine Mitgliedschaften erhältlich.','Aucun abonnement n’est en vente pour le moment.','Por ahora no hay membresías a la venta.'],
+    'Onbeperkte lessen':['Unlimited classes','Unbegrenzte Kurse','Cours illimités','Clases ilimitadas'],
+    'Aantal lessen per maand':['Number of classes per month','Anzahl Kurse pro Monat','Nombre de cours par mois','Número de clases al mes'],
+    'Aantal lessen':['Number of classes','Anzahl Kurse','Nombre de cours','Número de clases'],
+    'Strippenkaart':['Class pass','Mehrfachkarte','Carte','Bono'],
+    'Abonnement (maand)':['Membership (monthly)','Abo (monatlich)','Abonnement (mensuel)','Membresía (mensual)'],
+    'Toevoegen':['Add','Hinzufügen','Ajouter','Añadir'],
+    'Verwijderen':['Delete','Löschen','Supprimer','Eliminar'],
+    'Opslaan':['Save','Speichern','Enregistrer','Guardar'],
+    'Opzeggen':['Cancel subscription','Kündigen','Résilier','Cancelar suscripción'],
+    'Maandelijks abonnement':['Monthly subscription','Monatsabo','Abonnement mensuel','Suscripción mensual'],
+    'Je hebt geen lopende abonnementen.':['You have no active subscriptions.','Du hast keine laufenden Abos.','Vous n’avez aucun abonnement en cours.','No tienes suscripciones activas.'],
+    // videos
+    'Nog geen videos in deze categorie.':['No videos in this category yet.','Noch keine Videos in dieser Kategorie.','Aucune vidéo dans cette catégorie.','Aún no hay vídeos en esta categoría.'],
+    'Aanmaken':['Create','Erstellen','Créer','Crear'],
+    'Code':['Code','Code','Code','Código'],
+    'Waarde':['Value','Wert','Valeur','Valor'],
+    'Kortingscode of cadeaubon':['Discount code or gift card','Rabattcode oder Gutschein','Code promo ou carte cadeau','Código de descuento o tarjeta regalo'],
+    'Verloopt op (optioneel)':['Expires on (optional)','Läuft ab am (optional)','Expire le (facultatif)','Caduca el (opcional)'],
+    'Nog geen codes.':['No codes yet.','Noch keine Codes.','Aucun code pour l’instant.','Aún no hay códigos.'],
+    // admin common
+    'Titel':['Title','Titel','Titre','Título'],
+    'Datum':['Date','Datum','Date','Fecha'],
+    'Tijd':['Time','Zeit','Heure','Hora'],
+    'Type':['Type','Typ','Type','Tipo'],
+    'Land':['Country','Land','Pays','País'],
+    'Adres':['Address','Adresse','Adresse','Dirección'],
+    'Plaats':['City','Stadt','Ville','Ciudad'],
+    'Postcode':['Postcode','PLZ','Code postal','Código postal'],
+    'Bedrijfsnaam':['Company name','Firmenname','Nom de l’entreprise','Nombre de la empresa'],
+    'Nieuwe les inplannen':['Schedule a new class','Neuen Kurs planen','Planifier un nouveau cours','Programar una nueva clase'],
+    'Les toevoegen':['Add class','Kurs hinzufügen','Ajouter le cours','Añadir clase'],
+    'Type les':['Class type','Kursart','Type de cours','Tipo de clase'],
+    'Docent':['Teacher','Lehrer','Enseignant','Profesor'],
+    'Docent toevoegen':['Add teacher','Lehrer hinzufügen','Ajouter un enseignant','Añadir profesor'],
+    'Nieuw lidmaatschap':['New membership','Neue Mitgliedschaft','Nouvel abonnement','Nueva membresía'],
+    'Facturen':['Invoices','Rechnungen','Factures','Facturas'],
+    'Laden…':['Loading…','Lädt…','Chargement…','Cargando…'],
+    'Nog geen facturen.':['No invoices yet.','Noch keine Rechnungen.','Aucune facture pour l’instant.','Aún no hay facturas.'],
+    'Nog geen boekingen.':['No bookings yet.','Noch keine Buchungen.','Aucune réservation pour l’instant.','Aún no hay reservas.'],
+    'Nog geen aankopen.':['No purchases yet.','Noch keine Käufe.','Aucun achat pour l’instant.','Aún no hay compras.'],
+    'Omzet per type':['Revenue by type','Umsatz nach Typ','Chiffre d’affaires par type','Ingresos por tipo'],
+    'Nog geen omzet.':['No revenue yet.','Noch kein Umsatz.','Aucun chiffre d’affaires.','Aún no hay ingresos.'],
+    'Drukste lessen (op boekingen)':['Busiest classes (by bookings)','Beliebteste Kurse (nach Buchungen)','Cours les plus fréquentés (par réservations)','Clases más concurridas (por reservas)'],
+    'no-show':['no-show','No-Show','absence','ausencia'],
+    'Annuleer':['Cancel','Stornieren','Annuler','Cancelar'],
+    'Terugbetalen':['Refund','Erstatten','Rembourser','Reembolsar'],
+    // alerts / confirms
+    'Betalen werkt in de gepubliceerde app.':['Payments work in the published app.','Zahlungen funktionieren in der veröffentlichten App.','Les paiements fonctionnent dans l’app publiée.','Los pagos funcionan en la app publicada.'],
+    'Code kon niet worden gecontroleerd.':['The code could not be checked.','Der Code konnte nicht geprüft werden.','Le code n’a pas pu être vérifié.','No se pudo comprobar el código.'],
+    'Geef een code op.':['Enter a code.','Gib einen Code ein.','Saisissez un code.','Introduce un código.'],
+    'Deze code verwijderen?':['Delete this code?','Diesen Code löschen?','Supprimer ce code ?','¿Eliminar este código?'],
+    'Voor deze categorie is nog geen abonnementsprijs ingesteld.':['No subscription price has been set for this category yet.','Für diese Kategorie wurde noch kein Abopreis festgelegt.','Aucun tarif d’abonnement n’a été défini pour cette catégorie.','Aún no se ha fijado un precio de suscripción para esta categoría.'],
+    'Je video-abonnement opzeggen? Je houdt toegang tot het einde van de betaalde periode.':['Cancel your video subscription? You keep access until the end of the paid period.','Video-Abo kündigen? Du behältst den Zugang bis zum Ende des bezahlten Zeitraums.','Résilier votre abonnement vidéo ? Vous gardez l’accès jusqu’à la fin de la période payée.','¿Cancelar tu suscripción de vídeo? Mantienes el acceso hasta el final del período pagado.'],
+    'Opgezegd. Je houdt toegang tot het einde van de periode.':['Cancelled. You keep access until the end of the period.','Gekündigt. Du behältst den Zugang bis zum Ende des Zeitraums.','Résilié. Vous gardez l’accès jusqu’à la fin de la période.','Cancelado. Mantienes el acceso hasta el final del período.'],
+    'Je lessen-abonnement opzeggen? Je houdt toegang tot het einde van de betaalde periode.':['Cancel your class membership? You keep access until the end of the paid period.','Kurs-Abo kündigen? Du behältst den Zugang bis zum Ende des bezahlten Zeitraums.','Résilier votre abonnement de cours ? Vous gardez l’accès jusqu’à la fin de la période payée.','¿Cancelar tu membresía de clases? Mantienes el acceso hasta el final del período pagado.'],
+    'Betaling gelukt! Je boeking/aankoop is bevestigd.':['Payment successful! Your booking/purchase is confirmed.','Zahlung erfolgreich! Deine Buchung/dein Kauf ist bestätigt.','Paiement réussi ! Votre réservation/achat est confirmé.','¡Pago realizado! Tu reserva/compra está confirmada.'],
+    'Betaling kon niet bevestigd worden — er is niets toegekend.':['Payment could not be confirmed — nothing was granted.','Zahlung konnte nicht bestätigt werden — es wurde nichts gewährt.','Le paiement n’a pas pu être confirmé — rien n’a été accordé.','No se pudo confirmar el pago — no se concedió nada.'],
+    'Geef de les een titel.':['Give the class a title.','Gib dem Kurs einen Titel.','Donnez un titre au cours.','Ponle un título a la clase.'],
+    'Kies een datum.':['Pick a date.','Wähle ein Datum.','Choisissez une date.','Elige una fecha.'],
+    'Geef een naam op.':['Enter a name.','Gib einen Namen ein.','Saisissez un nom.','Introduce un nombre.'],
+    'Heb je een kortingscode of cadeaubon? Laat leeg als je er geen hebt.':['Do you have a discount code or gift card? Leave empty if not.','Hast du einen Rabattcode oder Gutschein? Leer lassen, falls nicht.','Avez-vous un code promo ou une carte cadeau ? Laissez vide sinon.','¿Tienes un código de descuento o tarjeta regalo? Déjalo vacío si no.'],
+    'Code ongeldig.':['Invalid code.','Code ungültig.','Code invalide.','Código no válido.'],
+    // locations
+    'Locaties':['Locations','Standorte','Lieux','Ubicaciones'],
+    'Locatie':['Location','Standort','Lieu','Ubicación'],
+    'Alle locaties':['All locations','Alle Standorte','Tous les lieux','Todas las ubicaciones'],
+    'Locatie toevoegen':['Add location','Standort hinzufügen','Ajouter un lieu','Añadir ubicación'],
+    'Adres (optioneel)':['Address (optional)','Adresse (optional)','Adresse (facultatif)','Dirección (opcional)'],
+    '— Geen specifieke locatie —':['— No specific location —','— Kein bestimmter Standort —','— Aucun lieu spécifique —','— Sin ubicación específica —'],
+    'Nog geen locaties — de app werkt dan als één locatie.':['No locations yet — the app then works as a single location.','Noch keine Standorte — die App funktioniert dann als ein Standort.','Aucun lieu pour l’instant — l’app fonctionne alors comme un seul lieu.','Aún no hay ubicaciones — la app funciona como una sola ubicación.'],
+    // invoices & revenue export
+    'Facturen & omzet':['Invoices & revenue','Rechnungen & Umsatz','Factures & chiffre d’affaires','Facturas e ingresos'],
+    'Periode':['Period','Zeitraum','Période','Período'],
+    'Omzet in deze periode':['Revenue in this period','Umsatz in diesem Zeitraum','Chiffre d’affaires sur cette période','Ingresos en este período'],
+    'Geen facturen in deze periode.':['No invoices in this period.','Keine Rechnungen in diesem Zeitraum.','Aucune facture sur cette période.','No hay facturas en este período.'],
+    'Docenten-uitbetaling':['Teacher payout','Lehrer-Auszahlung','Paiement des enseignants','Pago a profesores'],
+    'Tarief per les (€)':['Rate per class (€)','Satz pro Kurs (€)','Tarif par cours (€)','Tarifa por clase (€)'],
+    'Automatisch rapport':['Automatic report','Automatischer Bericht','Rapport automatique','Informe automático'],
+    'Frequentie':['Frequency','Häufigkeit','Fréquence','Frecuencia'],
+    'Uit':['Off','Aus','Désactivé','Apagado'],
+    'Wekelijks':['Weekly','Wöchentlich','Hebdomadaire','Semanal'],
+    'Maandelijks':['Monthly','Monatlich','Mensuel','Mensual'],
+    'Google-review-link':['Google review link','Google-Bewertungslink','Lien d’avis Google','Enlace de reseña de Google'],
+    'Abonnementen — betaalstatus':['Subscriptions — payment status','Abos — Zahlungsstatus','Abonnements — statut de paiement','Suscripciones — estado de pago'],
+    'Nog geen lopende abonnementen.':['No active subscriptions yet.','Noch keine laufenden Abos.','Aucun abonnement en cours.','Aún no hay suscripciones activas.'],
+    'Betaling mislukt':['Payment failed','Zahlung fehlgeschlagen','Paiement échoué','Pago fallido'],
+    'Actief':['Active','Aktiv','Actif','Activo']
+  };
+  // NB: regexes live inside a template literal, so EVERY backslash must be doubled (\\d, \\/, \\. …).
+  var SUB=[
+    [/Ingelogd als /g,['Logged in as ','Angemeldet als ','Connecté en tant que ','Conectado como ']],
+    [/geldig t\\/m /g,['valid until ','gültig bis ','valable jusqu’au ','válido hasta ']],
+    [/geldig (\\d+) dagen/g,['valid $1 days','gültig $1 Tage','valable $1 jours','válido $1 días']],
+    [/(\\d+) lessen per maand/g,['$1 classes per month','$1 Kurse pro Monat','$1 cours par mois','$1 clases al mes']],
+    [/onbeperkt lessen/g,['unlimited classes','unbegrenzte Kurse','cours illimités','clases ilimitadas']],
+    [/(\\d+) lessen/g,['$1 classes','$1 Kurse','$1 cours','$1 clases']],
+    [/automatisch verlengd/g,['auto-renewed','automatisch verlängert','renouvelé automatiquement','renovado automáticamente']],
+    [/ per maand/g,[' per month',' pro Monat',' par mois',' al mes']],
+    [/\\/maand/g,['/month','/Monat','/mois','/mes']],
+    [/elke /g,['every ','jeden ','chaque ','cada ']],
+    [/\\bWeek (\\d+)/g,['Week $1','Woche $1','Semaine $1','Semana $1']],
+    [/Beschikbaar vanaf /g,['Available from ','Verfügbar ab ','Disponible à partir du ','Disponible desde ']],
+    [/Boeken kan pas vanaf /g,['Booking opens from ','Buchung ab ','Réservation à partir du ','Reservas desde ']],
+    [/(\\d+) boekingen/g,['$1 bookings','$1 Buchungen','$1 réservations','$1 reservas']],
+    [/betalende abonnees/g,['paying subscribers','zahlende Abonnenten','abonnés payants','suscriptores que pagan']],
+    [/Actief · betaald t\\/m /g,['Active · paid until ','Aktiv · bezahlt bis ','Actif · payé jusqu’au ','Activo · pagado hasta ']],
+    [/Verlopen /g,['Expired ','Abgelaufen ','Expiré ','Caducado ']],
+    [/(\\d+)\\/(\\d+) gebruikt/g,['$1/$2 used','$1/$2 verwendet','$1/$2 utilisé','$1/$2 usado']],
+    [/(\\d+)x gebruikt/g,['$1× used','$1× verwendet','$1× utilisé','$1× usado']],
+    [/Korting toegepast: -/g,['Discount applied: -','Rabatt angewendet: -','Remise appliquée : -','Descuento aplicado: -']],
+    [/\\. Je betaalt nu /g,['. You now pay ','. Du zahlst jetzt ','. Vous payez maintenant ','. Ahora pagas ']],
+    [/Terugbetaald: /g,['Refunded: ','Erstattet: ','Remboursé : ','Reembolsado: ']],
+    [/Je bent geabonneerd \\(loopt maandelijks door\\)\\./g,['You are subscribed (renews monthly).','Du bist abonniert (verlängert sich monatlich).','Vous êtes abonné (renouvellement mensuel).','Estás suscrito (se renueva cada mes).']],
+    [/Abonneer je/g,['Subscribe','Abonnieren','S’abonner','Suscríbete']],
+    [/ingelogd/g,['logged in','angemeldet','connecté','conectado']],
+    [/Download Excel/g,['Download Excel','Excel herunterladen','Télécharger Excel','Descargar Excel']],
+    [/BTW-overzicht/g,['VAT report','USt-Übersicht','Récapitulatif TVA','Resumen de IVA']],
+    [/(\\d+) facturen/g,['$1 invoices','$1 Rechnungen','$1 factures','$1 facturas']],
+    [/(\\d+) maanden/g,['$1 months','$1 Monate','$1 mois','$1 meses']],
+    [/(\\d+) maand\\b/g,['$1 month','$1 Monat','$1 mois','$1 mes']],
+    [/\\(kwartaal\\)/g,['(quarter)','(Quartal)','(trimestre)','(trimestre)']],
+    [/\\(jaar\\)/g,['(year)','(Jahr)','(an)','(año)']]
+  ];
+  function trText(s){
+    if(lang==='nl'||s==null)return s;
+    var i=LIDX();if(i==null)return s;
+    var t=String(s).replace(/\\s+/g,' ').trim();if(!t)return s;
+    var e=TR[t];if(e&&e[i]!=null)return String(s).replace(t,e[i]);
+    var out=String(s),hit=false;
+    for(var k=0;k<SUB.length;k++){var r=SUB[k];if(r[1][i]==null)continue;var before=out;out=out.replace(r[0],r[1][i]);if(out!==before)hit=true;}
+    return hit?out:s;
+  }
+  function tr(s){var i=LIDX();if(i==null||lang==='nl')return s;var e=TR[s];return (e&&e[i]!=null)?e[i]:s;}
+  function translateDOM(el){
+    if(lang==='nl'||!el||typeof document==='undefined')return;
+    try{
+      var w=document.createTreeWalker(el,NodeFilter.SHOW_TEXT,null,false),ns=[],n;
+      while((n=w.nextNode()))ns.push(n);
+      ns.forEach(function(nd){var v=nd.nodeValue;if(!v||!/[A-Za-zÀ-ÿ]/.test(v))return;var nv=trText(v);if(nv!==v)nd.nodeValue=nv;});
+      var q2=el.querySelectorAll('[placeholder],[title]');
+      for(var j=0;j<q2.length;j++){var x=q2[j];
+        if(x.getAttribute('placeholder')){var p=trText(x.getAttribute('placeholder'));if(p!==x.getAttribute('placeholder'))x.setAttribute('placeholder',p);}
+        var ti=x.getAttribute('title');if(ti){var t2=trText(ti);if(t2!==ti)x.setAttribute('title',t2);}
+      }
+    }catch(e){}
+  }
+  function langSelect(){var o='';for(var k in LANGS){o+='<option value="'+k+'"'+(k===lang?' selected':'')+'>'+LANGS[k]+'</option>';}
+    return '<select class="ba-lang" data-act="setlang" title="Taal / Language" style="width:auto;padding:6px 10px;font-size:13px;border:1px solid var(--ba-line);border-radius:9px;background:#fff">'+o+'</select>';}
+  var _i18nObs=null,_i18nBusy=false;
+  function initI18n(){if(_i18nObs||typeof MutationObserver==='undefined'||!root)return;
+    _i18nObs=new MutationObserver(function(){if(_i18nBusy||lang==='nl')return;_i18nBusy=true;try{translateDOM(root);}catch(e){}_i18nBusy=false;});
+    _i18nObs.observe(root,{childList:true,subtree:true});}
+  // Translate user-facing alert/confirm/prompt text too (shadows the globals inside this IIFE).
+  function alert(m){return window.alert(trText(String(m==null?'':m)));}
+  function confirm(m){return window.confirm(trText(String(m==null?'':m)));}
+  function prompt(m,d){return window.prompt(trText(String(m==null?'':m)),d);}
+
   function seed(){
     var accs=bakedAccounts();
     var firstT=accs.filter(function(a){return a.role==='teacher';})[0]||accs[0]||{};
@@ -129,6 +373,11 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
       sell:{strippenkaart:true,abonnement:true},
       reminders:true,
       purchases:[],  // Stripe-aankopen (strippenkaart/abonnement) zodat de admin kan terugbetalen
+      videos:[], videoPlans:[], videoAccess:[], mySubs:[],  // video-bibliotheek + abonnementen
+      codes:[],  // kortingscodes / cadeaubonnen
+      locations:[],  // fysieke locaties (multi-locatie)
+      settings:{ownerReport:'off',reviewUrl:''},  // studio-instellingen (toggles)
+      subscribers:[],  // abonnees + betaalstatus (admin)
       integrations:{stripe:false,paypal:false,mailchimp:false,gcal:false,zoom:false,zapier:false,api:false}
     };
   }
@@ -166,6 +415,19 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
         if(d.url){body.innerHTML='<a href="'+d.url+'" target="_blank" rel="noopener" style="display:inline-block;background:var(--ba);color:#fff;text-decoration:none;font-weight:700;padding:10px 16px;border-radius:10px">Betaal met Stripe ↗</a><p style="color:#9ca3af;font-size:12px;margin:10px 0 0">Opent in een nieuw tabblad. Daarna kom je terug en wordt je aankoop bevestigd.</p>';}
         else{clearPending();body.textContent=d.error||'Afrekenen mislukt.';}
       }).catch(function(){clearPending();var body=ov.querySelector('#ba-pay-body');if(body)body.textContent='Afrekenen mislukt.';});
+  }
+
+  // Ask for an optional discount code / gift card, validate it server-side, then run go()
+  // with the (possibly) discounted amount + the code + discount so finalize can redeem it.
+  function payWithCode(kind,name,amount,pending){
+    var code=prompt('Heb je een kortingscode of cadeaubon? Laat leeg als je er geen hebt.');
+    function go(amt,c,disc){payViaStripe(kind,name,amt,Object.assign({},pending,{code:c||'',discount:disc||0}));}
+    if(!code||!code.trim()){go(amount,'',0);return;}
+    spost('code/validate',{code:code.trim(),amount:amount}).then(function(r){
+      if(!r||!r.ok||!r.d){alert((r&&r.d&&r.d.error)||'Code ongeldig.');go(amount,'',0);return;}
+      alert('Korting toegepast: -€'+r.d.discount+'. Je betaalt nu €'+r.d.newAmount+'.');
+      go(r.d.newAmount,r.d.code,r.d.discount);
+    }).catch(function(){alert('Code kon niet worden gecontroleerd.');go(amount,'',0);});
   }
 
   function teacherAccounts(){return S.accounts.filter(function(a){return a.role==='teacher';});}
@@ -272,7 +534,7 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
     var paySel=(!mineBooked&&!(me&&me.status==='waitlist')&&!o.past&&!tooEarly&&!full&&S.pay.tegoed&&S.pay.stripe)?('<select class="ba-pay" data-c="'+o.cls.id+'" data-d="'+o.date+'" style="width:auto">'+payOpts+'</select>'):'';
     var cls='ba-appt-card'+(mineBooked?' is-mine':(full?' is-full':''));
     return '<div class="ba-appt"><div class="ba-appt-time">'+esc(o.cls.time)+'</div>'+
-      '<div class="'+cls+'"><div class="ba-appt-main"><b>'+esc(o.cls.title)+'</b> '+status+'<div class="ba-meta" style="margin:2px 0 0">'+esc(o.cls.teacher||'')+(o.cls.price?(' · €'+o.cls.price):'')+'</div></div>'+
+      '<div class="'+cls+'"><div class="ba-appt-main"><b>'+esc(o.cls.title)+'</b> '+status+'<div class="ba-meta" style="margin:2px 0 0">'+esc(o.cls.teacher||'')+(o.cls.price?(' · €'+o.cls.price):'')+locLabel(o.cls)+'</div>'+onlineLine(o.cls)+'</div>'+
       '<div class="ba-row" style="gap:6px;justify-content:flex-end">'+paySel+btn+'</div></div></div>';
   }
   // Booking view = a WEEK agenda: all 7 days (empty days too), navigate week by week.
@@ -284,12 +546,14 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
     var start=new Date(today);start.setDate(today.getDate()-monOff+agendaWeek*7);
     var end=new Date(start);end.setDate(start.getDate()+6);
     var range=start.getDate()+' '+MON[start.getMonth()]+' – '+end.getDate()+' '+MON[end.getMonth()]+' '+end.getFullYear();
-    var h='<div class="ba-row" style="margin-bottom:12px"><div class="ba-meta" style="margin:0">Jouw tegoed: '+wallet+'</div></div>';
+    var locs=S.locations||[];
+    var locFilter=locs.length?('<select data-act="setbookloc" style="width:auto"><option value="all"'+(bookLoc==='all'?' selected':'')+'>Alle locaties</option>'+(S.locations||[]).map(function(l){return '<option value="'+l.id+'"'+(String(l.id)===String(bookLoc)?' selected':'')+'>'+esc(l.name)+'</option>';}).join('')+'</select>'):'';
+    var h='<div class="ba-row" style="margin-bottom:12px"><div class="ba-meta" style="margin:0">Jouw tegoed: '+wallet+'</div>'+locFilter+'</div>';
     h+='<div class="ba-weeknav"><button class="ba-btn ghost sm" data-act="weekprev"'+(agendaWeek<=0?' disabled':'')+'>← Vorige week</button><b>'+range+'</b><button class="ba-btn ghost sm" data-act="weeknext">Volgende week →</button></div>';
     h+='<div class="ba-agenda">';
     for(var i=0;i<7;i++){
       var d=new Date(start);d.setDate(start.getDate()+i);
-      var occ=classesOn(d);
+      var occ=classesOn(d).filter(function(o){return bookLoc==='all'||String(o.cls.locationId||0)===String(bookLoc);});
       var isToday=ymd(d)===ymd(new Date());
       h+='<div class="ba-day"><div class="ba-day-h">'+DOWF[d.getDay()]+' '+d.getDate()+' '+MON[d.getMonth()]+' '+d.getFullYear()+(isToday?' <span class="ba-badge ok">vandaag</span>':'')+'</div>';
       if(!occ.length)h+='<div class="ba-empty"><div class="ba-empty-card">Geen lessen</div></div>';
@@ -306,7 +570,7 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
     var b=booked(o.cls.id,o.date),wl=waitN(o.cls.id,o.date);
     var status='<span class="ba-badge'+(b>=o.cls.cap?' full':' ok')+'">'+b+'/'+o.cls.cap+' geboekt'+(wl?(' · '+wl+' wachtlijst'):'')+'</span>';
     return '<div class="ba-appt"><div class="ba-appt-time">'+esc(o.cls.time)+'</div>'+
-      '<div class="ba-appt-card"><div class="ba-appt-main"><b>'+esc(o.cls.title)+'</b> '+modeBadge(o.cls)+' '+status+(o.past?' <span class="ba-meta">(geweest)</span>':'')+onlineLine(o.cls)+'</div></div></div>';
+      '<div class="ba-appt-card"><div class="ba-appt-main"><b>'+esc(o.cls.title)+'</b> '+modeBadge(o.cls)+' '+status+(o.past?' <span class="ba-meta">(geweest)</span>':'')+(locName(o.cls.locationId)?(' <span class="ba-meta">📍 '+esc(locName(o.cls.locationId))+'</span>'):'')+onlineLine(o.cls)+'</div></div></div>';
   }
   // Teacher's own week agenda — identical look to the booking agenda, but only THEIR lessons
   // (the ones the admin assigned to them via teacherEmail).
@@ -334,6 +598,11 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
 
   function occOptions(sel){return occurrences().map(function(o){var v=o.cls.id+'|'+o.date;return '<option value="'+v+'"'+(v===sel?' selected':'')+'>'+esc(o.cls.title)+' — '+fmtDate(o.date)+' '+esc(o.cls.time)+'</option>';}).join('');}
 
+  // Multi-location helpers. With no locations defined, the app stays single-location (these return empty).
+  function locName(id){var l=(S.locations||[]).filter(function(x){return String(x.id)===String(id);})[0];return l?l.name:'';}
+  function locationOptions(sel){return (S.locations||[]).map(function(l){return '<option value="'+l.id+'"'+(String(l.id)===String(sel)?' selected':'')+'>'+esc(l.name)+'</option>';}).join('');}
+  function locLabel(c){var n=locName(c.locationId);return n?(' · 📍 '+esc(n)):'';}
+
   // Reusable "create class" card. ownerEmail set => teacher mode (fixed owner); else admin (picks teacher).
   function createClassCard(ownerEmail){
     var teacherField = ownerEmail
@@ -348,6 +617,8 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
       '<div><label class="ba-f">Prijs per les (€, voor Stripe)</label><input id="ba-cp" type="number" step="0.01" value="15"></div></div>'+
       '<div class="ba-2"><div><label class="ba-f">Boeken kan tot … dagen vooraf</label><input id="ba-cbook" type="number" min="0" value="14"><span class="ba-note" style="margin:0">0 = geen limiet</span></div>'+
       '<div><label class="ba-f">Annuleren kan tot … uur voor de les</label><input id="ba-ccancel" type="number" min="0" value="12"><span class="ba-note" style="margin:0">0 = altijd mogelijk</span></div></div>'+
+      '<label class="ba-f">Herhaal wekelijks — aantal weken (1 = eenmalig)</label><input id="ba-cweeks" type="number" min="1" value="1"><span class="ba-note" style="margin:0">Maakt dezelfde les elke week op deze dag/tijd.</span>'+
+      ((S.locations&&S.locations.length)?('<label class="ba-f">Locatie</label><select id="ba-cloc"><option value="0">— Geen specifieke locatie —</option>'+locationOptions('')+'</select>'):'')+
       '<label class="ba-f">Type les</label>'+
       '<div class="ba-row" style="justify-content:flex-start;gap:16px;margin:2px 0 4px">'+
         '<label class="ba-f" style="margin:0;font-weight:500"><input type="radio" name="ba-cmode" value="fysiek" checked style="width:auto;margin-right:6px">Fysiek</label>'+
@@ -359,7 +630,7 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
   }
 
   function classRow(c){
-    return '<div class="ba-item"><div class="ba-row"><div><b>'+esc(c.title)+'</b> '+modeBadge(c)+'<div class="ba-meta" style="margin:0">'+(c.recurring?('elke '+DOWF[c.day]):fmtDate(c.date))+' · '+esc(c.time)+' · max '+c.cap+(c.teacher?(' · '+esc(c.teacher)):'')+'</div>'+onlineLine(c)+'</div>'+
+    return '<div class="ba-item"><div class="ba-row"><div><b>'+esc(c.title)+'</b> '+modeBadge(c)+'<div class="ba-meta" style="margin:0">'+(c.recurring?('elke '+DOWF[c.day]):fmtDate(c.date))+' · '+esc(c.time)+' · max '+c.cap+(c.teacher?(' · '+esc(c.teacher)):'')+locLabel(c)+'</div>'+onlineLine(c)+'</div>'+
       '<div class="ba-row" style="gap:6px">€ <input type="number" step="0.01" min="0" data-act="classprice" data-c="'+c.id+'" value="'+(c.price||0)+'" title="Prijs per les aanpassen" style="width:78px;padding:6px 8px">'+
       '<button class="ba-btn warn sm" data-act="delclass" data-c="'+c.id+'">Verwijderen</button></div></div></div>';
   }
@@ -367,9 +638,23 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
   // Admin Studio-beheer: stats, create class (pick teacher), all classes, ALL bookings (move + attendance).
   function pStudio(){
     var totalBookings=S.bookings.filter(function(b){return b.status==='booked';}).length;
+    var subs=S.subscribers||[];
+    var subsActive=subs.filter(function(s){return s.status==='active';}).length;
     var h='<div class="ba-stats">'+
       '<div class="ba-stat"><b>'+S.classes.length+'</b><span>actieve klassen</span></div>'+
-      '<div class="ba-stat"><b>'+totalBookings+'</b><span>totaal boekingen</span></div></div>';
+      '<div class="ba-stat"><b>'+totalBookings+'</b><span>totaal boekingen</span></div>'+
+      '<div class="ba-stat"><b>'+subsActive+'/'+subs.length+'</b><span>betalende abonnees</span></div></div>';
+    // Abonnementen — betaalstatus: wie betaalt z'n maandabonnement (door)?
+    h+='<div class="ba-card" style="margin-top:16px"><h4>Abonnementen — betaalstatus</h4>'+
+      '<p class="ba-meta">Wie betaalt z\\u2019n maandabonnement (door)? Verlopen of mislukt = die persoon kan niet meer boeken tot er weer betaald is.</p>'+
+      '<div class="ba-list ba-scroll" style="margin-top:10px">';
+    if(!subs.length)h+='<p class="ba-meta">Nog geen lopende abonnementen.</p>';
+    subs.slice().sort(function(a,b){var o={failed:0,expired:1,active:2};return (o[a.status]||0)-(o[b.status]||0);}).forEach(function(s){
+      var badge=s.status==='active'?('<span class="ba-badge ok">Actief'+(s.validUntil?(' &middot; betaald t/m '+esc(s.validUntil)):'')+'</span>'):
+        (s.status==='failed'?'<span class="ba-badge full">Betaling mislukt</span>':'<span class="ba-badge warn">Verlopen'+(s.validUntil?(' '+esc(s.validUntil)):'')+'</span>');
+      h+='<div class="ba-item"><div class="ba-row"><div><b>'+esc(s.name||s.email)+'</b> <span class="ba-meta" style="margin:0">'+esc(s.email)+' &middot; '+esc(s.membership||'')+'</span></div>'+badge+'</div></div>';
+    });
+    h+='</div></div>';
     h+='<div class="ba-2">'+createClassCard(null)+
       '<div class="ba-card"><h4>Alle klassen</h4><div class="ba-list" style="margin-top:10px">'+
       (S.classes.length?S.classes.map(classRow).join(''):'<p class="ba-meta">Nog geen klassen.</p>')+'</div></div></div>';
@@ -378,14 +663,27 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
       '<label class="ba-f"><input type="checkbox" data-act="togglepay" data-k="tegoed" '+(S.pay.tegoed?'checked':'')+' style="width:auto;margin-right:6px">Strippenkaart & abonnement</label>'+
       '<label class="ba-f"><input type="checkbox" data-act="togglepay" data-k="stripe" '+(S.pay.stripe?'checked':'')+' style="width:auto;margin-right:6px">Stripe (per les afrekenen)</label>'+
       (S.pay.tegoed?'':'<p class="ba-note">Strippenkaart/abonnement staat uit — klanten kopen losse lessen via Stripe.</p>')+'</div>';
+    // Multi-location: optional physical locations. When set, a class can be assigned to one and
+    // clients can filter by location. Credits/strippenkaarten are shared across locations.
+    var locs=S.locations||[];
+    h+='<div class="ba-card" style="margin-top:16px"><h4>Locaties</h4>'+
+      '<p class="ba-meta">Heb je meerdere studio-locaties? Voeg ze hier toe — je kunt een les dan aan een locatie koppelen en klanten kunnen erop filteren. Tegoed/strippenkaarten gelden op alle locaties.</p>'+
+      '<div class="ba-2"><div><label class="ba-f">Naam</label><input id="ba-locn" placeholder="bijv. Studio Centrum"></div>'+
+      '<div><label class="ba-f">Adres (optioneel)</label><input id="ba-loca" placeholder="Straat 1, Stad"></div></div>'+
+      '<div style="margin-top:12px"><button class="ba-btn" data-act="addloc">Locatie toevoegen</button></div>'+
+      '<div class="ba-list" style="margin-top:12px">';
+    if(!locs.length)h+='<p class="ba-meta">Nog geen locaties — de app werkt dan als één locatie.</p>';
+    locs.forEach(function(l){h+='<div class="ba-item"><div class="ba-row"><div><b>📍 '+esc(l.name)+'</b>'+(l.address?(' <span class="ba-meta" style="margin:0">'+esc(l.address)+'</span>'):'')+'</div><button class="ba-btn warn sm" data-act="delloc" data-l="'+l.id+'">Verwijderen</button></div></div>';});
+    h+='</div></div>';
     // All bookings: who booked (account + e-mail) + reschedule + attendance + cancel
     h+='<div class="ba-card" style="margin-top:16px"><h4>Alle boekingen — wie, verplaatsen & aanwezigheid</h4><div class="ba-list" style="margin-top:10px">';
     var bs=S.bookings.filter(function(b){return b.status==='booked';});
     if(!bs.length)h+='<p class="ba-meta">Nog geen boekingen.</p>';
     bs.forEach(function(b){var c=S.classes.filter(function(x){return x.id===b.classId;})[0]||{};
-      h+='<div class="ba-item"><div class="ba-row"><div><b>'+esc(b.name)+'</b> <span class="ba-meta" style="margin:0">'+esc(b.bookerEmail||'')+' · '+esc(c.title||'?')+' · '+fmtDate(b.date)+' '+esc(c.time||'')+' · '+(b.payment==='stripe'?'Stripe':'tegoed')+'</span></div>'+
+      h+='<div class="ba-item"><div class="ba-row"><div><b>'+esc(b.name)+'</b>'+(b.noShow?' <span class="ba-badge warn">no-show</span>':'')+' <span class="ba-meta" style="margin:0">'+esc(b.bookerEmail||'')+' · '+esc(c.title||'?')+' · '+fmtDate(b.date)+' '+esc(c.time||'')+' · '+(b.payment==='stripe'?'Stripe':'tegoed')+'</span></div>'+
          '<div class="ba-row" style="gap:6px"><select data-act="moveto" data-b="'+b.id+'" style="width:auto">'+occOptions(b.classId+'|'+b.date)+'</select>'+
          '<button class="ba-btn '+(b.present?'':'ghost')+' sm" data-act="present" data-b="'+b.id+'">'+(b.present?'✓ aanwezig':'aanwezig')+'</button>'+
+         '<button class="ba-btn '+(b.noShow?'warn':'ghost')+' sm" data-act="noshow" data-b="'+b.id+'" title="No-show: klant kwam niet en is z\\u2019n tegoed kwijt">'+(b.noShow?'✓ no-show':'no-show')+'</button>'+
          (b.payment==='stripe'&&b.paymentIntent&&!b.refunded?'<button class="ba-btn ghost sm" data-act="refundbk" data-b="'+b.id+'">Annuleer + terugbetalen</button>':'<button class="ba-btn warn sm" data-act="cancel" data-b="'+b.id+'">Annuleer</button>')+'</div></div></div>';});
     h+='</div><p class="ba-note">Kies een andere les in het menu om een boeking te verplaatsen.</p></div>';
     // Cancellations log (the admin can remove individual entries or clear the whole log)
@@ -420,17 +718,54 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
       h+='<div class="ba-item"><div class="ba-row"><span><b>'+esc(x.name)+'</b> <span class="ba-meta">'+esc(x.email||'')+' · '+(x.type==='abonnement'?'abonnement':'strippenkaart')+' · €'+x.amount+'</span></span><div class="ba-row" style="gap:6px">'+ctrl+'</div></div></div>';
     });
     h+='</div><p class="ba-note">Bij een strippenkaart vul je zelf in hoeveel je terugstort (standaard het volledige bedrag).</p></div>';
-    // Facturenoverzicht — bekijken + downloaden als PDF.
-    h+='<div class="ba-card" style="margin-top:16px"><h4>Facturen</h4><p class="ba-meta">Automatisch aangemaakt bij elke betaling. Klik "PDF" om te bekijken/downloaden.</p><div id="ba-inv-list" class="ba-list ba-scroll" style="margin-top:10px"><p class="ba-meta">Laden…</p></div></div>';
+    // Facturen & omzet — kies een periode, bekijk de omzet en download alles als Excel.
+    var perOpts='';for(var pm=1;pm<=12;pm++){var lbl=pm+' maand'+(pm===1?'':'en')+(pm===3?' (kwartaal)':(pm===12?' (jaar)':''));perOpts+='<option value="'+pm+'"'+(pm===12?' selected':'')+'>'+lbl+'</option>';}
+    h+='<div class="ba-card" style="margin-top:16px"><h4>Facturen &amp; omzet</h4><p class="ba-meta">Automatisch aangemaakt bij elke betaling. Kies een periode om de omzet te zien; download alle facturen als Excel-bestand.</p>'+
+      '<div class="ba-row" style="gap:10px;align-items:flex-end;flex-wrap:wrap;justify-content:flex-start">'+
+        '<div><label class="ba-f">Periode</label><select id="ba-inv-period" data-act="invperiod" style="width:auto">'+perOpts+'</select></div>'+
+        '<a id="ba-inv-dl" class="ba-btn sm" href="'+api('invoices/export?months=12')+'" target="_blank" rel="noopener" style="text-decoration:none">⬇ Download Excel</a>'+
+        '<a id="ba-inv-vat" class="ba-btn ghost sm" href="'+api('invoices/vat-report?months=12')+'" target="_blank" rel="noopener" style="text-decoration:none">⬇ BTW-overzicht</a></div>'+
+      '<div id="ba-inv-rev" class="ba-card" style="margin-top:12px;text-align:center;background:var(--ba-soft);border:0"><div class="ba-meta" style="margin:0">Omzet in deze periode</div><div class="ba-inv-revval" style="font-size:26px;font-weight:800;margin-top:4px">—</div></div>'+
+      '<div id="ba-inv-list" class="ba-list ba-scroll" style="margin-top:10px"><p class="ba-meta">Laden…</p></div></div>';
+    // Docenten-uitbetaling — lessen + aanwezigheid per docent, optioneel tarief → Excel.
+    h+='<div class="ba-card" style="margin-top:16px"><h4>Docenten-uitbetaling</h4>'+
+      '<p class="ba-meta">Aantal gegeven lessen + boekingen + aanwezigheid per docent over de gekozen periode. Vul optioneel een tarief per les in voor een uitbetalingsbedrag.</p>'+
+      '<div class="ba-row" style="gap:10px;align-items:flex-end;flex-wrap:wrap;justify-content:flex-start">'+
+        '<div><label class="ba-f">Periode</label><select id="ba-pay-period" data-act="payparam" style="width:auto">'+perOpts+'</select></div>'+
+        '<div><label class="ba-f">Tarief per les (€)</label><input id="ba-pay-rate" type="number" step="0.01" min="0" value="0" data-act="payparam" style="width:120px"></div>'+
+        '<a id="ba-pay-dl" class="ba-btn sm" href="'+api('teacher-payout?months=12&rate=0')+'" target="_blank" rel="noopener" style="text-decoration:none">⬇ Download Excel</a></div></div>';
+    // Automatisch overzicht naar de eigenaar (omzet/boekingen/no-shows) per week of maand.
+    var orep=(S.settings&&S.settings.ownerReport)||'off';
+    h+='<div class="ba-card" style="margin-top:16px"><h4>Automatisch rapport</h4>'+
+      '<p class="ba-meta">Ontvang automatisch een overzicht (omzet, boekingen, lessen, no-shows) per e-mail. Werkt zodra e-mail is ingesteld bij Communicatie.</p>'+
+      '<label class="ba-f">Frequentie</label><select data-act="setownerreport" style="width:auto">'+
+        '<option value="off"'+(orep==='off'?' selected':'')+'>Uit</option>'+
+        '<option value="weekly"'+(orep==='weekly'?' selected':'')+'>Wekelijks</option>'+
+        '<option value="monthly"'+(orep==='monthly'?' selected':'')+'>Maandelijks</option></select>'+
+      '<label class="ba-f" style="margin-top:16px">Google-review-link</label>'+
+      '<p class="ba-meta" style="margin:0 0 6px">Plak hier je Google-review-link. Klanten krijgen na hun eerste les automatisch een vriendelijk verzoek om een review. Laat leeg om uit te zetten.</p>'+
+      '<div class="ba-row" style="gap:8px;justify-content:flex-start"><input id="ba-review-url" placeholder="https://g.page/r/..." value="'+esc((S.settings&&S.settings.reviewUrl)||'')+'" style="flex:1;min-width:200px"><button class="ba-btn sm" data-act="savereview">Opslaan</button></div></div>';
     return h;
   }
-  // Load the invoice list into the Facturen card (admin Studio-beheer).
+  // Load the invoice list into the Facturen card (admin Studio-beheer), then show revenue for the period.
   function refreshInvoices(){var box=q('ba-inv-list');if(!box||!projId())return;
     fetch(api('invoices')).then(function(r){return r.json();}).then(function(rows){
-      if(!rows||!rows.length){box.innerHTML='<p class="ba-meta">Nog geen facturen.</p>';return;}
-      box.innerHTML=rows.map(function(i){return '<div class="ba-item"><div class="ba-row"><div><b>'+esc(i.number)+'</b> <span class="ba-meta" style="margin:0">'+esc(i.customerName||i.customerEmail||'')+' · '+esc(i.description||'')+' · €'+i.total+' · '+esc(i.date)+'</span></div>'+
-        '<a class="ba-btn ghost sm" href="'+api('invoice/'+i.id+'/pdf')+'" target="_blank" rel="noopener">⬇ PDF</a></div></div>';}).join('');
+      _invRows=Array.isArray(rows)?rows:[];updateInvPeriod();
     }).catch(function(){box.innerHTML='<p class="ba-meta">Kon facturen niet laden.</p>';});}
+  // Recompute revenue + invoice list + Excel download link for the chosen period (no refetch).
+  function updateInvPeriod(){
+    var box=q('ba-inv-list');if(!box)return;
+    var sel=q('ba-inv-period');var m=sel?(parseInt(sel.value,10)||12):12;
+    var cutoff=new Date();cutoff.setMonth(cutoff.getMonth()-m);cutoff.setHours(0,0,0,0);
+    var rows=(_invRows||[]).filter(function(i){return i.createdAt&&new Date(i.createdAt)>=cutoff;});
+    var total=rows.reduce(function(s,i){return s+(i.total||0);},0);
+    var cur=(rows[0]&&rows[0].currency)||'EUR';var sym=cur==='GBP'?'£':(cur==='USD'?'$':'€');
+    var rev=root.querySelector('.ba-inv-revval');if(rev)rev.textContent=sym+(Math.round(total*100)/100).toFixed(2).replace('.',',')+' · '+rows.length+' facturen';
+    var dl=q('ba-inv-dl');if(dl)dl.setAttribute('href',api('invoices/export?months='+m));
+    var vat=q('ba-inv-vat');if(vat)vat.setAttribute('href',api('invoices/vat-report?months='+m));
+    box.innerHTML=rows.length?rows.map(function(i){return '<div class="ba-item"><div class="ba-row"><div><b>'+esc(i.number)+'</b> <span class="ba-meta" style="margin:0">'+esc(i.customerName||i.customerEmail||'')+' · '+esc(i.description||'')+' · €'+i.total+' · '+esc(i.date)+'</span></div>'+
+      '<a class="ba-btn ghost sm" href="'+api('invoice/'+i.id+'/pdf')+'" target="_blank" rel="noopener">⬇ PDF</a></div></div>';}).join(''):'<p class="ba-meta">Geen facturen in deze periode.</p>';
+  }
 
   // Teacher "Mijn lessen": only own classes + their bookings/attendance.
   function pMijn(){
@@ -447,8 +782,9 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
     var bs=S.bookings.filter(function(b){return b.status==='booked'&&ownIds[b.classId];});
     if(!bs.length)h+='<p class="ba-meta">Nog geen boekingen op jouw lessen.</p>';
     bs.forEach(function(b){var c=S.classes.filter(function(x){return x.id===b.classId;})[0]||{};
-      h+='<div class="ba-item"><div class="ba-row"><span>'+esc(b.name)+' — '+esc(c.title||'?')+' · '+fmtDate(b.date)+' '+esc(c.time||'')+'</span>'+
-         '<button class="ba-btn '+(b.present?'':'ghost')+' sm" data-act="present" data-b="'+b.id+'">'+(b.present?'✓ aanwezig':'markeer aanwezig')+'</button></div></div>';});
+      h+='<div class="ba-item"><div class="ba-row"><span>'+esc(b.name)+(b.noShow?' <span class="ba-badge warn">no-show</span>':'')+' — '+esc(c.title||'?')+' · '+fmtDate(b.date)+' '+esc(c.time||'')+'</span>'+
+         '<div class="ba-row" style="gap:6px"><button class="ba-btn '+(b.present?'':'ghost')+' sm" data-act="present" data-b="'+b.id+'">'+(b.present?'✓ aanwezig':'markeer aanwezig')+'</button>'+
+         '<button class="ba-btn '+(b.noShow?'warn':'ghost')+' sm" data-act="noshow" data-b="'+b.id+'">'+(b.noShow?'✓ no-show':'no-show')+'</button></div></div></div>';});
     h+='</div></div>';
     return h;
   }
@@ -525,6 +861,27 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
         h+='<div class="ba-item"><div class="ba-row"><div><b>'+esc(m.name)+'</b> <span class="ba-badge">'+(m.type==='strippenkaart'?'strippenkaart':'abonnement')+'</span><div class="ba-meta" style="margin:0">'+inhoud+'</div></div>'+
            '<div class="ba-row" style="gap:6px">€ <input type="number" step="0.01" min="0" data-act="memberprice" data-m="'+m.id+'" value="'+(m.price||0)+'" title="Prijs aanpassen" style="width:78px;padding:6px 8px">'+
            '<button class="ba-btn warn sm" data-act="delmember" data-m="'+m.id+'">Verwijderen</button></div></div></div>';
+      });
+      h+='</div></div>';
+      // Discount codes / promos / gift cards
+      var codes=S.codes||[];
+      h+='<div class="ba-card" style="margin-top:16px"><h4>Kortingscode of cadeaubon</h4>'+
+        '<div class="ba-2"><div><label class="ba-f">Code</label><input id="ba-cc" placeholder="bijv. ZOMER10"></div>'+
+        '<div><label class="ba-f">Type</label><select id="ba-ck"><option value="percent">Percentage korting (%)</option><option value="fixed">Vast bedrag (&euro;)</option><option value="gift">Cadeaubon (saldo &euro;)</option></select></div></div>'+
+        '<div class="ba-2"><div><label class="ba-f">Waarde</label><input id="ba-cv" type="number" step="0.01" min="0" value="10"></div>'+
+        '<div><label class="ba-f">Verloopt op (optioneel)</label><input id="ba-ce" type="date"></div></div>'+
+        '<div class="ba-2"><div><label class="ba-f">Max. keer te gebruiken (0 = onbeperkt)</label><input id="ba-cu" type="number" min="0" value="0"></div><div></div></div>'+
+        '<div style="margin-top:12px"><button class="ba-btn" data-act="addcode">Aanmaken</button></div>'+
+        '<p class="ba-note">Percentage = % van het bedrag. Vast bedrag = vaste korting in euro. Cadeaubon = een saldo dat per gebruik wordt afgeschreven. Klanten vullen de code in bij het afrekenen.</p></div>';
+      h+='<div class="ba-card" style="margin-top:16px"><h4>Bestaande codes &mdash; '+codes.length+'</h4><div class="ba-list ba-scroll" style="margin-top:10px">';
+      if(!codes.length)h+='<p class="ba-meta">Nog geen codes.</p>';
+      codes.forEach(function(c){
+        var kindLbl=c.kind==='percent'?(c.value+'% korting'):(c.kind==='fixed'?('&euro;'+c.value+' korting'):('cadeaubon &euro;'+c.value));
+        var saldo=c.kind==='gift'?(' &middot; saldo &euro;'+c.balance):'';
+        var lim=(c.maxUses>0?(c.uses+'/'+c.maxUses+' gebruikt'):(c.uses+'x gebruikt'));
+        var exp=c.expiresAt?(' &middot; t/m '+esc(c.expiresAt)):'';
+        h+='<div class="ba-item"><div class="ba-row"><div><b>'+esc(c.code)+'</b> <span class="ba-badge">'+kindLbl+'</span><div class="ba-meta" style="margin:0">'+lim+saldo+exp+'</div></div>'+
+           '<button class="ba-btn warn sm" data-act="delcode" data-c="'+c.id+'">Verwijderen</button></div></div>';
       });
       h+='</div></div>';
     }
@@ -672,15 +1029,116 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
     return h;
   }
 
-  var PANELS={boeken:pBoeken,agenda:pMijnAgenda,dashboard:pClientDash,studio:pStudio,mijn:pMijn,docenten:pDocenten,leden:pLeden,comm:pComm,koppel:pKoppel};
+  // ── Video's-tab ──
+  function catLabel(c){var m={yoga:'Yoga',mindfulness:'Mindfulness',pilates:'Pilates'};return m[c]||c;}
+  var VIDCATS=[['yoga','Yoga'],['mindfulness','Mindfulness'],['pilates','Pilates']];
+  function planFor(cat){return ((S.videoPlans||[]).filter(function(p){return p.category===cat;})[0])||null;}
+  function vidAccess(cat){return ((S.videoAccess||[]).filter(function(a){return a&&a.category===cat;})[0])||null;}
+  // Which program-week is unlocked for a subscriber, counting from their start date (week 1 = day 0).
+  function weeksSince(startYmd){if(!startYmd)return 1;var t=new Date(startYmd+'T00:00:00').getTime();if(isNaN(t))return 1;var w=Math.floor((Date.now()-t)/(7*86400000))+1;return w<1?1:w;}
+  // The date a given week unlocks for a subscriber who started on startYmd.
+  function unlockYmd(startYmd,wk){var base=startYmd?new Date(startYmd+'T00:00:00').getTime():Date.now();return ymd(new Date(base+((wk-1)*7*86400000)));}
+  // Embed a video link: YouTube/Vimeo → iframe; direct file → <video>; else a link.
+  function videoEmbed(url){var u=String(url||'');
+    var yt=u.match(/(?:youtube\\.com\\/(?:watch\\?v=|embed\\/)|youtu\\.be\\/)([\\w-]{6,})/);
+    if(yt)return '<iframe src="https://www.youtube.com/embed/'+yt[1]+'" style="width:100%;aspect-ratio:16/9;border:0;border-radius:12px" allowfullscreen allow="accelerometer;encrypted-media;picture-in-picture"></iframe>';
+    var vm=u.match(/vimeo\\.com\\/(\\d+)/);
+    if(vm)return '<iframe src="https://player.vimeo.com/video/'+vm[1]+'" style="width:100%;aspect-ratio:16/9;border:0;border-radius:12px" allowfullscreen></iframe>';
+    if(/\\.(mp4|webm|ogg|mov)(\\?|$)/i.test(u))return '<video controls src="'+esc(u)+'" style="width:100%;aspect-ratio:16/9;border-radius:12px;background:#000"></video>';
+    return '<a href="'+esc(u)+'" target="_blank" rel="noopener" style="color:var(--ba);font-weight:600">Video openen ↗</a>';
+  }
+  function pVideos(){
+    var isStaff=S.session&&(S.session.role==='admin'||S.session.role==='teacher');
+    var vids=(S.videos||[]).filter(function(v){return v.category===videoCat;});
+    var tabs=VIDCATS.map(function(c){return '<button class="ba-btn '+(c[0]===videoCat?'':'ghost ')+'sm" data-act="vidcat" data-c="'+c[0]+'">'+c[1]+'</button>';}).join(' ');
+    var h='<div class="ba-row" style="gap:8px;margin-bottom:14px;justify-content:flex-start;flex-wrap:wrap">'+tabs+'</div>';
+    var plan=planFor(videoCat);
+    var acc=vidAccess(videoCat);
+    var hasAccess=isStaff||!!acc;
+    var curWeek=acc?weeksSince(acc.startedAt):0; // ontgrendelde week voor deze abonnee (staf ziet alles)
+    var gated=plan&&plan.price>0&&!hasAccess; // betaalde categorie + geen toegang → afgeschermd
+    if(plan&&plan.price>0){
+      h+='<div class="ba-card" style="margin-bottom:14px"><div class="ba-row"><div><b>Abonnement '+esc(catLabel(videoCat))+'</b><div class="ba-meta" style="margin:0">Toegang tot alle '+esc(catLabel(videoCat))+'-videos</div></div><span class="ba-badge ok">&euro;'+plan.price+' /maand</span></div>'+
+        (hasAccess?(isStaff?'':'<div style="margin-top:8px"><span class="ba-note" style="color:#15803d">&#10003; Je bent geabonneerd (loopt maandelijks door).</span> <button class="ba-btn ghost sm" data-act="cancelvideo" data-c="'+videoCat+'">Opzeggen</button></div>'):'<div style="margin-top:10px"><button class="ba-btn sm" data-act="subvideo" data-c="'+videoCat+'">Abonneer je &mdash; &euro;'+plan.price+'/maand</button></div>')+'</div>';
+    }
+    var sorted=vids.slice().sort(function(a,b){return ((a.weekNo||1)-(b.weekNo||1))||(a.id-b.id);});
+    h+='<div class="ba-grid">';
+    if(!vids.length)h+='<p class="ba-meta">Nog geen videos in deze categorie.</p>';
+    else if(gated)h+='<div class="ba-card"><p class="ba-meta" style="margin:0">&#128274; '+vids.length+' video(s) in deze categorie. Abonneer je hierboven om ze te bekijken.</p></div>';
+    else sorted.forEach(function(v){var wk=v.weekNo||1;var badge='<span class="ba-badge">Week '+wk+'</span>';
+      if(isStaff){h+='<div class="ba-card"><div class="ba-row" style="margin-bottom:8px"><h4 style="margin:0">'+esc(v.title)+' '+badge+'</h4><button class="ba-btn ghost sm" data-act="delvideo" data-v="'+v.id+'">Verwijderen</button></div>'+videoEmbed(v.url)+'</div>';return;}
+      if(wk<=curWeek){h+='<div class="ba-card"><div class="ba-row" style="margin-bottom:8px"><h4 style="margin:0">'+esc(v.title)+' '+badge+'</h4></div>'+videoEmbed(v.url)+'</div>';}
+      else h+='<div class="ba-card"><div class="ba-row"><div><b>'+esc(v.title)+'</b> '+badge+'<div class="ba-meta" style="margin:2px 0 0">&#128274; Beschikbaar vanaf '+fmtDate(unlockYmd(acc.startedAt,wk))+'</div></div></div></div>';
+    });
+    h+='</div>';
+    if(isStaff){
+      h+='<div class="ba-card" style="margin-top:16px"><h4>Video toevoegen ('+esc(catLabel(videoCat))+')</h4>'+
+        '<label class="ba-f">Titel</label><input id="ba-vt" placeholder="bijv. Ochtend-flow 20 min">'+
+        '<label class="ba-f">Video-link (YouTube, Vimeo of MP4-URL)</label><input id="ba-vu" placeholder="https://youtu.be/...">'+
+        '<label class="ba-f">Week (ontgrendelt deze week ná de startdatum van de abonnee)</label><input id="ba-vw" type="number" min="1" value="1">'+
+        '<div style="margin-top:12px"><button class="ba-btn" data-act="addvideo">Toevoegen</button></div>'+
+        '<div id="ba-vid-out" class="ba-note" style="margin-top:8px"></div></div>';
+      h+='<div class="ba-card" style="margin-top:16px"><h4>Abonnementsprijs '+esc(catLabel(videoCat))+'</h4>'+
+        '<p class="ba-meta">Wat kost toegang tot alle '+esc(catLabel(videoCat))+'-videos per maand?</p>'+
+        '<label class="ba-f">Prijs (&euro; /maand)</label><input id="ba-vp" type="number" step="0.01" value="'+((plan&&plan.price)||0)+'">'+
+        '<p class="ba-note" style="margin:6px 0 0">Het abonnement loopt automatisch maandelijks door tot de klant zelf opzegt.</p>'+
+        '<div style="margin-top:12px"><button class="ba-btn sm" data-act="savevideoplan">Opslaan</button></div>'+
+        '<div id="ba-vplan-out" class="ba-note" style="margin-top:8px"></div></div>';
+    }
+    return h;
+  }
+  // Client-only "Abonnementen" tab: lijst van lopende (maandelijkse) abonnementen met opzeg-knop.
+  function pSubs(){
+    var subs=S.mySubs||[];
+    var h='<div class="ba-row" style="margin-bottom:14px"><div class="ba-meta" style="margin:0">Je lopende abonnementen \\u2014 hier zeg je ze op.</div></div>';
+    if(!subs.length)return h+'<p class="ba-meta">Je hebt geen lopende abonnementen.</p>';
+    h+='<div class="ba-list">';
+    subs.forEach(function(s){
+      if(s.kind==='video')h+='<div class="ba-item"><div class="ba-row"><div><b>Videos: '+esc(catLabel(s.category))+'</b><div class="ba-meta" style="margin:0">Maandelijks abonnement'+(s.validUntil?(' \\u00b7 geldig t/m '+esc(s.validUntil)):'')+'</div></div><button class="ba-btn warn sm" data-act="cancelvideo" data-c="'+esc(s.category)+'">Opzeggen</button></div></div>';
+      else h+='<div class="ba-item"><div class="ba-row"><div><b>Lessen: '+esc(s.name||'Abonnement')+'</b><div class="ba-meta" style="margin:0">Maandelijks abonnement</div></div><button class="ba-btn warn sm" data-act="cancelmembership" data-s="'+esc(s.subscription)+'">Opzeggen</button></div></div>';
+    });
+    return h+'</div>';
+  }
+  // Admin-only statistieken: omzet + bezetting, berekend uit de al-geladen data (S).
+  function pStats(){
+    var nowM=ymd(new Date()).slice(0,7),today=ymd(new Date());
+    var purch=S.purchases||[],bookings=S.bookings||[],classes=S.classes||[],counts=S.counts||{};
+    var clients=(S.accounts||[]).filter(function(a){return a.role==='client';});
+    var revTotal=0,revMonth=0,byType={};
+    purch.forEach(function(p){if(p.refunded)return;var amt=p.amount||0;revTotal+=amt;if((p.date||'').slice(0,7)===nowM)revMonth+=amt;var t=p.type||'overig';byType[t]=(byType[t]||0)+amt;});
+    bookings.forEach(function(b){if(b.payment==='stripe'&&b.amount&&!b.refunded){revTotal+=b.amount;if((b.date||'').slice(0,7)===nowM)revMonth+=b.amount;byType['losse les']=(byType['losse les']||0)+b.amount;}});
+    var booked=bookings.filter(function(b){return b.status==='booked';});
+    var upcoming=booked.filter(function(b){return (b.date||'')>=today;});
+    var bookedMonth=booked.filter(function(b){return (b.date||'').slice(0,7)===nowM;});
+    var capSum=0,bookSum=0;
+    classes.forEach(function(c){if((c.date||'')>=today){capSum+=(c.cap||0);var k=c.id+'|'+c.date;bookSum+=(counts[k]&&counts[k].booked)||0;}});
+    var occ=capSum>0?Math.round(bookSum/capSum*100):0;
+    var noShowMonth=bookings.filter(function(b){return b.noShow&&(b.date||'').slice(0,7)===nowM;}).length;
+    var byClass={};booked.forEach(function(b){byClass[b.classId]=(byClass[b.classId]||0)+1;});
+    var top=Object.keys(byClass).map(function(id){return {title:classMeta(parseInt(id,10)||id).title,n:byClass[id]};}).sort(function(a,b){return b.n-a.n;}).slice(0,5);
+    function eur(n){return '\\u20ac'+(Math.round(n*100)/100).toFixed(2).replace('.',',');}
+    function stat(label,val){return '<div class="ba-card" style="text-align:center"><div class="ba-meta" style="margin:0">'+label+'</div><div style="font-size:24px;font-weight:800;margin-top:4px">'+val+'</div></div>';}
+    var h='<div class="ba-grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:16px">';
+    h+=stat('Omzet totaal',eur(revTotal))+stat('Omzet deze maand',eur(revMonth))+stat('Boekingen deze maand',bookedMonth.length)+stat('Aankomende boekingen',upcoming.length)+stat('Actieve klanten',clients.length)+stat('Gem. bezetting (komend)',occ+'%')+stat('No-shows deze maand',noShowMonth);
+    h+='</div>';
+    h+='<div class="ba-card"><h4>Omzet per type</h4><div class="ba-list" style="margin-top:8px">';
+    var types=Object.keys(byType);if(!types.length)h+='<p class="ba-meta">Nog geen omzet.</p>';
+    types.forEach(function(t){h+='<div class="ba-item"><div class="ba-row"><span>'+esc(t)+'</span><b>'+eur(byType[t])+'</b></div></div>';});
+    h+='</div></div>';
+    h+='<div class="ba-card" style="margin-top:16px"><h4>Drukste lessen (op boekingen)</h4><div class="ba-list" style="margin-top:8px">';
+    if(!top.length)h+='<p class="ba-meta">Nog geen boekingen.</p>';
+    top.forEach(function(t){h+='<div class="ba-item"><div class="ba-row"><span>'+esc(t.title)+'</span><span class="ba-badge ok">'+t.n+' boekingen</span></div></div>';});
+    return h+'</div></div>';
+  }
+  var PANELS={boeken:pBoeken,agenda:pMijnAgenda,dashboard:pClientDash,studio:pStudio,mijn:pMijn,docenten:pDocenten,leden:pLeden,comm:pComm,koppel:pKoppel,videos:pVideos,abos:pSubs,stats:pStats};
   function tabsFor(role){
-    if(role==='admin'){var t=[['boeken','Lessen boeken'],['studio','Studio-beheer'],['docenten','Docenten']];if(S.pay.tegoed)t.push(['leden','Lidmaatschappen']);t.push(['comm','Communicatie'],['koppel','Integraties']);return t;}
-    if(role==='teacher')return [['agenda','Mijn agenda'],['mijn','Mijn lessen'],['boeken','Lessen boeken']];
-    var c=[['dashboard','Mijn lessen'],['boeken','Lessen boeken']];if(S.pay.tegoed)c.push(['leden','Mijn strippenkaart']);return c; // client
+    if(role==='admin'){var t=[['boeken','Lessen boeken'],['studio','Studio-beheer'],['docenten','Docenten']];if(S.pay.tegoed)t.push(['leden','Lidmaatschappen']);t.push(['videos','Videos'],['stats','Statistieken'],['comm','Communicatie'],['koppel','Integraties']);return t;}
+    if(role==='teacher')return [['agenda','Mijn agenda'],['mijn','Mijn lessen'],['boeken','Lessen boeken'],['videos','Videos']];
+    var c=[['dashboard','Mijn lessen'],['boeken','Lessen boeken']];if(S.pay.tegoed)c.push(['leden','Mijn strippenkaart']);c.push(['videos','Videos'],['abos','Abonnementen']);return c; // client
   }
   function toast(msg){var o=root.querySelector('#ba-comm-out');if(o)o.textContent=msg;}
   function q(id){return root.querySelector('#'+id);}
-  function projId(){var m=(location.pathname||'').match(/projects\\/(\\d+)/);return m?m[1]:'';}
+  function projId(){try{if(window.__BA_PID__)return String(window.__BA_PID__);}catch(e){}var m=(location.pathname||'').match(/projects\\/(\\d+)/);return m?m[1]:'';}
   function api(p){return '/api/projects/'+projId()+'/'+p;}
   // ── Server API (step 3: booking data moves server-side). Only the SESSION TOKEN is kept in
   // localStorage — never accounts/passwords/bookings. These helpers are wired into the UI in 3b. ──
@@ -692,16 +1150,24 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
   function spost(p,bodyObj){return fetch(sapi(p),{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+srvToken()},body:JSON.stringify(bodyObj||{})}).then(function(r){return r.json().then(function(d){return{ok:r.ok,status:r.status,d:d};}).catch(function(){return{ok:r.ok,status:r.status,d:{}};});});}
   function sdel(p){return fetch(sapi(p),{method:'DELETE',headers:{'Authorization':'Bearer '+srvToken()}}).then(function(r){return r.json().then(function(d){return{ok:r.ok,status:r.status,d:d};}).catch(function(){return{ok:r.ok,status:r.status,d:{}};});});}
   // Map a server booking/state into the in-memory S object (render functions keep reading S as before).
-  function srvBk(b){return {id:b.id,classId:b.classId,date:b.date,bookerEmail:b.bookerEmail,name:b.name,status:b.status,payment:b.payment,usedCredit:!!b.usedCredit,usedMonthly:!!b.usedMonthly,present:!!b.present,amount:b.amount,paymentIntent:b.paymentIntent,refunded:!!b.refunded,refundedAmount:b.refundedAmount};}
+  function srvBk(b){return {id:b.id,classId:b.classId,date:b.date,bookerEmail:b.bookerEmail,name:b.name,status:b.status,payment:b.payment,usedCredit:!!b.usedCredit,usedMonthly:!!b.usedMonthly,present:!!b.present,noShow:!!b.noShow,amount:b.amount,paymentIntent:b.paymentIntent,refunded:!!b.refunded,refundedAmount:b.refundedAmount};}
   function applyServerState(d){
     if(!d)return;
     S.session=d.user?{email:d.user.email,role:d.user.role,name:d.user.name}:null;
-    S.classes=(d.classes||[]).map(function(c){return {id:c.id,title:c.title,teacherEmail:c.teacherEmail,teacher:c.teacher,date:c.date,time:c.time,cap:c.cap,price:c.price,mode:c.mode,onlineLink:c.onlineLink,onlineInfo:c.onlineInfo,bookDays:c.bookDays,cancelHours:c.cancelHours,recurring:false};});
+    S.classes=(d.classes||[]).map(function(c){return {id:c.id,title:c.title,teacherEmail:c.teacherEmail,teacher:c.teacher,date:c.date,time:c.time,cap:c.cap,price:c.price,mode:c.mode,onlineLink:c.onlineLink,onlineInfo:c.onlineInfo,bookDays:c.bookDays,cancelHours:c.cancelHours,locationId:c.locationId||0,recurring:false};});
     S.members=(d.members||[]).map(function(m){return {id:m.id,name:m.name,type:m.type,unlimited:m.unlimited,credits:m.credits,price:m.price,validDays:m.validDays,recurring:m.recurring};});
     S.counts=d.counts||{};
     S.myBookings=(d.myBookings||[]).map(srvBk);
     S.bookings=(d.bookings||[]).map(srvBk);   // admin/teacher: alle; klant: leeg (privacy → counts gebruikt)
     S.purchases=d.purchases||[];
+    S.videos=d.videos||[];
+    S.videoPlans=d.videoPlans||[];
+    S.videoAccess=d.videoAccess||[];
+    S.mySubs=d.mySubs||[];
+    S.codes=d.codes||[];
+    S.locations=d.locations||[];
+    S.settings=d.settings||{ownerReport:'off',reviewUrl:''};
+    S.subscribers=d.subscribers||[];
     S.accounts=d.users?d.users.map(function(u){return {role:u.role,name:u.name,email:u.email,phone:u.phone};}):(d.user?[{role:d.user.role,name:d.user.name,email:d.user.email,phone:d.user.phone}]:[]);
     S.wallets={};
     if(d.user&&d.wallet){var nowM=ymd(new Date()).slice(0,7);S.wallets[d.user.email]={credits:d.wallet.credits||0,membership:d.wallet.membership||null,unlimited:!!d.wallet.unlimited,monthly:(d.wallet.monthlyLimit!=null?{limit:d.wallet.monthlyLimit,remaining:d.wallet.monthlyRemaining,period:nowM}:null),validUntil:d.wallet.validUntil||null,needsPayment:!!d.wallet.needsPayment};}
@@ -753,7 +1219,7 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
     if(authView==='register'){
       var act=getAct();
       var banner=act?'<div class="ba-note" style="background:#ecfdf5;border:1px solid #a7f3d0;color:#065f46;padding:10px 12px;border-radius:8px;margin-bottom:12px">Je gegevens zijn gevonden. Maak een wachtwoord aan om je strippenkaart/abonnement te activeren.</div>':'';
-      return '<div class="ba-auth"><h2>Account aanmaken</h2><p class="ba-meta">Maak een account om lessen te boeken.</p>'+
+      return '<div class="ba-auth"><div class="ba-row" style="justify-content:flex-end;margin-bottom:4px">'+langSelect()+'</div><h2>Account aanmaken</h2><p class="ba-meta">Maak een account om lessen te boeken.</p>'+
         '<div class="ba-card" style="max-width:400px">'+banner+'<label class="ba-f">Naam</label><input id="rg-n" placeholder="Voor- en achternaam" value="'+esc((act&&act.name)||'')+'">'+
         '<label class="ba-f">E-mailadres</label><input id="rg-e" type="email" placeholder="naam@voorbeeld.nl" value="'+esc((act&&act.email)||'')+'"'+(act&&act.email?' readonly style="background:#f3f4f6"':'')+'>'+
         '<label class="ba-f">Telefoonnummer</label><input id="rg-tel" type="tel" placeholder="06 12345678" value="'+esc((act&&act.phone)||'')+'">'+
@@ -771,7 +1237,7 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
     }
     var noStaff=!S.accounts.some(function(a){return a.role==='admin'||a.role==='teacher';});
     var actBanner=activationMsg?'<div class="ba-note" style="background:#ecfdf5;border:1px solid #a7f3d0;color:#065f46;padding:10px 12px;border-radius:8px;margin-bottom:12px">'+esc(activationMsg)+'</div>':'';
-    return '<div class="ba-auth"><h2>Inloggen</h2><p class="ba-meta">Log in om verder te gaan.</p>'+
+    return '<div class="ba-auth"><div class="ba-row" style="justify-content:flex-end;margin-bottom:4px">'+langSelect()+'</div><h2>Inloggen</h2><p class="ba-meta">Log in om verder te gaan.</p>'+
       '<div class="ba-card" style="max-width:400px">'+actBanner+'<label class="ba-f">E-mailadres</label><input id="lg-e" type="email" placeholder="naam@voorbeeld.nl" value="'+esc(activationEmail||'')+'">'+
       '<label class="ba-f">Wachtwoord</label><input id="lg-p" type="password">'+
       '<div style="margin-top:14px"><button class="ba-btn" data-act="login">Inloggen</button></div>'+
@@ -784,11 +1250,12 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
     var u=S.session,tabs=tabsFor(u.role);
     if(!tabs.some(function(t){return t[0]===activeTab;}))activeTab=tabs[0][0];
     var tb=tabs.map(function(t){return '<button class="ba-tab'+(t[0]===activeTab?' is-on':'')+'" data-tab="'+t[0]+'">'+t[1]+'</button>';}).join('');
-    return '<div class="ba-row" style="margin-bottom:14px"><div><div class="ba-h" style="font-size:22px">Boekingen</div><div class="ba-meta" style="margin:0">Ingelogd als '+esc(u.name)+'</div></div><button class="ba-btn ghost sm" data-act="logout">Uitloggen</button></div>'+
+    return '<div class="ba-row" style="margin-bottom:14px"><div><div class="ba-h" style="font-size:22px">Boekingen</div><div class="ba-meta" style="margin:0">Ingelogd als '+esc(u.name)+'</div></div><div class="ba-row" style="gap:8px">'+langSelect()+'<button class="ba-btn ghost sm" data-act="logout">Uitloggen</button></div></div>'+
       '<div class="ba-tabs">'+tb+'</div><div class="ba-host"></div>';
   }
-  function renderHost(){var host=root.querySelector('.ba-host');if(host){host.innerHTML=(PANELS[activeTab]||pBoeken)();if(activeTab==='koppel'){refreshStripeStatus();refreshInvoiceSettings();refreshImportStatus();}if(activeTab==='comm')refreshEmailStatus();if(activeTab==='studio')refreshInvoices();}}
+  function renderHost(){var host=root.querySelector('.ba-host');if(host){host.innerHTML=(PANELS[activeTab]||pBoeken)();if(activeTab==='koppel'){refreshStripeStatus();refreshInvoiceSettings();refreshImportStatus();}if(activeTab==='comm')refreshEmailStatus();if(activeTab==='studio')refreshInvoices();translateDOM(host);}}
   function render(){
+    initI18n();
     var sc=!S.session?'login':'app';
     ['login','app'].forEach(function(name){
       var el=root.querySelector('[data-screen="'+name+'"]');if(!el)return;
@@ -796,6 +1263,7 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
       if(name===sc)el.innerHTML=name==='login'?vAuth():vApp();
     });
     if(sc==='app')renderHost();
+    translateDOM(root);
   }
 
   // ---------- events ----------
@@ -804,11 +1272,16 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
     // Payment choice changes the action button: Stripe => "Kopen" (pay per class), else "Boeken".
     if(tg.classList&&tg.classList.contains('ba-pay')){
       var row=tg.closest('.ba-row');var bb=row&&row.querySelector('[data-act="book"]');
-      if(bb)bb.textContent=(tg.value==='stripe')?'Kopen':'Boeken';
+      if(bb)bb.textContent=tr((tg.value==='stripe')?'Kopen':'Boeken');
       return;
     }
     var a=tg.closest&&tg.closest('[data-act]');if(!a)return;
     var act=a.getAttribute('data-act');
+    if(act==='setlang'){lang=a.value;setLangPref(lang);applyDateLang();render();return;}
+    if(act==='setbookloc'){bookLoc=a.value;renderHost();return;}
+    if(act==='invperiod'){updateInvPeriod();return;}
+    if(act==='payparam'){var pm=q('ba-pay-period'),rt=q('ba-pay-rate');var pmM=pm?(parseInt(pm.value,10)||12):12;var pmR=rt?Math.max(0,parseFloat(rt.value)||0):0;var pdl=q('ba-pay-dl');if(pdl)pdl.setAttribute('href',api('teacher-payout?months='+pmM+'&rate='+pmR));return;}
+    if(act==='setownerreport'){if(!S.settings)S.settings={};S.settings.ownerReport=a.value;spost('settings',{ownerReport:a.value}).then(function(r){if(!r.ok)alert((r.d&&r.d.error)||'Opslaan mislukt.');});return;}
     if(act==='moveto'){
       var bid=a.getAttribute('data-b'),parts=a.value.split('|');
       var bk=S.bookings.filter(function(b){return b.id===bid;})[0];
@@ -921,7 +1394,7 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
         else if(bc.type==='monthly'){MW.monthly.remaining--;usedMonthly=true;} // X/maand: maandtegoed eraf
         // unlimited abonnement = geen aftrek
       }
-      var nb={id:uid(),classId:cid,date:date,name:(S.session&&S.session.name)||'Gast',bookerEmail:myEmail(),status:act==='book'?'booked':'waitlist',payment:pay,usedCredit:usedCredit,usedMonthly:usedMonthly,present:false};
+      var nb={id:uid(),classId:cid,date:date,name:(S.session&&S.session.name)||'Gast',bookerEmail:myEmail(),status:act==='book'?'booked':'waitlist',payment:pay,usedCredit:usedCredit,usedMonthly:usedMonthly,present:false,noShow:false};
       S.bookings.push(nb);
       if(act==='book'){var cm=classMeta(cid);notify('booking',myEmail(),{name:nb.name,classTitle:cm.title,date:date,time:cm.time,bookingId:nb.id,mode:cm.mode,onlineLink:cm.link,onlineInfo:cm.info});}
       save();renderHost();return;
@@ -954,9 +1427,11 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
       var cbook=Math.max(0,parseInt(q('ba-cbook')?q('ba-cbook').value:'0',10)||0);
       var ccancel=Math.max(0,parseInt(q('ba-ccancel')?q('ba-ccancel').value:'0',10)||0);
       var ccap=Math.max(1,parseInt(q('ba-cc').value,10)||12),cprice=Math.max(0,parseFloat(q('ba-cp')?q('ba-cp').value:'0')||0),ctime=q('ba-ctm').value||'09:00';
-      if(SRV){spost('classes',{title:title,teacherEmail:temail,date:cdate,time:ctime,cap:ccap,price:cprice,mode:cmode,onlineLink:clink,onlineInfo:cinfo,bookDays:cbook,cancelHours:ccancel}).then(function(r){
+      var cweeks=Math.min(52,Math.max(1,parseInt(q('ba-cweeks')?q('ba-cweeks').value:'1',10)||1));
+      var cloc=Math.max(0,parseInt(q('ba-cloc')?q('ba-cloc').value:'0',10)||0);
+      if(SRV){spost('classes',{title:title,teacherEmail:temail,date:cdate,time:ctime,cap:ccap,price:cprice,mode:cmode,onlineLink:clink,onlineInfo:cinfo,bookDays:cbook,cancelHours:ccancel,repeatWeeks:cweeks,locationId:cloc}).then(function(r){
         if(!r.ok){alert((r.d&&r.d.error)||'Les toevoegen mislukt.');return;}refreshAndRender().then(syncCalendar);});return;}
-      S.classes.push({id:uid(),title:title,teacherEmail:temail,teacher:accName(temail),date:cdate,time:ctime,cap:ccap,price:cprice,mode:cmode,onlineLink:clink,onlineInfo:cinfo,bookDays:cbook,cancelHours:ccancel,recurring:false});
+      for(var wi=0;wi<cweeks;wi++){var wd=new Date(cdate+'T00:00:00');wd.setDate(wd.getDate()+wi*7);S.classes.push({id:uid(),title:title,teacherEmail:temail,teacher:accName(temail),date:ymd(wd),time:ctime,cap:ccap,price:cprice,mode:cmode,onlineLink:clink,onlineInfo:cinfo,bookDays:cbook,cancelHours:ccancel,locationId:cloc,recurring:false});}
       save();renderHost();syncCalendar();return;}
     if(act==='delclass'){var id=a.getAttribute('data-c');
       if(SRV){sdel('classes/'+id).then(function(r){if(!r.ok){alert((r.d&&r.d.error)||'Verwijderen mislukt.');return;}refreshAndRender().then(syncCalendar);});return;}
@@ -964,9 +1439,12 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
     if(act==='present'){var bid2=a.getAttribute('data-b');
       if(SRV){spost('present',{bookingId:bid2}).then(function(r){if(r.ok)refreshAndRender();});return;}
       var b2=S.bookings.filter(function(b){return b.id===bid2;})[0];if(b2)b2.present=!b2.present;save();renderHost();return;}
+    if(act==='noshow'){var bid3=a.getAttribute('data-b');
+      if(SRV){spost('noshow',{bookingId:bid3}).then(function(r){if(r.ok)refreshAndRender();});return;}
+      var b3=S.bookings.filter(function(b){return b.id===bid3;})[0];if(b3){b3.noShow=!b3.noShow;if(b3.noShow)b3.present=false;}save();renderHost();return;}
     if(act==='buy'){var m=S.members.filter(function(x){return x.id==a.getAttribute('data-m');})[0];if(!m)return;
       // Pay via Stripe; the strippenkaart/abonnement is granted on return (server-mode: /studio/stripe/finalize).
-      payViaStripe(m.type,m.name,m.price,{kind:'buy',memberId:m.id,bookerEmail:myEmail()});
+      payWithCode(m.type,m.name,m.price,{kind:'buy',memberId:m.id,bookerEmail:myEmail()});
       return;}
     if(act==='addmember'){var nm=q('ba-mn').value.trim();if(!nm){alert('Geef een naam op.');return;}
       var type=q('ba-mt').value;var lim=q('ba-ml')?q('ba-ml').value:'aantal';var lessons=parseInt(q('ba-mc').value,10)||0;
@@ -1025,6 +1503,42 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
     if(act==='delmember'){var mid=a.getAttribute('data-m');
       if(SRV){sdel('members/'+mid).then(function(r){if(r.ok)refreshAndRender();});return;}
       S.members=S.members.filter(function(x){return x.id!==mid;});save();renderHost();return;}
+
+    // Kortingscodes / cadeaubonnen (alleen admin, server-mode)
+    if(act==='addcode'){var ccode=(q('ba-cc')||{value:''}).value.trim();if(!ccode){alert('Geef een code op.');return;}
+      var ckind=(q('ba-ck')||{value:'percent'}).value,cval=parseFloat((q('ba-cv')||{value:'0'}).value)||0,cexp=(q('ba-ce')||{value:''}).value,cmax=parseInt((q('ba-cu')||{value:'0'}).value,10)||0;
+      spost('codes',{code:ccode,kind:ckind,value:cval,expiresAt:cexp,maxUses:cmax}).then(function(r){if(!r.ok){alert((r.d&&r.d.error)||'Aanmaken mislukt.');return;}refreshAndRender();});return;}
+    if(act==='delcode'){var cid=a.getAttribute('data-c');if(!confirm('Deze code verwijderen?'))return;
+      sdel('codes/'+cid).then(function(r){if(r.ok)refreshAndRender();});return;}
+
+    // Locaties (alleen admin, server-mode)
+    if(act==='addloc'){var ln=(q('ba-locn')||{value:''}).value.trim();if(!ln){alert('Geef een naam op.');return;}
+      var la=(q('ba-loca')||{value:''}).value.trim();
+      spost('locations',{name:ln,address:la}).then(function(r){if(!r.ok){alert((r.d&&r.d.error)||'Opslaan mislukt.');return;}refreshAndRender();});return;}
+    if(act==='savereview'){var ru=(q('ba-review-url')||{value:''}).value.trim();if(!S.settings)S.settings={};S.settings.reviewUrl=ru;
+      spost('settings',{reviewUrl:ru}).then(function(r){if(r.ok)alert('Opgeslagen.');else alert((r.d&&r.d.error)||'Opslaan mislukt.');});return;}
+    if(act==='delloc'){var lid=a.getAttribute('data-l');if(!confirm('Deze locatie verwijderen? Lessen op deze locatie houden geen specifieke locatie meer.'))return;
+      sdel('locations/'+lid).then(function(r){if(r.ok)refreshAndRender();});return;}
+
+    // Video's-tab
+    if(act==='vidcat'){videoCat=a.getAttribute('data-c')||'yoga';renderHost();return;}
+    if(act==='addvideo'){var vt=(q('ba-vt')||{value:''}).value.trim(),vu=(q('ba-vu')||{value:''}).value.trim(),vw=parseInt((q('ba-vw')||{value:'1'}).value,10)||1,vo=q('ba-vid-out');
+      if(!vt||!vu){if(vo){vo.style.color='#b91c1c';vo.textContent='Vul een titel en een video-link in.';}return;}
+      if(SRV){spost('videos',{category:videoCat,title:vt,url:vu,weekNo:vw}).then(function(r){if(!r.ok){if(vo){vo.style.color='#b91c1c';vo.textContent=(r.d&&r.d.error)||'Toevoegen mislukt.';}return;}refreshAndRender();});return;}
+      if(!S.videos)S.videos=[];S.videos.push({id:uid(),category:videoCat,title:vt,url:vu,weekNo:vw});save();renderHost();return;}
+    if(act==='delvideo'){var dvid=a.getAttribute('data-v');
+      if(SRV){sdel('videos/'+dvid).then(function(r){if(r.ok)refreshAndRender();});return;}
+      S.videos=(S.videos||[]).filter(function(x){return String(x.id)!==String(dvid);});save();renderHost();return;}
+    if(act==='savevideoplan'){var vpr=parseFloat((q('ba-vp')||{value:'0'}).value)||0,vdy=parseInt((q('ba-vd')||{value:'30'}).value,10)||30,vpo=q('ba-vplan-out');
+      if(SRV){spost('video-plan',{category:videoCat,price:vpr,validDays:vdy}).then(function(r){if(!r.ok){if(vpo){vpo.style.color='#b91c1c';vpo.textContent=(r.d&&r.d.error)||'Opslaan mislukt.';}return;}if(vpo){vpo.style.color='#15803d';vpo.textContent='Opgeslagen \\u2713';}refreshAndRender();});return;}
+      if(!S.videoPlans)S.videoPlans=[];var vix=S.videoPlans.map(function(p){return p.category;}).indexOf(videoCat);if(vix>=0)S.videoPlans[vix]={category:videoCat,price:vpr,validDays:vdy};else S.videoPlans.push({category:videoCat,price:vpr,validDays:vdy});save();renderHost();return;}
+    if(act==='subvideo'){var scat=a.getAttribute('data-c')||videoCat;var sp=planFor(scat);
+      if(!sp||!(sp.price>0)){alert('Voor deze categorie is nog geen abonnementsprijs ingesteld.');return;}
+      payWithCode('abonnement','Video-abonnement '+catLabel(scat),sp.price,{kind:'video',category:scat,bookerEmail:myEmail()});return;}
+    if(act==='cancelvideo'){if(!confirm('Je video-abonnement opzeggen? Je houdt toegang tot het einde van de betaalde periode.'))return;
+      spost('video-cancel',{category:a.getAttribute('data-c')||videoCat}).then(function(r){if(!r.ok){alert((r.d&&r.d.error)||'Opzeggen mislukt.');return;}alert('Opgezegd. Je houdt toegang tot het einde van de periode.');refreshAndRender();});return;}
+    if(act==='cancelmembership'){if(!confirm('Je lessen-abonnement opzeggen? Je houdt toegang tot het einde van de betaalde periode.'))return;
+      spost('cancel-membership',{subscription:a.getAttribute('data-s')}).then(function(r){if(!r.ok){alert((r.d&&r.d.error)||'Opzeggen mislukt.');return;}alert('Opgezegd. Je houdt toegang tot het einde van de periode.');refreshAndRender();});return;}
     if(act==='delcancel'){var cbid=a.getAttribute('data-b');S.bookings=S.bookings.filter(function(b){return !(b.id===cbid&&b.status==='cancelled');});save();renderHost();return;}
     if(act==='clearcancels'){S.bookings=S.bookings.filter(function(b){return b.status!=='cancelled';});save();renderHost();return;}
     if(act==='stripe-onboard'){var ex=root.querySelector('#ba-stripe-extra');if(ex)ex.textContent='Bezig…';
@@ -1102,7 +1616,7 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
   function localStripeGrant(p,sid){
     fetch(api('stripe/verify?session_id='+encodeURIComponent(sid))).then(function(r){return r.json();}).then(function(d){
       if(d&&d.paid){
-        if(p.kind==='book'){var sb={id:uid(),classId:p.classId,date:p.date,name:p.name||'Gast',bookerEmail:p.bookerEmail||'',status:'booked',payment:'stripe',usedCredit:false,present:false,paymentIntent:d.paymentIntent||'',amount:(d.amountTotal||0)/100};S.bookings.push(sb);var scm=classMeta(p.classId);notify('booking',p.bookerEmail||myEmail(),{name:p.name,classTitle:scm.title,date:p.date,time:scm.time,bookingId:sb.id,mode:scm.mode,onlineLink:scm.link,onlineInfo:scm.info});
+        if(p.kind==='book'){var sb={id:uid(),classId:p.classId,date:p.date,name:p.name||'Gast',bookerEmail:p.bookerEmail||'',status:'booked',payment:'stripe',usedCredit:false,present:false,noShow:false,paymentIntent:d.paymentIntent||'',amount:(d.amountTotal||0)/100};S.bookings.push(sb);var scm=classMeta(p.classId);notify('booking',p.bookerEmail||myEmail(),{name:p.name,classTitle:scm.title,date:p.date,time:scm.time,bookingId:sb.id,mode:scm.mode,onlineLink:scm.link,onlineInfo:scm.info});
           genInvoice({email:p.bookerEmail||myEmail(),name:p.name||accName(p.bookerEmail||myEmail()),description:'Losse les — '+scm.title+(p.date?(' '+p.date):''),amount:(d.amountTotal||0)/100,method:'Stripe'});}
         else if(p.kind==='buy'){var m=S.members.filter(function(x){return x.id===p.memberId;})[0];if(m){var BW=walletFor(p.bookerEmail||myEmail());if(isUnlimited(m)){BW.membership=m.name;}else{BW.credits+=(m.credits||0);BW.membership=null;}var dt=new Date();dt.setDate(dt.getDate()+(m.validDays||30));BW.validUntil=ymd(dt);
           if(!S.purchases)S.purchases=[];S.purchases.push({id:uid(),email:p.bookerEmail||myEmail(),type:m.type,name:m.name,amount:(d.amountTotal||0)/100,paymentIntent:d.paymentIntent||'',subscription:d.subscription||'',date:ymd(new Date()),refunded:false});
@@ -1115,7 +1629,7 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
   function finalizeStripeReturn(){
     if(!stripeReturn)return;var p=stripeReturn.p,sid=stripeReturn.sid;stripeReturn=null;
     if(SRV){
-      spost('stripe/finalize',{session_id:sid,kind:p.kind,classId:p.classId,date:p.date,memberId:p.memberId}).then(function(r){
+      spost('stripe/finalize',{session_id:sid,kind:p.kind,classId:p.classId,date:p.date,memberId:p.memberId,category:p.category,code:p.code,discount:p.discount}).then(function(r){
         if(r.ok){refreshAndRender();setTimeout(function(){alert('Betaling gelukt! Je boeking/aankoop is bevestigd.');},60);}
         else setTimeout(function(){alert((r.d&&r.d.error)||'Betaling kon niet bevestigd worden — er is niets toegekend.');},60);
       });

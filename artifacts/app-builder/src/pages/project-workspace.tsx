@@ -35,6 +35,9 @@ import {
   RotateCcw,
   Sparkles,
   MousePointerClick,
+  Rocket,
+  Globe,
+  Copy,
 } from "lucide-react";
 import JSZip from "jszip";
 import { Button } from "@/components/ui/button";
@@ -1154,6 +1157,12 @@ export function ProjectWorkspace() {
   // (deterministic, coupled to the code — no AI vision). `selection` holds the clicked element.
   const [selectMode, setSelectMode] = useState(false);
   // Manual blog editor (no AI): a small modal with title + body (+ optional image).
+  const [publishOpen, setPublishOpen] = useState(false);
+  const [pubBusy, setPubBusy] = useState(false);
+  const [pubData, setPubData] = useState<any>(null);     // { platformHost, target, subdomain, domains }
+  const [pubSlug, setPubSlug] = useState("");
+  const [newDomain, setNewDomain] = useState("");
+  const reloadPublish = () => fetch(`/api/projects/${projectId}/publish`).then((r) => r.json()).then(setPubData).catch(() => {});
   const [blogOpen, setBlogOpen] = useState(false);
   const [blogTitle, setBlogTitle] = useState("");
   const [blogBody, setBlogBody] = useState("");
@@ -1228,6 +1237,7 @@ export function ProjectWorkspace() {
   useEffect(() => {
     if (!projectId) return;
     fetch(`/api/projects/${projectId}/seo`).then((r) => r.json()).then((d) => setSeoAuto(!!d.autoEnabled)).catch(() => {});
+    void reloadPublish(); // load publish status for the header indicator
   }, [projectId]);
 
   // Permanent record of each past build, keyed by the assistant message id that triggered it.
@@ -1460,6 +1470,7 @@ export function ProjectWorkspace() {
     await queryClient.invalidateQueries({ queryKey: getListFilesQueryKey(projectId) });
     await queryClient.invalidateQueries({ queryKey: getListMessagesQueryKey(projectId) });
     setPreviewKey((k) => k + 1);
+    void reloadPublish(); // refresh "unpublished changes" indicator after an edit
   };
 
   const currentPagePath = () => previewPage ?? "index.html";
@@ -2275,7 +2286,115 @@ export function ProjectWorkspace() {
             <h1 className="font-semibold text-sm">{project.name}</h1>
           </div>
         </div>
+        <div className="ml-auto flex items-center gap-2">
+          {pubData?.published && (
+            pubData?.hasChanges
+              ? <span className="text-[11px] text-amber-600 flex items-center gap-1"><span className="h-1.5 w-1.5 rounded-full bg-amber-500" /> Niet-gepubliceerde wijzigingen</span>
+              : <span className="text-[11px] text-emerald-600 flex items-center gap-1"><Check className="h-3 w-3" /> Gepubliceerd</span>
+          )}
+          <Button
+            size="sm"
+            className="h-8 gap-2 bg-emerald-600 hover:bg-emerald-500 text-white"
+            data-testid="button-publish"
+            onClick={() => {
+              setPublishOpen(true);
+              setPubBusy(true);
+              fetch(`/api/projects/${projectId}/publish`)
+                .then((r) => r.json())
+                .then((d) => { setPubData(d); setPubSlug(d?.subdomain ? String(d.subdomain.domain).split(".")[0] : ""); })
+                .catch(() => {})
+                .finally(() => setPubBusy(false));
+            }}
+          >
+            <Rocket className="h-4 w-4" /> {pubData?.published && pubData?.hasChanges ? "Republiceren" : "Publiceren"}
+          </Button>
+        </div>
       </header>
+
+      {publishOpen && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 p-4" onClick={() => { if (!pubBusy) setPublishOpen(false); }}>
+          <div className="w-[min(620px,96%)] max-h-[88vh] overflow-y-auto rounded-xl bg-background border shadow-2xl p-6" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold flex items-center gap-2"><Rocket className="h-5 w-5 text-emerald-600" /> Publiceren</h3>
+              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setPublishOpen(false)}><X className="h-4 w-4" /></Button>
+            </div>
+
+            {/* 1. Free Nebula subdomain */}
+            <div className="rounded-lg border p-4 mb-4">
+              <div className="flex items-center gap-2 mb-1"><Globe className="h-4 w-4 text-muted-foreground" /><h4 className="font-medium text-sm">Gratis Nebula-adres</h4></div>
+              {pubData?.subdomain ? (
+                <div className="mb-3">
+                  <p className="text-xs text-muted-foreground mb-1">Je site is live op:</p>
+                  <div className="flex items-center gap-2">
+                    <a href={`https://${pubData.subdomain.domain}`} target="_blank" rel="noopener" className="text-sm font-medium text-emerald-600 hover:underline break-all">{pubData.subdomain.domain}</a>
+                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => navigator.clipboard?.writeText(`https://${pubData.subdomain.domain}`)}><Copy className="h-3.5 w-3.5" /></Button>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground mb-3">Kies een adres en zet je site direct live — geen eigen domein nodig.</p>
+              )}
+              <label className="block text-xs text-muted-foreground mb-1">Adres</label>
+              <div className="flex items-center gap-1">
+                <input className="flex-1 rounded-md border bg-background px-3 py-2 text-sm" value={pubSlug} onChange={(e) => setPubSlug(e.target.value)} placeholder="mijn-studio" data-testid="input-pub-slug" />
+                <span className="text-sm text-muted-foreground">.{pubData?.platformHost || "nebulabookings.com"}</span>
+              </div>
+              <div className="mt-3">
+                <Button size="sm" disabled={pubBusy} data-testid="button-do-publish" className="bg-emerald-600 hover:bg-emerald-500 text-white"
+                  onClick={async () => {
+                    setPubBusy(true);
+                    try {
+                      const res = await fetch(`/api/projects/${projectId}/publish`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ slug: pubSlug }) });
+                      const d = await res.json();
+                      if (res.ok && d.ok) { await reloadPublish(); } else window.alert(d.error || "Publiceren mislukt.");
+                    } catch { window.alert("Publiceren mislukt."); }
+                    finally { setPubBusy(false); }
+                  }}>
+                  {pubBusy ? "Bezig…" : pubData?.subdomain ? "Opnieuw publiceren" : "Publiceren"}
+                </Button>
+              </div>
+            </div>
+
+            {/* 2. Own domain */}
+            <div className="rounded-lg border p-4">
+              <div className="flex items-center gap-2 mb-1"><Globe className="h-4 w-4 text-muted-foreground" /><h4 className="font-medium text-sm">Eigen domein</h4></div>
+              <p className="text-xs text-muted-foreground mb-3">Koppel je eigen domein (bijv. jouwstudio.nl). Voeg bij je DNS-provider een CNAME toe naar <code className="bg-muted px-1 rounded">{pubData?.target || "customers.nebulabookings.com"}</code> en klik daarna op Verifiëren. SSL gaat automatisch.</p>
+              {(pubData?.domains || []).map((d: any) => (
+                <div key={d.id} className="flex items-center justify-between gap-2 border rounded-md px-3 py-2 mb-2">
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium break-all">{d.domain}</div>
+                    <div className={`text-[11px] ${d.status === "active" ? "text-emerald-600" : "text-amber-600"}`}>{d.status === "active" ? "● Live (SSL actief)" : "○ Wacht op DNS — voeg de CNAME toe"}</div>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    {d.status !== "active" && (
+                      <Button variant="outline" size="sm" className="h-7" disabled={pubBusy} onClick={async () => {
+                        setPubBusy(true);
+                        try { const r = await fetch(`/api/projects/${projectId}/domains/${d.id}/verify`, { method: "POST" }); const j = await r.json(); if (!j.ok) window.alert(j.detail || "Nog niet geverifieerd."); await reloadPublish(); } catch { /* ignore */ } finally { setPubBusy(false); }
+                      }}>Verifiëren</Button>
+                    )}
+                    <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive" disabled={pubBusy} onClick={async () => {
+                      if (!window.confirm("Dit domein loskoppelen?")) return;
+                      setPubBusy(true);
+                      try { await fetch(`/api/projects/${projectId}/domains/${d.id}`, { method: "DELETE" }); await reloadPublish(); } catch { /* ignore */ } finally { setPubBusy(false); }
+                    }}><X className="h-3.5 w-3.5" /></Button>
+                  </div>
+                </div>
+              ))}
+              <div className="flex items-center gap-2 mt-2">
+                <input className="flex-1 rounded-md border bg-background px-3 py-2 text-sm" value={newDomain} onChange={(e) => setNewDomain(e.target.value)} placeholder="jouwstudio.nl" data-testid="input-new-domain" />
+                <Button size="sm" disabled={pubBusy || !newDomain.trim()} onClick={async () => {
+                  setPubBusy(true);
+                  try {
+                    const res = await fetch(`/api/projects/${projectId}/domains`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ domain: newDomain.trim() }) });
+                    const d = await res.json();
+                    if (res.ok && d.ok) { setNewDomain(""); await reloadPublish(); } else window.alert(d.error || "Koppelen mislukt.");
+                  } catch { window.alert("Koppelen mislukt."); }
+                  finally { setPubBusy(false); }
+                }}>Koppelen</Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Main Workspace */}
       <div className="flex-1 flex overflow-hidden">
@@ -2795,13 +2914,13 @@ export function ProjectWorkspace() {
                     <>
                       {sitePages.length > 1 && (
                         <select
-                          className="h-8 rounded-md border border-border bg-background px-2 text-sm text-muted-foreground"
+                          className="h-8 w-[112px] rounded-md border border-border bg-background px-2 text-sm text-muted-foreground truncate"
                           value={previewPage ?? "index.html"}
                           onChange={(e) => { setPreviewPage(e.target.value); setPreviewKey((k) => k + 1); }}
                           title="Wissel tussen pagina's"
                           data-testid="select-page"
                         >
-                          {sitePages.map((f) => (<option key={f.path} value={f.path}>{f.path}</option>))}
+                          {sitePages.map((f) => (<option key={f.path} value={f.path}>{f.path.replace(/^pages\//, "").replace(/\.html$/, "")}</option>))}
                         </select>
                       )}
                       <Button
@@ -2825,7 +2944,7 @@ export function ProjectWorkspace() {
                         + Pagina
                       </Button>
                       <select
-                        className="h-8 rounded-md border border-border bg-background px-2 text-sm text-muted-foreground"
+                        className="h-8 w-[104px] rounded-md border border-border bg-background px-2 text-sm text-muted-foreground truncate"
                         value=""
                         title="Voeg een sectie toe aan deze pagina (zonder AI)"
                         data-testid="select-add-section"
@@ -2925,24 +3044,6 @@ export function ProjectWorkspace() {
                     }}
                   >
                     Auto-SEO {seoAuto ? "aan" : "uit"}
-                  </Button>
-                )}
-                {!isStreaming && files && files.length > 0 && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-8 text-muted-foreground hover:text-foreground"
-                    onClick={handleDownload}
-                    disabled={isDownloading}
-                    title="Download de code als ZIP-bestand"
-                    data-testid="button-download"
-                  >
-                    {isDownloading ? (
-                      <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-                    ) : (
-                      <Download className="h-3.5 w-3.5 mr-1.5" />
-                    )}
-                    Download code
                   </Button>
                 )}
               </div>

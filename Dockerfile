@@ -27,4 +27,7 @@ RUN NODE_ENV=production BASE_PATH=/ PORT=8080 pnpm --filter @workspace/app-build
 RUN pnpm --filter @workspace/api-server run build
 
 # Render/Railway inject PORT at runtime; the server reads process.env.PORT.
-CMD ["node", "artifacts/api-server/dist/index.mjs"]
+# On boot we first sync the database schema (drizzle push) against the injected DATABASE_URL so new
+# tables/columns exist before the app serves traffic — additive + idempotent, so re-deploys are safe.
+# A push failure must NOT block startup (|| true); normally it's a quick no-op when already in sync.
+CMD ["sh", "-c", "pnpm --filter @workspace/db run push-force || true; node artifacts/api-server/dist/index.mjs"]

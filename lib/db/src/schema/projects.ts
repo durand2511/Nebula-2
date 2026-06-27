@@ -101,7 +101,7 @@ export const projectSeo = pgTable("project_seo", {
   language: text("language").notNull().default("nl"),
   lastRunAt: timestamp("last_run_at", { withTimezone: true }),
   // Quality-gated publishing: max articles/day, and the minimum qualityScore for AUTO publish.
-  maxPerDay: integer("max_per_day").notNull().default(2),
+  maxPerDay: integer("max_per_day").notNull().default(1),
   autoPublishMin: integer("auto_publish_min").notNull().default(85),
   gscRefreshEnc: text("gsc_refresh_enc").notNull().default(""),
   gscSiteUrl: text("gsc_site_url").notNull().default(""),
@@ -273,8 +273,49 @@ export const studioClasses = pgTable("studio_classes", {
   onlineInfo: text("online_info").notNull().default(""),
   bookDays: integer("book_days").notNull().default(0),     // 0 = no limit
   cancelHours: integer("cancel_hours").notNull().default(0), // 0 = always cancelable
+  locationId: integer("location_id").notNull().default(0),   // 0 = no specific location (studio_locations.id)
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 }, (t) => ({ byProj: index("studio_classes_proj").on(t.projectId) }));
+
+// The PUBLISHED snapshot of a project's site (draft → publish model). serveProjectSite serves this
+// snapshot, so edits in the builder are a draft until the user re-publishes. `files` is a JSON map
+// path → { content, language }. Auto-published SEO articles re-snapshot automatically.
+export const sitePublishes = pgTable("site_publishes", {
+  projectId: integer("project_id").primaryKey().references(() => projects.id, { onDelete: "cascade" }),
+  files: text("files").notNull().default("{}"),
+  publishedAt: timestamp("published_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+// Per-studio toggles. Additive: a missing row means all defaults (everything off).
+export const studioSettings = pgTable("studio_settings", {
+  projectId: integer("project_id").primaryKey().references(() => projects.id, { onDelete: "cascade" }),
+  ownerReport: text("owner_report").notNull().default("off"),   // off | weekly | monthly — auto report to admins
+  reviewUrl: text("review_url").notNull().default(""),          // Google review link; set = auto review request after 1st class
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+// Sent "smart reminder" nudges (low credits / renewal soon / win-back) — one row per situation
+// so a daily scanner never sends the same nudge twice. `ref` buckets the situation (e.g. the
+// renewal date, or a month for win-back).
+export const studioNudges = pgTable("studio_nudges", {
+  id: serial("id").primaryKey(),
+  projectId: integer("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  email: text("email").notNull().default(""),
+  kind: text("kind").notNull().default(""),   // lowcredits | renewal | winback
+  ref: text("ref").notNull().default(""),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => ({ uniq: uniqueIndex("studio_nudges_uniq").on(t.projectId, t.email, t.kind, t.ref) }));
+
+// Optional physical locations for multi-location studios. Additive: with none defined the app
+// behaves as a single-location studio. Credits/passes are shared across locations.
+export const studioLocations = pgTable("studio_locations", {
+  id: serial("id").primaryKey(),
+  projectId: integer("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  name: text("name").notNull().default(""),
+  address: text("address").notNull().default(""),
+  active: text("active").notNull().default("true"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => ({ byProj: index("studio_locations_proj").on(t.projectId) }));
 
 // Membership TYPES the studio sells (strippenkaart / abonnement).
 export const studioMembers = pgTable("studio_members", {
@@ -318,6 +359,7 @@ export const studioBookings = pgTable("studio_bookings", {
   usedCredit: text("used_credit").notNull().default("false"),
   usedMonthly: text("used_monthly").notNull().default("false"),
   present: text("present").notNull().default("false"),
+  noShow: text("no_show").notNull().default("false"), // gemarkeerd als no-show → tegoed wordt niet terugbetaald
   paymentIntent: text("payment_intent").notNull().default(""),
   amount: real("amount").notNull().default(0),
   refunded: text("refunded").notNull().default("false"),
@@ -342,6 +384,53 @@ export const studioPurchases = pgTable("studio_purchases", {
   date: text("date").notNull().default(""),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 }, (t) => ({ byProj: index("studio_purchases_proj").on(t.projectId) }));
+
+// Video library (links only — YouTube/Vimeo/MP4 URL). Categories: yoga | mindfulness | pilates.
+export const studioVideos = pgTable("studio_videos", {
+  id: serial("id").primaryKey(),
+  projectId: integer("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  category: text("category").notNull().default("yoga"),
+  title: text("title").notNull().default(""),
+  url: text("url").notNull().default(""),
+  weekNo: integer("week_no").notNull().default(1), // program week — unlocks N weeks after a subscriber starts
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => ({ byProj: index("studio_videos_proj").on(t.projectId) }));
+
+// Per-category video subscription price the studio sets (purchase + access gating come in step 2).
+export const studioVideoPlans = pgTable("studio_video_plans", {
+  projectId: integer("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  category: text("category").notNull(),
+  price: real("price").notNull().default(0),
+  validDays: integer("valid_days").notNull().default(30),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => ({ projCat: uniqueIndex("studio_video_plans_proj_cat").on(t.projectId, t.category) }));
+
+// Which customer has access to which video category, until when (granted after a paid subscription).
+export const studioVideoAccess = pgTable("studio_video_access", {
+  id: serial("id").primaryKey(),
+  projectId: integer("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  email: text("email").notNull(),
+  category: text("category").notNull(),
+  validUntil: text("valid_until").notNull().default(""), // yyyy-mm-dd
+  startedAt: text("started_at").notNull().default(""), // yyyy-mm-dd — when access first started (for the weekly drip)
+  subscription: text("subscription").notNull().default(""), // Stripe subscription id (recurring)
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => ({ projEmailCat: uniqueIndex("studio_video_access_proj_email_cat").on(t.projectId, t.email, t.category), bySub: index("studio_video_access_sub").on(t.subscription) }));
+
+// Discount codes / promos / gift cards. kind: percent (% off) | fixed (€ off) | gift (€ balance spent down).
+export const studioCodes = pgTable("studio_codes", {
+  id: serial("id").primaryKey(),
+  projectId: integer("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  code: text("code").notNull(),              // stored uppercase
+  kind: text("kind").notNull().default("percent"),
+  value: real("value").notNull().default(0), // percent, or € off, or initial gift balance
+  balance: real("balance").notNull().default(0), // remaining balance for gift cards
+  expiresAt: text("expires_at").notNull().default(""), // yyyy-mm-dd, "" = none
+  maxUses: integer("max_uses").notNull().default(0),   // 0 = unlimited
+  uses: integer("uses").notNull().default(0),
+  active: text("active").notNull().default("true"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => ({ projCode: uniqueIndex("studio_codes_proj_code").on(t.projectId, t.code) }));
 
 export const insertProjectSchema = createInsertSchema(projects).omit({
   id: true,
@@ -385,3 +474,11 @@ export type StudioMember = typeof studioMembers.$inferSelect;
 export type StudioWallet = typeof studioWallets.$inferSelect;
 export type StudioBooking = typeof studioBookings.$inferSelect;
 export type StudioPurchase = typeof studioPurchases.$inferSelect;
+export type StudioVideo = typeof studioVideos.$inferSelect;
+export type StudioVideoPlan = typeof studioVideoPlans.$inferSelect;
+export type StudioVideoAccess = typeof studioVideoAccess.$inferSelect;
+export type StudioCode = typeof studioCodes.$inferSelect;
+export type StudioLocation = typeof studioLocations.$inferSelect;
+export type StudioNudge = typeof studioNudges.$inferSelect;
+export type StudioSettings = typeof studioSettings.$inferSelect;
+export type SitePublish = typeof sitePublishes.$inferSelect;

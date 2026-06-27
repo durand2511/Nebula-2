@@ -4,7 +4,7 @@ import { lookup as dnsLookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import { Agent, fetch as safeFetch } from "undici";
 import { load as cheerioLoad } from "cheerio";
-import { db, projects, projectMessages, projectFiles, projectSnapshots, learnings, emailReminders } from "@workspace/db";
+import { db, projects, projectMessages, projectFiles, projectSnapshots, learnings, emailReminders, studioClasses, studioUsers, studioBookings } from "@workspace/db";
 import {
   CreateProjectBody,
   GetProjectParams,
@@ -16,7 +16,7 @@ import { logger } from "../lib/logger";
 import { checkWritePlanViolation, BOOKING_BLOCK_KEYWORDS, isNewPageOnImportedSite, detectExplicitNewPage, fitHistoryToContext, importedSiteHasEdits } from "../lib/write-plan.js";
 import { applyAction, rebuildBookingApp, ACTION_CATALOGUE, type BuilderAction } from "../lib/actions.js";
 import { sendBookingEmail, sendWithConfig, sendBroadcast, sendPaymentEmail, type EmailKind } from "../lib/email.js";
-import { getInvoiceSettings, saveInvoiceSettings, createInvoice, renderInvoiceHtml, renderInvoiceDocument, renderInvoicePdf, listInvoices, getInvoice } from "../lib/invoice.js";
+import { getInvoiceSettings, saveInvoiceSettings, createInvoice, renderInvoiceHtml, renderInvoiceDocument, renderInvoicePdf, listInvoices, listInvoicesSince, renderInvoicesXls, renderVatReportXls, renderTeacherPayoutXls, getInvoice } from "../lib/invoice.js";
 import { ensureCalendar, saveLessons, getStatus as getCalendarStatus, buildIcs, getLessons, type Lesson } from "../lib/calendar.js";
 import { emailBrandSeed } from "../lib/actions.js";
 import { resolveSmtpConfig, explainSmtpError } from "../lib/email-config.js";
@@ -1527,10 +1527,10 @@ RUNTIME ROBUSTNESS (critical — the app MUST run with ZERO uncaught console err
 
 CONSISTENCY ON EDITS (when current project files already exist below):
 - READ FIRST: Before editing any existing file, call read_file on it. Use the actual content you receive — never guess at class names, IDs, or structure.
-- SURGICAL EDITS ONLY: Add or modify the specific component(s), function(s), or section(s) the user asked about — nothing else. Never rewrite an entire file for a small change, and never regenerate parts of the codebase the user did not mention.
+- SCOPED BUT COMPLETE EDITS: Change what the user asked about — and do it FULLY, whatever it takes. If they ask to MOVE a block up/down, REORDER sections, REPOSITION or OVERLAP an element, place text over an image, WIDEN/RESIZE a section, or otherwise RESTRUCTURE the layout of the part they mention, then actually do it — rewrite that element's/section's markup and CSS (position, order, flex/grid, margins, z-index, absolute positioning) as needed. Do NOT refuse or water down a layout/structure request. The only rule: leave parts of the page the user did NOT mention untouched.
 - OUTPUT ONLY CHANGED FILES: Do not emit a file unless you actually modified it. Emitting an unchanged file replaces it verbatim and can corrupt content that is visible in the preview but not fully represented in your context window.
 - This is an EDIT to an existing app, not a fresh build. If the existing files already follow the BUILDLY DESIGN SYSTEM above, keep matching it exactly. If they predate it and use a different look, preserve that app's established design language (palette, typography, spacing, component styles) so the result stays visually cohesive — do NOT re-theme or migrate it onto the Buildly system unless the user explicitly asks. Either way, only elevate the parts you actually touch.
-- Make the SMALLEST change that satisfies the request. Do not redesign, rename, or restructure unrelated parts of the app, and do not drop existing features or seeded data.
+- Fully satisfy the request — including layout/structure changes (moving a block up, changing order, repositioning, overlapping text, widening a section). Do not redesign or restructure UNRELATED parts of the app, and do not drop existing features or seeded data.
 - Keep all existing files and their working behavior intact; only change what the request requires.
 - NEVER remove or empty out buttons, links, CTAs, or sections that were already in the app. Every button/CTA/link that existed before MUST still be present AND fully working after your change — same label and destination unless the user explicitly asked to change it. A "make it prettier" / "maak mooier" pass may RESTYLE these, but must keep every single one of them and keep them all functioning.
 - NEVER leave a section as just a heading with nothing under it. Unless the user explicitly asked to remove that section, if a section exists (e.g. "What I offer" / "Dit bied ik aan", Services, Pricing, Contact), it MUST keep its real text AND its buttons/cards/links — a heading followed by empty space, missing copy, or missing buttons is a FAILURE. Restyle a section, never accidentally gut it.
@@ -2121,8 +2121,8 @@ function buildImportedContext(
 
     const context =
       `\n\nThis project was imported from a real website and has ALREADY been rebuilt into the single-page app below. ` +
-      `Make ONLY the specific change the user asks for. Keep the existing layout, structure, sections, copy and styling exactly as they are — edit just the part that needs to change. ` +
-      `Do NOT redesign, re-theme, or regenerate the whole page, and do NOT change anything the user did not ask about. Output only the file(s) you actually modify.` +
+      `Make the change the user asks for — and do it FULLY. If they ask to move/reorder/reposition/overlap/resize/restructure the part they mention, actually change its layout (markup + CSS: order, position, flex/grid, margins, z-index, absolute positioning). Keep everything the user did NOT mention exactly as it is. ` +
+      `Do NOT redesign or re-theme the whole page or touch unrelated parts. Output only the file(s) you actually modify.` +
       `\nSURGICAL TARGETING: edit the file that owns the thing being changed — styling → the CSS file, a script behaviour → the JS file, page copy → the page that contains it. Do NOT funnel every change into index.html; touch index.html only when the change is actually about index.html (its markup or its nav).` +
       newPageDirective +
       `\n\nCurrent project files (modify these as needed):\n${blocks.join("\n\n")}` +
@@ -5676,8 +5676,73 @@ router.get("/projects/:projectId/invoices", async (req, res) => {
   if (isNaN(projectId)) { res.status(400).json({ error: "Invalid project ID" }); return; }
   try {
     const rows = await listInvoices(projectId);
-    res.json(rows.map((i) => ({ id: i.id, number: i.number, date: i.date, customerName: i.customerName, customerEmail: i.customerEmail, description: i.description, total: i.total, status: i.status })));
+    res.json(rows.map((i) => ({ id: i.id, number: i.number, date: i.date, customerName: i.customerName, customerEmail: i.customerEmail, description: i.description, total: i.total, status: i.status, currency: i.currency, createdAt: i.createdAt })));
   } catch (err) { logger.error({ err, projectId }, "[invoice] list failed"); res.status(500).json({ error: "Kon facturen niet ophalen." }); }
+});
+
+// Download all invoices from the last N months (1–12) as a real Excel file (.xls SpreadsheetML).
+router.get("/projects/:projectId/invoices/export", async (req, res) => {
+  const projectId = Number(req.params.projectId);
+  if (isNaN(projectId)) { res.status(400).send("Invalid project ID"); return; }
+  const months = Math.min(12, Math.max(1, parseInt(String(req.query.months || "12"), 10) || 12));
+  try {
+    const rows = await listInvoicesSince(projectId, months);
+    const settings = await getInvoiceSettings(projectId);
+    const xls = renderInvoicesXls(settings, rows);
+    const stamp = new Date().toISOString().slice(0, 10);
+    res.setHeader("Content-Type", "application/vnd.ms-excel; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="facturen-${months}mnd-${stamp}.xls"`);
+    res.send(xls);
+  } catch (err) { logger.error({ err, projectId }, "[invoice] export failed"); res.status(500).send("Export mislukt."); }
+});
+
+// BTW/VAT report (grouped per rate) for the last N months — real Excel (.xls).
+router.get("/projects/:projectId/invoices/vat-report", async (req, res) => {
+  const projectId = Number(req.params.projectId);
+  if (isNaN(projectId)) { res.status(400).send("Invalid project ID"); return; }
+  const months = Math.min(12, Math.max(1, parseInt(String(req.query.months || "12"), 10) || 12));
+  try {
+    const rows = await listInvoicesSince(projectId, months);
+    const settings = await getInvoiceSettings(projectId);
+    const label = months + (months === 1 ? " maand" : " maanden");
+    const xls = renderVatReportXls(settings, rows, label);
+    const stamp = new Date().toISOString().slice(0, 10);
+    res.setHeader("Content-Type", "application/vnd.ms-excel; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="btw-overzicht-${months}mnd-${stamp}.xls"`);
+    res.send(xls);
+  } catch (err) { logger.error({ err, projectId }, "[invoice] vat-report failed"); res.status(500).send("Export mislukt."); }
+});
+
+// Teacher payout overview for the last N months — classes given + attendance per teacher (+ optional
+// payout if a per-class rate is given). Real Excel (.xls).
+router.get("/projects/:projectId/teacher-payout", async (req, res) => {
+  const projectId = Number(req.params.projectId);
+  if (isNaN(projectId)) { res.status(400).send("Invalid project ID"); return; }
+  const months = Math.min(12, Math.max(1, parseInt(String(req.query.months || "12"), 10) || 12));
+  const rate = Math.max(0, Number(req.query.rate) || 0);
+  try {
+    const cutoff = new Date(); cutoff.setMonth(cutoff.getMonth() - months); cutoff.setHours(0, 0, 0, 0);
+    const cut = `${cutoff.getFullYear()}-${String(cutoff.getMonth() + 1).padStart(2, "0")}-${String(cutoff.getDate()).padStart(2, "0")}`;
+    const classes = (await db.select().from(studioClasses).where(eq(studioClasses.projectId, projectId))).filter((c) => c.date >= cut);
+    const users = await db.select().from(studioUsers).where(eq(studioUsers.projectId, projectId));
+    const bookings = await db.select().from(studioBookings).where(eq(studioBookings.projectId, projectId));
+    const nameByEmail: Record<string, string> = {}; users.forEach((u) => { nameByEmail[u.email] = u.name; });
+    // booked + present counts per classId|date
+    const cnt: Record<string, { booked: number; present: number }> = {};
+    for (const b of bookings) { if (b.status !== "booked") continue; const k = b.classId + "|" + b.date; (cnt[k] ||= { booked: 0, present: 0 }); cnt[k].booked++; if (b.present === "true") cnt[k].present++; }
+    const byTeacher: Record<string, { teacher: string; email: string; classes: number; bookings: number; present: number }> = {};
+    for (const c of classes) {
+      const email = c.teacherEmail || "(geen docent)";
+      const g = (byTeacher[email] ||= { teacher: nameByEmail[email] || c.teacher || "", email: c.teacherEmail || "", classes: 0, bookings: 0, present: 0 });
+      g.classes++; const k = c.id + "|" + c.date; g.bookings += cnt[k]?.booked || 0; g.present += cnt[k]?.present || 0;
+    }
+    const rows = Object.values(byTeacher).sort((a, b) => b.classes - a.classes);
+    const xls = renderTeacherPayoutXls(rows, months + (months === 1 ? " maand" : " maanden"), rate);
+    const stamp = new Date().toISOString().slice(0, 10);
+    res.setHeader("Content-Type", "application/vnd.ms-excel; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="docenten-uitbetaling-${months}mnd-${stamp}.xls"`);
+    res.send(xls);
+  } catch (err) { logger.error({ err, projectId }, "[payout] failed"); res.status(500).send("Export mislukt."); }
 });
 
 // Printable invoice page (fallback / preview).

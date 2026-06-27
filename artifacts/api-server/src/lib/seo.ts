@@ -10,6 +10,7 @@
  * Generation uses AI; publishing is deterministic (writes project files).
  */
 import { db, projectFiles, seoArticles, projectSeo } from "@workspace/db";
+import { republishMatching } from "./site-publish.js";
 import { eq, and } from "drizzle-orm";
 import { anthropic } from "@workspace/integrations-openai-ai-server";
 import { addNavItem, emailBrandSeed, type ProjectFile } from "./actions.js";
@@ -339,6 +340,11 @@ async function syncPublishedAux(projectId: number, ctx: Ctx, rows: { path: strin
     const updated = ensureBlogLink(f.content);
     if (updated !== f.content) await db.update(projectFiles).set({ content: updated, updatedAt: new Date() }).where(eq(projectFiles.id, f.id));
   }
+  // Auto re-publish the blog/SEO files so new articles go live without a manual re-publish — but
+  // ONLY these files, so an unrelated draft edit elsewhere isn't pushed live by accident.
+  try {
+    await republishMatching(projectId, (p) => p === "blog.html" || /^blog\//i.test(p) || p === "robots.txt" || p === "llms.txt" || p === "sitemap.xml");
+  } catch { /* best-effort */ }
 }
 
 // Reconstruct a Brief from a stored pipeline payload (for re-rendering drafts/updates).

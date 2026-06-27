@@ -1,6 +1,7 @@
 import app from "./app";
 import { logger } from "./lib/logger";
 import { startReminderScheduler } from "./lib/reminders";
+import { startNudgeScheduler } from "./lib/nudges";
 import { startSeoScheduler } from "./lib/seo-scheduler";
 
 const rawPort = process.env["PORT"];
@@ -25,5 +26,6 @@ app.listen(port, (err) => {
 
   logger.info({ port }, "Server listening");
   startReminderScheduler();
+  startNudgeScheduler();
   startSeoScheduler();
 });

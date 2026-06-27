@@ -71,7 +71,7 @@ async function nextNumber(projectId: number): Promise<string> {
 export type InvoiceRow = typeof invoices.$inferSelect;
 
 /** Create + store an invoice for a payment. Returns the stored row. */
-export async function createInvoice(projectId: number, p: { customerName: string; customerEmail: string; description: string; total: number; method?: string }): Promise<InvoiceRow> {
+export async function createInvoice(projectId: number, p: { customerName: string; customerEmail: string; description: string; total: number; method?: string; status?: string }): Promise<InvoiceRow> {
   const s = await getInvoiceSettings(projectId);
   const number = await nextNumber(projectId);
   const d = new Date();
@@ -80,7 +80,7 @@ export async function createInvoice(projectId: number, p: { customerName: string
   const [row] = await db.insert(invoices).values({
     projectId, number, date, customerName: p.customerName || "", customerEmail: p.customerEmail || "",
     description: p.description || "Aankoop", total: Math.round((p.total || 0) * 100) / 100, vatPercent: s.vatPercent,
-    country: s.country || "NL", currency: c.currency, method: p.method || "Stripe", status: c.paidLabel,
+    country: s.country || "NL", currency: c.currency, method: p.method || "Stripe", status: p.status || c.paidLabel,
   }).returning();
   return row;
 }
@@ -194,4 +194,114 @@ export function renderInvoicePdf(s: InvoiceSettings, inv: InvoiceRow): Buffer {
 export async function getInvoice(projectId: number, id: number): Promise<InvoiceRow | null> {
   const [r] = await db.select().from(invoices).where(and(eq(invoices.projectId, projectId), eq(invoices.id, id)));
   return r ?? null;
+}
+
+// All invoices created within the last `months` months (1–12), newest first.
+export async function listInvoicesSince(projectId: number, months: number): Promise<InvoiceRow[]> {
+  const m = Math.min(12, Math.max(1, Math.floor(months) || 12));
+  const cutoff = new Date(); cutoff.setMonth(cutoff.getMonth() - m); cutoff.setHours(0, 0, 0, 0);
+  const rows = await db.select().from(invoices).where(eq(invoices.projectId, projectId));
+  return rows.filter((r) => r.createdAt && new Date(r.createdAt) >= cutoff).reverse();
+}
+
+const xmlEsc = (s: unknown) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c] as string));
+
+/**
+ * Export invoices as a real Excel file using SpreadsheetML 2003 (a single .xls XML document that
+ * Excel/Numbers/LibreOffice open natively as a spreadsheet) — no third-party dependency needed.
+ */
+export function renderInvoicesXls(s: InvoiceSettings, rows: InvoiceRow[]): string {
+  const headers = ["Nummer", "Datum", "Klant", "E-mail", "Omschrijving", "Bedrag incl.", "BTW %", "BTW-bedrag", "Bedrag excl.", "Valuta", "Methode", "Status"];
+  const cellS = (v: unknown) => `<Cell><Data ss:Type="String">${xmlEsc(v)}</Data></Cell>`;
+  const cellN = (v: number, style?: string) => `<Cell${style ? ` ss:StyleID="${style}"` : ""}><Data ss:Type="Number">${Math.round((Number(v) || 0) * 100) / 100}</Data></Cell>`;
+  let total = 0;
+  const dataRows = rows.map((inv) => {
+    const vp = inv.vatPercent || 0;
+    const excl = vp > 0 ? inv.total / (1 + vp / 100) : inv.total;
+    const vat = inv.total - excl;
+    total += inv.total || 0;
+    return "<Row>" + cellS(inv.number) + cellS(inv.date) + cellS(inv.customerName) + cellS(inv.customerEmail) + cellS(inv.description)
+      + cellN(inv.total, "money") + cellN(vp) + cellN(vat, "money") + cellN(excl, "money") + cellS(inv.currency || s.currency || "EUR") + cellS(inv.method) + cellS(inv.status) + "</Row>";
+  }).join("");
+  const headerRow = "<Row>" + headers.map((h) => `<Cell ss:StyleID="hdr"><Data ss:Type="String">${xmlEsc(h)}</Data></Cell>`).join("") + "</Row>";
+  const totalRow = "<Row>" + cellS("") + cellS("") + cellS("") + cellS("") + `<Cell ss:StyleID="hdr"><Data ss:Type="String">Totaal</Data></Cell>` + cellN(total, "moneyB") + "</Row>";
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<?mso-application progid="Excel.Sheet"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
+ <Styles>
+  <Style ss:ID="hdr"><Font ss:Bold="1"/><Interior ss:Color="#EFEFEF" ss:Pattern="Solid"/></Style>
+  <Style ss:ID="money"><NumberFormat ss:Format="#,##0.00"/></Style>
+  <Style ss:ID="moneyB"><Font ss:Bold="1"/><NumberFormat ss:Format="#,##0.00"/></Style>
+ </Styles>
+ <Worksheet ss:Name="Facturen">
+  <Table>${headerRow}${dataRows}${totalRow}</Table>
+ </Worksheet>
+</Workbook>`;
+}
+
+/**
+ * BTW/VAT report: invoices grouped per VAT rate with taxable base (excl.), VAT amount and total
+ * (incl.) — what a studio needs to prepare a VAT return. Real Excel (.xls SpreadsheetML).
+ */
+export function renderVatReportXls(s: InvoiceSettings, rows: InvoiceRow[], periodLabel: string): string {
+  const byRate: Record<number, { count: number; incl: number; excl: number; vat: number }> = {};
+  for (const inv of rows) {
+    const vp = inv.vatPercent || 0;
+    const excl = vp > 0 ? inv.total / (1 + vp / 100) : inv.total;
+    const g = (byRate[vp] ||= { count: 0, incl: 0, excl: 0, vat: 0 });
+    g.count++; g.incl += inv.total; g.excl += excl; g.vat += inv.total - excl;
+  }
+  const r2 = (n: number) => Math.round(n * 100) / 100;
+  const headers = ["BTW-tarief", "Aantal facturen", "Grondslag (excl. btw)", "BTW-bedrag", "Totaal (incl. btw)"];
+  const headerRow = "<Row>" + headers.map((h) => `<Cell ss:StyleID="hdr"><Data ss:Type="String">${xmlEsc(h)}</Data></Cell>`).join("") + "</Row>";
+  const sN = (v: number, st?: string) => `<Cell${st ? ` ss:StyleID="${st}"` : ""}><Data ss:Type="Number">${r2(v)}</Data></Cell>`;
+  const sStr = (v: string, st?: string) => `<Cell${st ? ` ss:StyleID="${st}"` : ""}><Data ss:Type="String">${xmlEsc(v)}</Data></Cell>`;
+  let tc = 0, ti = 0, te = 0, tv = 0;
+  const dataRows = Object.keys(byRate).map(Number).sort((a, b) => a - b).map((vp) => {
+    const g = byRate[vp]; tc += g.count; ti += g.incl; te += g.excl; tv += g.vat;
+    return "<Row>" + sStr(vp + "%") + sN(g.count) + sN(g.excl, "money") + sN(g.vat, "money") + sN(g.incl, "money") + "</Row>";
+  }).join("");
+  const totalRow = "<Row>" + `<Cell ss:StyleID="hdr"><Data ss:Type="String">Totaal</Data></Cell>` + sN(tc, "hdr") + sN(te, "moneyB") + sN(tv, "moneyB") + sN(ti, "moneyB") + "</Row>";
+  const title = "<Row>" + sStr("BTW-overzicht — " + periodLabel, "hdr") + "</Row><Row></Row>";
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<?mso-application progid="Excel.Sheet"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
+ <Styles>
+  <Style ss:ID="hdr"><Font ss:Bold="1"/><Interior ss:Color="#EFEFEF" ss:Pattern="Solid"/></Style>
+  <Style ss:ID="money"><NumberFormat ss:Format="#,##0.00"/></Style>
+  <Style ss:ID="moneyB"><Font ss:Bold="1"/><NumberFormat ss:Format="#,##0.00"/></Style>
+ </Styles>
+ <Worksheet ss:Name="BTW-overzicht">
+  <Table>${title}${headerRow}${dataRows}${totalRow}</Table>
+ </Worksheet>
+</Workbook>`;
+}
+
+/** Teacher payout overview: classes given + bookings + attendance per teacher, optional payout. */
+export function renderTeacherPayoutXls(rows: { teacher: string; email: string; classes: number; bookings: number; present: number }[], periodLabel: string, rate: number): string {
+  const withRate = rate > 0;
+  const headers = ["Docent", "E-mail", "Aantal lessen", "Boekingen", "Aanwezig"].concat(withRate ? ["Tarief/les", "Uitbetaling"] : []);
+  const r2 = (n: number) => Math.round(n * 100) / 100;
+  const headerRow = "<Row>" + headers.map((h) => `<Cell ss:StyleID="hdr"><Data ss:Type="String">${xmlEsc(h)}</Data></Cell>`).join("") + "</Row>";
+  const sN = (v: number, st?: string) => `<Cell${st ? ` ss:StyleID="${st}"` : ""}><Data ss:Type="Number">${r2(v)}</Data></Cell>`;
+  const sStr = (v: string, st?: string) => `<Cell${st ? ` ss:StyleID="${st}"` : ""}><Data ss:Type="String">${xmlEsc(v)}</Data></Cell>`;
+  let tc = 0, tb = 0, tp = 0, tpay = 0;
+  const dataRows = rows.map((r) => {
+    tc += r.classes; tb += r.bookings; tp += r.present; const pay = r.classes * rate; tpay += pay;
+    return "<Row>" + sStr(r.teacher || r.email) + sStr(r.email) + sN(r.classes) + sN(r.bookings) + sN(r.present) + (withRate ? sN(rate, "money") + sN(pay, "money") : "") + "</Row>";
+  }).join("");
+  const totalRow = "<Row>" + `<Cell ss:StyleID="hdr"><Data ss:Type="String">Totaal</Data></Cell>` + sStr("") + sN(tc, "hdr") + sN(tb, "hdr") + sN(tp, "hdr") + (withRate ? sStr("") + sN(tpay, "moneyB") : "") + "</Row>";
+  const title = "<Row>" + sStr("Docenten-uitbetaling — " + periodLabel, "hdr") + "</Row><Row></Row>";
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<?mso-application progid="Excel.Sheet"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
+ <Styles>
+  <Style ss:ID="hdr"><Font ss:Bold="1"/><Interior ss:Color="#EFEFEF" ss:Pattern="Solid"/></Style>
+  <Style ss:ID="money"><NumberFormat ss:Format="#,##0.00"/></Style>
+  <Style ss:ID="moneyB"><Font ss:Bold="1"/><NumberFormat ss:Format="#,##0.00"/></Style>
+ </Styles>
+ <Worksheet ss:Name="Docenten">
+  <Table>${title}${headerRow}${dataRows}${totalRow}</Table>
+ </Worksheet>
+</Workbook>`;
 }

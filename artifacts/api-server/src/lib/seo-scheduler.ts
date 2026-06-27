@@ -1,12 +1,11 @@
 /**
  * Auto-publish scheduler for the SEO engine. Runs SERVER-SIDE (independent of any browser/website
- * being open): for each project with auto ON it publishes up to `maxPerDay` articles per day
- * (default 2), spaced evenly (~24h / maxPerDay apart). As long as the API server runs, it keeps
- * generating. Best-effort; never throws.
+ * being open): for each project with auto ON it publishes at most ONE article per day (hard cap),
+ * at least ~24h apart. As long as the API server runs, it keeps generating. Best-effort; never throws.
  */
 import { db, projectSeo } from "@workspace/db";
 import { eq } from "drizzle-orm";
-import { publishArticle, publishedToday, getSettings } from "./seo.js";
+import { publishArticle, publishedToday } from "./seo.js";
 import { logger } from "./logger";
 
 let started = false;
@@ -17,10 +16,11 @@ async function tick(): Promise<void> {
     const now = Date.now();
     for (const row of rows) {
       try {
-        const perDay = Math.max(1, (await getSettings(row.projectId)).maxPerDay); // default 2/day
-        // Already hit today's target?
+        // HARD CAP: never publish more than 1 article per day per website.
+        const perDay = 1;
+        // Already published today?
         if ((await publishedToday(row.projectId)) >= perDay) continue;
-        // Space the articles out across the day (e.g. 2/day → ~12h apart).
+        // At most one per 24h.
         const minGapMs = Math.floor(86400000 / perDay);
         if (row.lastRunAt && now - new Date(row.lastRunAt).getTime() < minGapMs) continue;
         const result = await publishArticle(row.projectId, new Date().toISOString(), { mode: "auto" });
