@@ -1600,7 +1600,8 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
     if(act==='clearcancels'){S.bookings=S.bookings.filter(function(b){return b.status!=='cancelled';});save();renderHost();return;}
     if(act==='stripe-onboard'){var ex=root.querySelector('#ba-stripe-extra');if(ex)ex.textContent='Bezig…';
       var w=null;try{w=window.open('about:blank','_blank');}catch(e){} // open SYNC binnen de klik (Safari)
-      fetch(api('stripe/onboard'),{method:'POST'}).then(function(r){return r.json();}).then(function(d){
+      var here=location.href.replace(/[?&](betaald|geannuleerd|stripe)=[^&]*/g,'');
+      fetch(api('stripe/onboard'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({returnUrl:here,refreshUrl:here})}).then(function(r){return r.json();}).then(function(d){
         if(d.url){
           try{if(w)w.location.href=d.url;}catch(e){}
           // Altijd ook een klikbare link tonen (één klik werkt altijd, ook als de pop-up wordt geblokkeerd).

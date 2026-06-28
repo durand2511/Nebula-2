@@ -8,7 +8,7 @@
  * We call the Stripe REST API directly with fetch (no SDK dependency). Secret key lives in
  * .env (STRIPE_SECRET_KEY); the webhook signing secret in STRIPE_WEBHOOK_SECRET.
  */
-import { Router, type IRouter, type Request, raw } from "express";
+import { Router, type IRouter, type Request, raw, json } from "express";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { db, projectStripe, studioVideoAccess, studioPurchases, studioWallets, platformUsers } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
@@ -124,9 +124,15 @@ export async function stripeRefund(projectId: number, opts: { paymentIntent?: st
 }
 
 // ── 1. Onboarding: get-or-create the studio's Express account + an onboarding link ──
-router.post("/projects/:id/stripe/onboard", async (req, res) => {
+router.post("/projects/:id/stripe/onboard", json({ limit: "16kb" }), async (req, res) => {
   const projectId = Number(req.params.id);
   if (isNaN(projectId)) { res.status(400).json({ error: "Invalid project ID" }); return; }
+  // Stripe rejects localhost return/refresh URLs in LIVE mode. Prefer the exact page the studio is
+  // on (sent by the booking app), then the request's live host — never a hardcoded localhost.
+  const b = req.body || {};
+  const fallback = `${baseUrl(req)}/projects/${projectId}`;
+  const returnUrl = (typeof b.returnUrl === "string" && /^https?:\/\//.test(b.returnUrl) && b.returnUrl) || fallback;
+  const refreshUrl = (typeof b.refreshUrl === "string" && /^https?:\/\//.test(b.refreshUrl) && b.refreshUrl) || returnUrl;
   try {
     let [row] = await db.select().from(projectStripe).where(eq(projectStripe.projectId, projectId));
     if (!row) {
@@ -138,8 +144,8 @@ router.post("/projects/:id/stripe/onboard", async (req, res) => {
     }
     const link = await stripeReq("POST", "account_links", {
       account: row.accountId,
-      refresh_url: `${baseUrl(req)}/projects/${projectId}`,
-      return_url: `${baseUrl(req)}/projects/${projectId}`,
+      refresh_url: refreshUrl,
+      return_url: returnUrl,
       type: "account_onboarding",
     });
     res.json({ url: link.url, accountId: row.accountId });
