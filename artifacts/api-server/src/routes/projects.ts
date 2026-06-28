@@ -6,6 +6,8 @@ import { Agent, fetch as safeFetch } from "undici";
 import { load as cheerioLoad } from "cheerio";
 import { db, projects, projectMessages, projectFiles, projectSnapshots, learnings, emailReminders, studioClasses, studioUsers, studioBookings, type PlatformUser } from "@workspace/db";
 import { getSessionUser, tokenFrom } from "../lib/platform-auth.js";
+import { isSubscribed, isBookingRequest, chargeTrackedUsage } from "../lib/billing.js";
+import { runWithUsage } from "../lib/ai-usage.js";
 import {
   CreateProjectBody,
   GetProjectParams,
@@ -5841,6 +5843,10 @@ router.post("/projects/:projectId/messages/stream", json({ limit: "25mb" }), asy
     return;
   }
 
+  // Account + ownership (multi-tenant) + billing gate.
+  const owner = await requireOwner(req, res, projectId);
+  if (!owner) return;
+
   // If a build is already running for this project, attach this client to it
   // instead of starting a second one (the client guards against this, but a
   // stale tab could still POST). Otherwise start a fresh detached build.
@@ -5850,16 +5856,28 @@ router.post("/projects/:projectId/messages/stream", json({ limit: "25mb" }), asy
     return;
   }
 
-  // Short acknowledgments ("dankjewel", "ok", etc.) get a chat reply, no build.
+  // Short acknowledgments ("dankjewel", "ok", etc.) get a chat reply, no build — allowed for all,
+  // still metered (cheap).
   if (images.length === 0 && content.length < 200 && await checkConversational(content, projectId)) {
     const session = createBuildSession(projectId);
-    void handleConversational(session, projectId, content);
+    void runWithUsage(() => handleConversational(session, projectId, content)).then(({ totals }) => chargeTrackedUsage(owner.id, projectId, content, totals)).catch(() => {});
     attachToBuild(session, res);
     return;
   }
 
+  // Billing gate for real AI changes.
+  const subscribed = isSubscribed(owner);
+  if (subscribed && (owner.aiCredit ?? 0) <= 0) {
+    res.status(402).json({ error: "Je AI-tegoed is op. Koop bij in je profiel → Abonnement." });
+    return;
+  }
+  if (!subscribed && !isBookingRequest(content)) {
+    res.status(402).json({ error: "Met een gratis account kan de AI alleen een boekingssysteem toevoegen of de admin-login instellen. Abonneer je (€69,99/maand) voor volledige AI-bewerkingen." });
+    return;
+  }
+
   const session = createBuildSession(projectId);
-  void runBuildPipeline(session, projectId, content, images);
+  void runWithUsage(() => runBuildPipeline(session, projectId, content, images)).then(({ totals }) => chargeTrackedUsage(owner.id, projectId, content, totals)).catch(() => {});
   attachToBuild(session, res);
 });
 

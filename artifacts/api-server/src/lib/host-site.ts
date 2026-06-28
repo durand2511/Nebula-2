@@ -3,10 +3,21 @@
  * project_files (/ → index.html, /booking-app.html → that file, /blog/x.html → that file) and
  * return it. Simple MVP renderer — serves the stored files as-is.
  */
-import { db, projectFiles } from "@workspace/db";
+import { db, projectFiles, projects, platformUsers } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import type { Request, Response } from "express";
 import { getPublishedFiles } from "./site-publish.js";
+
+// A non-removable "Made with Nebula" badge (injected at serve time) for FREE (unsubscribed) sites.
+const NEBULA_BADGE = `<a href="https://nebulabookings.com" target="_blank" rel="noopener" style="position:fixed;right:14px;bottom:14px;z-index:2147483647;display:flex;align-items:center;gap:6px;background:#fff;color:#111827;font:600 13px/1 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;padding:8px 13px;border-radius:999px;box-shadow:0 2px 14px rgba(0,0,0,.2);text-decoration:none">Made with <span style="color:#7a00df">Nebula</span></a>`;
+
+// Is the project's owner a paying subscriber? (ownerless/legacy projects count as NOT subscribed.)
+async function ownerSubscribed(projectId: number): Promise<boolean> {
+  const [p] = await db.select().from(projects).where(eq(projects.id, projectId));
+  if (!p?.ownerId) return false;
+  const [u] = await db.select().from(platformUsers).where(eq(platformUsers.id, p.ownerId));
+  return u?.subscriptionStatus === "active";
+}
 
 const TYPES: Record<string, string> = {
   html: "text/html; charset=utf-8", css: "text/css; charset=utf-8", js: "application/javascript; charset=utf-8",
@@ -78,6 +89,10 @@ export async function serveProjectSite(projectId: number, req: Request, res: Res
     if (/<head[^>]*>/i.test(content)) content = content.replace(/<head[^>]*>/i, (m) => m + tag);
     else if (/<body[^>]*>/i.test(content)) content = content.replace(/<body[^>]*>/i, (m) => m + tag);
     else content = tag + content;
+    // Free (unsubscribed) sites carry a non-removable Nebula badge bottom-right.
+    if (!(await ownerSubscribed(projectId))) {
+      content = /<\/body>/i.test(content) ? content.replace(/<\/body>/i, NEBULA_BADGE + "</body>") : content + NEBULA_BADGE;
+    }
   }
   res.send(content);
 }

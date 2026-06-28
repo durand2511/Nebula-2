@@ -12,7 +12,7 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { ArrowRight, Globe, Loader2, FileCode, MessageSquare, Clock, Trash2, Sparkles, CalendarCheck, Rocket, User as UserIcon, LogOut, X } from "lucide-react";
+import { ArrowRight, Globe, Loader2, FileCode, MessageSquare, Clock, Trash2, Sparkles, CalendarCheck, Rocket, User as UserIcon, LogOut, X, CreditCard, Check } from "lucide-react";
 import logoUrl from "../assets/nebula-logo.png";
 import { getToken, setToken, clearToken, type PlatformUser } from "@/lib/session";
 
@@ -40,6 +40,7 @@ export function AiEditor() {
   const [notice, setNotice] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [billingOpen, setBillingOpen] = useState(false);
 
   // ── project/import state ──
   const [url, setUrl] = useState("");
@@ -183,6 +184,7 @@ export function AiEditor() {
               <div className="text-xs text-muted-foreground truncate">{user.email}</div>
             </div>
             <button className="w-full text-left rounded-lg px-3 py-2 hover:bg-muted/50 flex items-center gap-2" onClick={() => { setProfileOpen(true); setMenuOpen(false); }}><UserIcon className="h-4 w-4" /> Profiel</button>
+            <button className="w-full text-left rounded-lg px-3 py-2 hover:bg-muted/50 flex items-center gap-2" onClick={() => { setBillingOpen(true); setMenuOpen(false); }} data-testid="menu-billing"><CreditCard className="h-4 w-4" /> Abonnement</button>
             <button className="w-full text-left rounded-lg px-3 py-2 hover:bg-muted/50 flex items-center gap-2 text-destructive" onClick={doLogout}><LogOut className="h-4 w-4" /> Uitloggen</button>
           </div>
         )}
@@ -234,6 +236,7 @@ export function AiEditor() {
       )}
 
       <ProfileDialog open={profileOpen} onClose={() => setProfileOpen(false)} user={user} onSaved={(u) => setUser(u)} onDeleted={() => { clearToken(); setUser(null); setProfileOpen(false); refresh(); }} />
+      <BillingDialog open={billingOpen} onClose={() => setBillingOpen(false)} />
 
       <AlertDialog open={confirmDel} onOpenChange={(open) => { if (!open) { setConfirmDel(false); deleteProject.reset(); } }}>
         <AlertDialogContent className="light bg-white border-neutral-200">
@@ -250,6 +253,84 @@ export function AiEditor() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+    </div>
+  );
+}
+
+async function billingApi(path: string, body?: unknown): Promise<{ ok: boolean; d: any }> {
+  const r = await fetch(`/api/billing${path}`, {
+    method: body === undefined ? "GET" : "POST",
+    headers: { "Content-Type": "application/json", ...(getToken() ? { Authorization: `Bearer ${getToken()}` } : {}) },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const d = await r.json().catch(() => ({}));
+  return { ok: r.ok, d };
+}
+
+// ── Abonnement + AI-tegoed ──
+function BillingDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [data, setData] = useState<any>(null);
+  const [busy, setBusy] = useState(false);
+  const [topup, setTopup] = useState("10");
+  const load = () => billingApi("").then((r) => { if (r.ok) setData(r.d); });
+  useEffect(() => { if (open) { setData(null); load(); } }, [open]);
+  if (!open) return null;
+
+  const subscribe = async () => { setBusy(true); const r = await billingApi("/subscribe", {}); setBusy(false); if (r.ok && r.d.url) window.location.href = r.d.url; else alert(r.d.error || "Abonneren mislukt."); };
+  const doTopup = async () => { const amt = Math.max(5, parseFloat(topup) || 0); setBusy(true); const r = await billingApi("/topup", { amount: amt }); setBusy(false); if (r.ok && r.d.url) window.location.href = r.d.url; else alert(r.d.error || "Bijkopen mislukt."); };
+  const cancel = async () => { if (!window.confirm("Je abonnement opzeggen? Je houdt toegang tot het einde van de periode.")) return; setBusy(true); const r = await billingApi("/cancel", {}); setBusy(false); if (r.ok) load(); else alert(r.d.error || "Opzeggen mislukt."); };
+
+  const credit = data ? data.aiCredit : 0;
+  const pct = data ? Math.max(0, Math.min(100, (credit / (data.monthlyCredit || 7.5)) * 100)) : 0;
+
+  return (
+    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+      <div className="w-[min(540px,96%)] max-h-[88vh] overflow-y-auto rounded-xl bg-background border shadow-2xl p-6" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-4"><h3 className="text-lg font-semibold flex items-center gap-2"><CreditCard className="h-5 w-5" /> Abonnement</h3><Button variant="ghost" size="icon" className="h-8 w-8" onClick={onClose}><X className="h-4 w-4" /></Button></div>
+        {!data ? (<div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>) : (<>
+          {/* Subscription */}
+          {data.subscribed ? (
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 mb-4">
+              <div className="flex items-center gap-2 text-emerald-700 font-medium"><Check className="h-4 w-4" /> Actief abonnement — €{data.priceEur}/maand</div>
+              {data.currentPeriodEnd && <p className="text-xs text-emerald-700/80 mt-1">Verlengt op {data.currentPeriodEnd}</p>}
+              <Button variant="outline" size="sm" className="mt-3 border-destructive/40 text-destructive hover:bg-destructive/10" disabled={busy} onClick={cancel}>Opzeggen</Button>
+            </div>
+          ) : (
+            <div className="rounded-xl border p-5 mb-4 text-center">
+              <h4 className="text-xl font-bold">Nebula Pro</h4>
+              <p className="text-3xl font-extrabold mt-1">€{data.priceEur}<span className="text-base font-medium text-muted-foreground">/maand</span></p>
+              <ul className="text-sm text-muted-foreground mt-3 space-y-1 text-left max-w-xs mx-auto">
+                <li className="flex gap-2"><Check className="h-4 w-4 text-primary shrink-0" /> Volledige AI-chat (€{data.monthlyCredit} tegoed/maand)</li>
+                <li className="flex gap-2"><Check className="h-4 w-4 text-primary shrink-0" /> Publiceren op je eigen domein</li>
+                <li className="flex gap-2"><Check className="h-4 w-4 text-primary shrink-0" /> Geen Nebula-logo op je site</li>
+              </ul>
+              <Button className="mt-4 w-full h-11 font-bold" disabled={busy} onClick={subscribe} data-testid="button-subscribe">{busy ? <Loader2 className="h-5 w-5 animate-spin" /> : "Abonneren"}</Button>
+            </div>
+          )}
+          {/* AI credit */}
+          <div className="rounded-xl border p-4 mb-4">
+            <div className="flex items-center justify-between"><span className="font-medium text-sm">AI-tegoed</span><span className="font-bold">€{credit.toFixed(2)}</span></div>
+            <div className="h-2 w-full rounded-full bg-muted mt-2 overflow-hidden"><div className="h-full bg-primary" style={{ width: `${pct}%` }} /></div>
+            <p className="text-xs text-muted-foreground mt-1">Elke AI-wijziging kost z'n werkelijke kostprijs ×2. €{data.monthlyCredit} per maand inbegrepen; bijkopen blijft staan.</p>
+            <div className="flex items-end gap-2 mt-3">
+              <div className="flex-1"><label className="text-xs text-muted-foreground">Bijkopen (€, zelf invullen)</label><Input type="number" min="5" step="5" value={topup} onChange={(e) => setTopup(e.target.value)} /></div>
+              <Button size="sm" className="h-10" disabled={busy || !(parseFloat(topup) >= 5)} onClick={doTopup} data-testid="button-topup">Bijkopen</Button>
+            </div>
+          </div>
+          {/* Usage */}
+          <h4 className="font-medium text-sm mb-2">Recent verbruik</h4>
+          {(!data.usage || data.usage.length === 0) ? (<p className="text-xs text-muted-foreground">Nog geen AI-wijzigingen.</p>) : (
+            <div className="space-y-1 max-h-48 overflow-y-auto">
+              {data.usage.map((u: any, i: number) => (
+                <div key={i} className="flex items-center justify-between text-xs border-b border-border/40 py-1.5">
+                  <span className="truncate pr-2 text-muted-foreground">{u.summary || "AI-wijziging"}</span>
+                  <span className="shrink-0 font-medium">€{(u.costEur || 0).toFixed(3)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </>)}
+      </div>
     </div>
   );
 }

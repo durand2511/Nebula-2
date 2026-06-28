@@ -10,12 +10,24 @@
  */
 import { Router, type IRouter, raw } from "express";
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { db, projectStripe, studioVideoAccess, studioPurchases, studioWallets } from "@workspace/db";
+import { db, projectStripe, studioVideoAccess, studioPurchases, studioWallets, platformUsers } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
 import { logger } from "../lib/logger";
 import { sendBookingEmail } from "../lib/email.js";
+import { getSessionUser, tokenFrom } from "../lib/platform-auth.js";
+import { addCredit, recentUsage, isSubscribed, MONTHLY_AI_CREDIT_EUR, SUBSCRIPTION_PRICE_EUR } from "../lib/billing.js";
 
 const router: IRouter = Router();
+
+// Nebula platform subscription (€69,99/mo) price id (not secret) — overridable via env.
+const NEBULA_PRICE = process.env.STRIPE_NEBULA_PRICE || "price_1TnJ4EH6IP6GE07dMkhROecB";
+// Get-or-create the Stripe customer for a platform user (on the PLATFORM account, no Connect header).
+async function ensureCustomer(u: { id: number; email: string; name: string; stripeCustomerId: string }): Promise<string> {
+  if (u.stripeCustomerId) return u.stripeCustomerId;
+  const c = await stripeReq("POST", "customers", { email: u.email, name: u.name, "metadata[platformUserId]": String(u.id) });
+  await db.update(platformUsers).set({ stripeCustomerId: c.id }).where(eq(platformUsers.id, u.id));
+  return c.id;
+}
 
 // ── Stripe REST helper ────────────────────────────────────────────────────────
 function toForm(obj: Record<string, unknown>, prefix = ""): string[] {
@@ -272,6 +284,47 @@ router.post("/stripe/webhook", raw({ type: "*/*" }), async (req, res) => {
   }
   try {
     const event = JSON.parse(payload.toString("utf8"));
+    // PLATFORM (Nebula) billing events fire on OUR account (no event.account). Connect/studio events
+    // carry event.account and fall through to the studio logic below.
+    if (!event.account) {
+      const obj = event.data?.object || {};
+      const findUser = async () => {
+        const pid = obj.metadata?.platformUserId || obj.client_reference_id;
+        if (pid) { const [u] = await db.select().from(platformUsers).where(eq(platformUsers.id, Number(pid))); if (u) return u; }
+        const cust = obj.customer; if (cust) { const [u] = await db.select().from(platformUsers).where(eq(platformUsers.stripeCustomerId, String(cust))); if (u) return u; }
+        return null;
+      };
+      const periodEndYmd = (sub: any) => sub?.current_period_end ? ymdUTC(new Date(sub.current_period_end * 1000)) : "";
+      if (event.type === "checkout.session.completed") {
+        const u = await findUser();
+        if (u && obj.mode === "subscription") {
+          await db.update(platformUsers).set({ subscriptionId: String(obj.subscription || ""), subscriptionStatus: "active" }).where(eq(platformUsers.id, u.id));
+          await addCredit(u.id, 0, "refill"); // grant the included €7,50 right away
+          logger.info({ userId: u.id }, "[billing] subscription started");
+        } else if (u && obj.mode === "payment" && obj.metadata?.kind === "topup") {
+          await addCredit(u.id, Number(obj.metadata?.amountEur) || 0, "add");
+          logger.info({ userId: u.id, amount: obj.metadata?.amountEur }, "[billing] AI credit topped up");
+        }
+      } else if (event.type === "invoice.paid" || event.type === "invoice.payment_succeeded") {
+        const u = await findUser();
+        if (u) {
+          const pe = obj.lines?.data?.[0]?.period?.end ? ymdUTC(new Date(obj.lines.data[0].period.end * 1000)) : "";
+          await db.update(platformUsers).set({ subscriptionStatus: "active", ...(pe ? { currentPeriodEnd: pe } : {}) }).where(eq(platformUsers.id, u.id));
+          await addCredit(u.id, 0, "refill"); // monthly €7,50 top-up to the included amount
+          logger.info({ userId: u.id }, "[billing] subscription renewed + credit refilled");
+        }
+      } else if (event.type === "customer.subscription.updated") {
+        const u = await findUser();
+        if (u) await db.update(platformUsers).set({ subscriptionStatus: obj.status === "active" || obj.status === "trialing" ? "active" : obj.status === "past_due" ? "past_due" : "canceled", currentPeriodEnd: periodEndYmd(obj) }).where(eq(platformUsers.id, u.id));
+      } else if (event.type === "customer.subscription.deleted") {
+        const u = await findUser();
+        if (u) await db.update(platformUsers).set({ subscriptionStatus: "canceled", subscriptionId: "" }).where(eq(platformUsers.id, u.id));
+      } else if (event.type === "invoice.payment_failed") {
+        const u = await findUser();
+        if (u) await db.update(platformUsers).set({ subscriptionStatus: "past_due" }).where(eq(platformUsers.id, u.id));
+      }
+      res.json({ received: true }); return;
+    }
     // Recurring video subscriptions: each automatic monthly charge extends access; deletion stops it.
     if (event.type === "invoice.paid" || event.type === "invoice.payment_succeeded") {
       const sub = event.data?.object?.subscription || event.data?.object?.lines?.data?.[0]?.subscription;
@@ -327,6 +380,64 @@ router.post("/stripe/webhook", raw({ type: "*/*" }), async (req, res) => {
     }
   } catch (err) { logger.warn({ err }, "[stripe] webhook handling error"); }
   res.json({ received: true });
+});
+
+// ── Nebula platform billing (subscription + AI-credit top-up) ──────────────────
+async function billingUser(req: unknown) {
+  return getSessionUser(tokenFrom(req as { headers: Record<string, unknown>; query?: Record<string, unknown> }));
+}
+
+// Start the €69,99/mo subscription checkout (on the PLATFORM account — no Connect header).
+router.post("/billing/subscribe", async (req, res) => {
+  const u = await billingUser(req); if (!u) { res.status(401).json({ error: "Niet ingelogd." }); return; }
+  try {
+    const customer = await ensureCustomer(u);
+    const base = baseUrl(req as any);
+    const session = await stripeReq("POST", "checkout/sessions", {
+      mode: "subscription", customer, client_reference_id: String(u.id),
+      line_items: [{ price: NEBULA_PRICE, quantity: 1 }],
+      subscription_data: { metadata: { platformUserId: String(u.id) } },
+      success_url: `${base}/ai-editor?sub=ok`, cancel_url: `${base}/ai-editor?sub=cancel`,
+    });
+    res.json({ url: session.url });
+  } catch (err) { logger.error({ err, userId: u.id }, "[billing] subscribe failed"); res.status(500).json({ error: err instanceof Error ? err.message : "Abonneren mislukt." }); }
+});
+
+// Top up AI credit with a self-chosen amount (one-time payment, platform account).
+router.post("/billing/topup", async (req, res) => {
+  const u = await billingUser(req); if (!u) { res.status(401).json({ error: "Niet ingelogd." }); return; }
+  const amount = Math.max(5, Math.min(500, Number(req.body?.amount) || 0)); // €5–€500
+  if (!(amount > 0)) { res.status(400).json({ error: "Ongeldig bedrag." }); return; }
+  try {
+    const customer = await ensureCustomer(u);
+    const base = baseUrl(req as any);
+    const session = await stripeReq("POST", "checkout/sessions", {
+      mode: "payment", customer, client_reference_id: String(u.id),
+      line_items: [{ quantity: 1, price_data: { currency: "eur", unit_amount: Math.round(amount * 100), product_data: { name: "Nebula AI-tegoed" } } }],
+      metadata: { kind: "topup", platformUserId: String(u.id), amountEur: String(amount) },
+      payment_intent_data: { metadata: { kind: "topup", platformUserId: String(u.id), amountEur: String(amount) } },
+      success_url: `${base}/ai-editor?topup=ok`, cancel_url: `${base}/ai-editor?topup=cancel`,
+    });
+    res.json({ url: session.url });
+  } catch (err) { logger.error({ err, userId: u.id }, "[billing] topup failed"); res.status(500).json({ error: err instanceof Error ? err.message : "Bijkopen mislukt." }); }
+});
+
+// Status: subscription + AI credit + recent usage.
+router.get("/billing", async (req, res) => {
+  const u = await billingUser(req); if (!u) { res.status(401).json({ error: "Niet ingelogd." }); return; }
+  res.json({
+    subscribed: isSubscribed(u), status: u.subscriptionStatus, currentPeriodEnd: u.currentPeriodEnd,
+    aiCredit: Math.round((u.aiCredit || 0) * 100) / 100, monthlyCredit: MONTHLY_AI_CREDIT_EUR, priceEur: SUBSCRIPTION_PRICE_EUR,
+    usage: await recentUsage(u.id),
+  });
+});
+
+// Cancel the subscription at period end (keeps access until then).
+router.post("/billing/cancel", async (req, res) => {
+  const u = await billingUser(req); if (!u) { res.status(401).json({ error: "Niet ingelogd." }); return; }
+  if (!u.subscriptionId) { res.status(400).json({ error: "Geen actief abonnement." }); return; }
+  try { await stripeReq("POST", `subscriptions/${encodeURIComponent(u.subscriptionId)}`, { cancel_at_period_end: true }); res.json({ ok: true }); }
+  catch (err) { logger.error({ err, userId: u.id }, "[billing] cancel failed"); res.status(500).json({ error: "Opzeggen mislukt." }); }
 });
 
 export default router;

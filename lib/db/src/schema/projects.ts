@@ -11,6 +11,22 @@ export const platformUsers = pgTable("platform_users", {
   name: text("name").notNull().default(""),
   birthdate: text("birthdate").notNull().default(""), // yyyy-mm-dd
   phone: text("phone").notNull().default(""),
+  // Billing (Nebula platform subscription €69,99/mo + AI credit wallet, in EUR).
+  stripeCustomerId: text("stripe_customer_id").notNull().default(""),
+  subscriptionId: text("subscription_id").notNull().default(""),
+  subscriptionStatus: text("subscription_status").notNull().default("none"), // none | active | past_due | canceled
+  currentPeriodEnd: text("current_period_end").notNull().default(""),         // yyyy-mm-dd
+  aiCredit: real("ai_credit").notNull().default(0),                            // euros of AI budget left
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+// Per-AI-change billing log (what each chat edit cost, after the ×2 markup).
+export const platformAiUsage = pgTable("platform_ai_usage", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().references(() => platformUsers.id, { onDelete: "cascade" }),
+  projectId: integer("project_id"),
+  summary: text("summary").notNull().default(""),
+  costEur: real("cost_eur").notNull().default(0),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
@@ -504,3 +520,4 @@ export type StudioSettings = typeof studioSettings.$inferSelect;
 export type SitePublish = typeof sitePublishes.$inferSelect;
 export type PlatformUser = typeof platformUsers.$inferSelect;
 export type PlatformSession = typeof platformSessions.$inferSelect;
+export type PlatformAiUsage = typeof platformAiUsage.$inferSelect;

@@ -3,6 +3,11 @@ import { logger } from "./lib/logger";
 import { startReminderScheduler } from "./lib/reminders";
 import { startNudgeScheduler } from "./lib/nudges";
 import { startSeoScheduler } from "./lib/seo-scheduler";
+import { anthropic } from "@workspace/integrations-openai-ai-server";
+import { instrumentAnthropic } from "./lib/ai-usage";
+
+// Meter every AI call's token usage (per-request) so chat edits can be billed against AI credit.
+instrumentAnthropic(anthropic as any);
 
 const rawPort = process.env["PORT"];
 

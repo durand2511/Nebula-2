@@ -2407,8 +2407,18 @@ export function ProjectWorkspace() {
                   <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
                 </div>
               ) : messages?.length === 0 && !isStreaming ? (
-                <div className="text-center p-8 text-sm text-muted-foreground border border-dashed border-border/50 rounded-lg">
-                  Describe what you want to build to get started.
+                <div className="p-5 text-sm border border-border/60 rounded-2xl bg-card/60 space-y-4">
+                  <div>
+                    <div className="font-semibold text-foreground flex items-center gap-2"><Sparkles className="h-4 w-4 text-primary" /> Begin hier</div>
+                    <p className="text-muted-foreground mt-1">Vraag de chat om iets te bouwen of aan te passen. Bijvoorbeeld een boekingssysteem in je website:</p>
+                    <div className="mt-2 rounded-lg bg-muted/60 px-3 py-2 font-mono text-[12px] text-foreground/80">Voeg een boekingssysteem toe aan mijn website</div>
+                  </div>
+                  <div>
+                    <div className="font-medium text-foreground">Je admin-account instellen</div>
+                    <p className="text-muted-foreground mt-1">Wil je later kunnen inloggen op je boekingsbeheer? Typ in de chat:</p>
+                    <div className="mt-2 rounded-lg bg-muted/60 px-3 py-2 font-mono text-[12px] text-foreground/80">admin gebruikersnaam jouwmail@gmail.com wachtwoord</div>
+                    <p className="text-muted-foreground mt-1 text-xs">Daarmee maak je de beheerder-login aan waarmee je op het boekingssysteem inlogt.</p>
+                  </div>
                 </div>
               ) : (
                 messages?.map((msg) => {
@@ -2770,7 +2780,7 @@ export function ProjectWorkspace() {
             </div>
           </div>
 
-          <div className="p-4 bg-card border-t border-border">
+          <div className="px-3 pb-4 pt-2">
             {attachedImages.length > 0 && (
               <div className="flex flex-wrap gap-2 mb-2">
                 {attachedImages.map((img) => (
@@ -2796,15 +2806,15 @@ export function ProjectWorkspace() {
                 ))}
               </div>
             )}
-            <div className="relative">
+            <div className="relative rounded-[22px] border border-border bg-background shadow-lg transition focus-within:border-primary/50 focus-within:ring-2 focus-within:ring-primary/30">
               <Textarea
                 ref={chatTextareaRef}
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
                 onKeyDown={handleKeyDown}
                 onPaste={handlePaste}
-                placeholder="Ask Nebula to make changes..."
-                className="pr-12 pl-11 min-h-[80px] max-h-[200px] resize-none bg-background border-border focus-visible:ring-1 focus-visible:ring-primary/50"
+                placeholder="Vraag Nebula om iets te bouwen of aan te passen…"
+                className="pr-12 pl-11 min-h-[80px] max-h-[200px] resize-none bg-transparent border-0 shadow-none rounded-[22px] focus-visible:ring-0 focus-visible:ring-offset-0"
                 disabled={isStreaming}
                 data-testid="input-chat-prompt"
               />
@@ -3037,6 +3047,8 @@ export function ProjectWorkspace() {
                     title="Automatisch periodiek SEO-artikelen publiceren aan/uit"
                     onClick={async () => {
                       const next = !seoAuto;
+                      // Turning it OFF is a deliberate choice — confirm first (turning on is free).
+                      if (!next && !window.confirm("Weet je zeker dat je automatische SEO wilt uitzetten? Er worden dan geen nieuwe artikelen meer geschreven en gepubliceerd, wat je vindbaarheid in Google kan schaden.")) return;
                       setSeoAuto(next);
                       try {
                         await fetch(`/api/projects/${projectId}/seo/auto`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled: next }) });

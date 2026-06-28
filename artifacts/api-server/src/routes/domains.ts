@@ -1,6 +1,6 @@
 /** Custom-domain management API (per project; open like the rest of the API for now). */
 import { Router, json } from "express";
-import { db, projectFiles } from "@workspace/db";
+import { db, projectFiles, projects, platformUsers } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { logger } from "../lib/logger";
 import { addDomain, listDomains, deleteDomain, verifyDomain, publishSubdomain, getSubdomain, CUSTOMERS_TARGET, PLATFORM_HOST } from "../lib/domains.js";
@@ -12,6 +12,14 @@ const router = Router();
 // Rebuild booking-app.html from the LATEST template (keeps accounts/branding) so every publish ships
 // the newest booking app — incl. the window.__BA_PID__ fix that makes server features work on a
 // custom domain/subdomain. No-op if the project has no booking app.
+// Own-domain connecting is a paid feature: the project's owner must have an active subscription.
+async function ownerSubscribed(projectId: number): Promise<boolean> {
+  const [p] = await db.select().from(projects).where(eq(projects.id, projectId));
+  if (!p?.ownerId) return false;
+  const [u] = await db.select().from(platformUsers).where(eq(platformUsers.id, p.ownerId));
+  return u?.subscriptionStatus === "active";
+}
+
 async function refreshBookingApp(projectId: number): Promise<void> {
   const files = await db.select().from(projectFiles).where(eq(projectFiles.projectId, projectId));
   const rebuilt = rebuildBookingApp(files.map((f) => ({ path: f.path, content: f.content })));
@@ -58,6 +66,7 @@ router.post("/projects/:id/domains", json({ limit: "16kb" }), async (req, res) =
   const projectId = Number(req.params.id);
   if (isNaN(projectId)) { res.status(400).json({ error: "Invalid project ID" }); return; }
   try {
+    if (!(await ownerSubscribed(projectId))) { res.status(402).json({ error: "Een eigen domein koppelen kan met een abonnement (€69,99/maand). Gratis publiceer je op een Nebula-adres. Abonneer je in je profiel." }); return; }
     const row = await addDomain(projectId, String(req.body?.domain ?? ""));
     res.json({ ok: true, domain: row, instruction: `Voeg bij je DNS-provider een CNAME-record toe: ${row.domain} → ${CUSTOMERS_TARGET}`, target: CUSTOMERS_TARGET });
   } catch (err) { res.status(400).json({ error: (err as Error)?.message || "Toevoegen mislukt." }); }
