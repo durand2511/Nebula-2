@@ -8,7 +8,7 @@
  * We call the Stripe REST API directly with fetch (no SDK dependency). Secret key lives in
  * .env (STRIPE_SECRET_KEY); the webhook signing secret in STRIPE_WEBHOOK_SECRET.
  */
-import { Router, type IRouter, raw } from "express";
+import { Router, type IRouter, type Request, raw } from "express";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { db, projectStripe, studioVideoAccess, studioPurchases, studioWallets, platformUsers } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
@@ -16,6 +16,7 @@ import { logger } from "../lib/logger";
 import { sendBookingEmail } from "../lib/email.js";
 import { getSessionUser, tokenFrom } from "../lib/platform-auth.js";
 import { addCredit, recentUsage, isSubscribed, MONTHLY_AI_CREDIT_EUR, SUBSCRIPTION_PRICE_EUR } from "../lib/billing.js";
+import { reqBaseUrl } from "../lib/req-url.js";
 
 const router: IRouter = Router();
 
@@ -66,8 +67,10 @@ async function stripeReq(method: string, path: string, params?: Record<string, u
   return json;
 }
 
-const baseUrl = (req: { headers: Record<string, unknown> }) =>
-  (typeof req.headers["origin"] === "string" && req.headers["origin"]) || "http://localhost:5173";
+// Prefer the Origin the editor was opened on (so the studio returns to the right editor), then fall
+// back to the request's live host (never a hardcoded localhost in production).
+const baseUrl = (req: Request) =>
+  (typeof req.headers["origin"] === "string" && req.headers["origin"]) || reqBaseUrl(req);
 
 // ── Reusable helpers (used by the studio booking API to finalize/refund server-side) ──
 async function stripeAccountId(projectId: number): Promise<string | null> {

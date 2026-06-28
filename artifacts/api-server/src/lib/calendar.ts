@@ -9,28 +9,31 @@ import crypto from "node:crypto";
 
 export type Lesson = { id: string; title: string; date: string; time: string; mode?: string; onlineLink?: string; onlineInfo?: string; teacher?: string };
 
-const apiBase = () => process.env.PUBLIC_API_URL || "http://localhost:5001";
+// Base URL for the .ics feed. Prefer the live host the request came in on (passed by the route),
+// then PUBLIC_API_URL, then a dev fallback — so studios never get a localhost subscription link.
+const apiBase = (baseUrl?: string) => (baseUrl || process.env.PUBLIC_API_URL || "http://localhost:5001").replace(/\/+$/, "");
+const feedUrl = (projectId: number, token: string, baseUrl?: string) => `${apiBase(baseUrl)}/api/projects/${projectId}/calendar/${token}.ics`;
 
 /** Get-or-create the calendar row + feed token. */
-export async function ensureCalendar(projectId: number): Promise<{ token: string; url: string }> {
+export async function ensureCalendar(projectId: number, baseUrl?: string): Promise<{ token: string; url: string }> {
   let [row] = await db.select().from(projectCalendar).where(eq(projectCalendar.projectId, projectId));
   if (!row || !row.token) {
     const token = crypto.randomBytes(16).toString("hex");
     [row] = await db.insert(projectCalendar).values({ projectId, token, lessons: row?.lessons ?? "[]" })
       .onConflictDoUpdate({ target: projectCalendar.projectId, set: { token } }).returning();
   }
-  return { token: row.token, url: `${apiBase()}/api/projects/${projectId}/calendar/${row.token}.ics` };
+  return { token: row.token, url: feedUrl(projectId, row.token, baseUrl) };
 }
 
-export async function saveLessons(projectId: number, lessons: Lesson[]): Promise<{ token: string; url: string }> {
-  const { token, url } = await ensureCalendar(projectId);
+export async function saveLessons(projectId: number, lessons: Lesson[], baseUrl?: string): Promise<{ token: string; url: string }> {
+  const { token, url } = await ensureCalendar(projectId, baseUrl);
   await db.update(projectCalendar).set({ lessons: JSON.stringify(lessons.slice(0, 2000)), updatedAt: new Date() }).where(eq(projectCalendar.projectId, projectId));
   return { token, url };
 }
 
-export async function getStatus(projectId: number): Promise<{ token: string; url: string; lessonCount: number }> {
+export async function getStatus(projectId: number, baseUrl?: string): Promise<{ token: string; url: string; lessonCount: number }> {
   const [row] = await db.select().from(projectCalendar).where(eq(projectCalendar.projectId, projectId));
-  const { token, url } = await ensureCalendar(projectId);
+  const { token, url } = await ensureCalendar(projectId, baseUrl);
   let n = 0; try { n = (JSON.parse(row?.lessons ?? "[]") as Lesson[]).length; } catch { /* ignore */ }
   return { token, url, lessonCount: n };
 }

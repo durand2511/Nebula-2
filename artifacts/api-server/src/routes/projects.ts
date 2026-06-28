@@ -21,6 +21,7 @@ import { applyAction, rebuildBookingApp, ACTION_CATALOGUE, type BuilderAction } 
 import { sendBookingEmail, sendWithConfig, sendBroadcast, sendPaymentEmail, type EmailKind } from "../lib/email.js";
 import { getInvoiceSettings, saveInvoiceSettings, createInvoice, renderInvoiceHtml, renderInvoiceDocument, renderInvoicePdf, listInvoices, listInvoicesSince, renderInvoicesXls, renderVatReportXls, renderTeacherPayoutXls, getInvoice } from "../lib/invoice.js";
 import { ensureCalendar, saveLessons, getStatus as getCalendarStatus, buildIcs, getLessons, type Lesson } from "../lib/calendar.js";
+import { reqBaseUrl } from "../lib/req-url.js";
 import { emailBrandSeed } from "../lib/actions.js";
 import { resolveSmtpConfig, explainSmtpError } from "../lib/email-config.js";
 import { generateEmailBrand, loadEmailBrand } from "../lib/email-brand.js";
@@ -5691,13 +5692,13 @@ router.post("/projects/:projectId/calendar/sync", json({ limit: "512kb" }), asyn
   const projectId = Number(req.params.projectId);
   if (isNaN(projectId)) { res.status(400).json({ error: "Invalid project ID" }); return; }
   const lessons = Array.isArray(req.body?.lessons) ? (req.body.lessons as Lesson[]) : [];
-  try { const r = await saveLessons(projectId, lessons); res.json({ ok: true, ...r }); }
+  try { const r = await saveLessons(projectId, lessons, reqBaseUrl(req)); res.json({ ok: true, ...r }); }
   catch (err) { logger.error({ err, projectId }, "[calendar] sync failed"); res.status(500).json({ error: "Sync mislukt." }); }
 });
 router.get("/projects/:projectId/calendar", async (req, res) => {
   const projectId = Number(req.params.projectId);
   if (isNaN(projectId)) { res.status(400).json({ error: "Invalid project ID" }); return; }
-  try { await ensureCalendar(projectId); res.json(await getCalendarStatus(projectId)); }
+  try { await ensureCalendar(projectId, reqBaseUrl(req)); res.json(await getCalendarStatus(projectId, reqBaseUrl(req))); }
   catch (err) { logger.error({ err, projectId }, "[calendar] status failed"); res.status(500).json({ error: "Status mislukt." }); }
 });
 // Public, token-protected iCal feed that calendars subscribe to.
