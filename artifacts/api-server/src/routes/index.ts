@@ -1,5 +1,6 @@
 import { Router, type IRouter } from "express";
 import healthRouter from "./health";
+import authRouter from "./auth";
 import projectsRouter from "./projects";
 import proxyRouter from "./proxy";
 import siteProxyRouter from "./site-proxy";
@@ -12,6 +13,7 @@ import studioRouter from "./studio";
 const router: IRouter = Router();
 
 router.use(healthRouter);
+router.use(authRouter);
 router.use(projectsRouter);
 router.use(proxyRouter);
 router.use(siteProxyRouter);

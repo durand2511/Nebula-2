@@ -51,7 +51,7 @@ function main() {
   ok("admin can choose payment methods (Stripe-only possible)", a.includes("Betaalmethoden") && a.includes("togglepay") && a.includes("S.pay.tegoed") && a.includes("S.pay.stripe"));
   ok("NO 'wat kunnen klanten kopen' sell-toggles in dashboard", !a.includes("togglesell") && !a.includes("Strippenkaart verkopen") && !a.includes("Wat kunnen klanten kopen"));
   ok("admin can DELETE existing memberships", a.includes("delmember") && a.includes("Bestaande lidmaatschappen"));
-  ok("admin sees WHO booked (account + e-mail)", a.includes("bookerEmail") && a.includes("Alle boekingen — wie"));
+  ok("admin sees WHO booked (account + e-mail), grouped per class as an attendance list", a.includes("bookerEmail") && a.includes("Presentielijst per les") && a.includes("<details class=\"ba-att\""));
   ok("cancellations are kept and shown (not deleted)", a.includes("status='cancelled'") && a.includes("cancelledAt") && a.includes("Annuleringen"));
   ok("admin can delete cancellations (one or all)", a.includes("delcancel") && a.includes("clearcancels") && a.includes("Alles wissen"));
   // No dummy accounts on a fresh app — accounts are set via the chat.

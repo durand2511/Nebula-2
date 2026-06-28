@@ -1,0 +1,73 @@
+/** Platform (builder) account auth: register / login / logout / me / forgot-password / profile. */
+import { Router, type IRouter } from "express";
+import { logger } from "../lib/logger";
+import {
+  registerUser, loginUser, createSession, getSessionUser, deleteSession, tokenFrom,
+  publicUser, resetPassword, updateProfile, changePassword, deleteAccount,
+} from "../lib/platform-auth.js";
+
+const router: IRouter = Router();
+
+router.post("/auth/register", async (req, res) => {
+  try {
+    const b = req.body || {};
+    const r = await registerUser({ email: b.email, password: b.password, name: b.name, birthdate: b.birthdate, phone: b.phone });
+    if ("error" in r) { res.status(400).json({ error: r.error }); return; }
+    const token = await createSession(r.user.id);
+    res.json({ ok: true, token, user: publicUser(r.user) });
+  } catch (err) { logger.error({ err }, "[auth] register failed"); res.status(500).json({ error: "Registreren mislukt." }); }
+});
+
+router.post("/auth/login", async (req, res) => {
+  try {
+    const u = await loginUser(String(req.body?.email || ""), String(req.body?.password || ""));
+    if (!u) { res.status(401).json({ error: "Onjuist e-mailadres of wachtwoord." }); return; }
+    const token = await createSession(u.id);
+    res.json({ ok: true, token, user: publicUser(u) });
+  } catch (err) { logger.error({ err }, "[auth] login failed"); res.status(500).json({ error: "Inloggen mislukt." }); }
+});
+
+router.post("/auth/logout", async (req, res) => {
+  try { await deleteSession(tokenFrom(req as any)); res.json({ ok: true }); }
+  catch { res.json({ ok: true }); }
+});
+
+router.get("/auth/me", async (req, res) => {
+  const u = await getSessionUser(tokenFrom(req as any));
+  if (!u) { res.status(401).json({ error: "Niet ingelogd." }); return; }
+  res.json({ user: publicUser(u) });
+});
+
+router.post("/auth/forgot", async (req, res) => {
+  try {
+    const r = await resetPassword(String(req.body?.email || ""));
+    if (!r.ok) { res.status(400).json({ error: r.error || "Reset mislukt." }); return; }
+    res.json({ ok: true, emailed: r.emailed, tempPassword: r.tempPassword });
+  } catch (err) { logger.error({ err }, "[auth] forgot failed"); res.status(500).json({ error: "Reset mislukt." }); }
+});
+
+router.post("/auth/profile", async (req, res) => {
+  const u = await getSessionUser(tokenFrom(req as any));
+  if (!u) { res.status(401).json({ error: "Niet ingelogd." }); return; }
+  try { await updateProfile(u.id, req.body || {}); const fresh = await getSessionUser(tokenFrom(req as any)); res.json({ ok: true, user: fresh ? publicUser(fresh) : undefined }); }
+  catch (err) { logger.error({ err }, "[auth] profile failed"); res.status(500).json({ error: "Opslaan mislukt." }); }
+});
+
+router.post("/auth/password", async (req, res) => {
+  const u = await getSessionUser(tokenFrom(req as any));
+  if (!u) { res.status(401).json({ error: "Niet ingelogd." }); return; }
+  const r = await changePassword(u.id, String(req.body?.current || ""), String(req.body?.next || ""));
+  if (!r.ok) { res.status(400).json({ error: r.error }); return; }
+  res.json({ ok: true });
+});
+
+// Delete the account + EVERYTHING it owns. Requires the current password.
+router.post("/auth/delete-account", async (req, res) => {
+  const u = await getSessionUser(tokenFrom(req as any));
+  if (!u) { res.status(401).json({ error: "Niet ingelogd." }); return; }
+  const r = await deleteAccount(u.id, String(req.body?.password || ""));
+  if (!r.ok) { res.status(400).json({ error: r.error }); return; }
+  res.json({ ok: true });
+});
+
+export default router;

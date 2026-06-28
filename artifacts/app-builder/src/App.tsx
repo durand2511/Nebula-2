@@ -1,10 +1,10 @@
-import { Switch, Route, Router as WouterRouter } from "wouter";
+import { Switch, Route, Redirect, Router as WouterRouter } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import "@/lib/session"; // registers the Bearer-token getter for the api-client
 import { Layout } from "@/components/layout";
 import { Home } from "@/pages/home";
-import { Projects } from "@/pages/projects";
 import { AiEditor } from "@/pages/ai-editor";
 import { ProjectWorkspace } from "@/pages/project-workspace";
 import NotFound from "@/pages/not-found";
@@ -22,7 +22,7 @@ function Router() {
   return (
     <Switch>
       <Route path="/" component={Home} />
-      <Route path="/projects" component={Projects} />
+      <Route path="/projects"><Redirect to="/ai-editor" /></Route>
       <Route path="/ai-editor" component={AiEditor} />
       <Route path="/projects/:id" component={ProjectWorkspace} />
       <Route component={NotFound} />

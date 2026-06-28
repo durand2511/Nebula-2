@@ -48,6 +48,14 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
 #booking-app .ba-badge.full{background:#fef2f2;color:#b91c1c;border-color:#fecaca}
 #booking-app .ba-badge.ok{background:#ecfdf5;color:#047857;border-color:#a7f3d0}
 #booking-app .ba-badge.warn{background:#fffbeb;color:#b45309;border-color:#fde68a}
+#booking-app .ba-att{border:1px solid var(--ba-line);border-radius:12px;margin-bottom:8px;overflow:hidden;background:#fff}
+#booking-app .ba-att>summary{cursor:pointer;padding:12px 14px;font-size:15px;list-style:none;background:var(--ba-soft);user-select:none}
+#booking-app .ba-att>summary::-webkit-details-marker{display:none}
+#booking-app .ba-att>summary:before{content:"\\25B8";display:inline-block;margin-right:8px;color:var(--ba-muted);transition:transform .15s}
+#booking-app .ba-att[open]>summary:before{transform:rotate(90deg)}
+#booking-app .ba-att[open]>summary{border-bottom:1px solid var(--ba-line)}
+#booking-app .ba-att .ba-item{margin:0;border-radius:0;border:0;border-bottom:1px solid var(--ba-line);padding:10px 14px}
+#booking-app .ba-att .ba-item:last-child{border-bottom:0}
 #booking-app .ba-row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
 #booking-app label.ba-f{display:block;font-size:13px;font-weight:600;color:#374151;margin:12px 0 5px}
 #booking-app input,#booking-app select,#booking-app textarea{font:inherit;font-size:14px;width:100%;min-height:42px;padding:10px 12px;border:1px solid var(--ba-line);border-radius:11px;background:#fff;color:var(--ba-ink);transition:border-color .15s ease,box-shadow .15s ease}
@@ -676,15 +684,24 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
     locs.forEach(function(l){h+='<div class="ba-item"><div class="ba-row"><div><b>📍 '+esc(l.name)+'</b>'+(l.address?(' <span class="ba-meta" style="margin:0">'+esc(l.address)+'</span>'):'')+'</div><button class="ba-btn warn sm" data-act="delloc" data-l="'+l.id+'">Verwijderen</button></div></div>';});
     h+='</div></div>';
     // All bookings: who booked (account + e-mail) + reschedule + attendance + cancel
-    h+='<div class="ba-card" style="margin-top:16px"><h4>Alle boekingen — wie, verplaatsen & aanwezigheid</h4><div class="ba-list" style="margin-top:10px">';
+    h+='<div class="ba-card" style="margin-top:16px"><h4>Presentielijst per les</h4><p class="ba-meta">Klik op een les om de namen te zien en af te vinken. Lessen van vandaag staan open.</p><div style="margin-top:10px">';
     var bs=S.bookings.filter(function(b){return b.status==='booked';});
     if(!bs.length)h+='<p class="ba-meta">Nog geen boekingen.</p>';
-    bs.forEach(function(b){var c=S.classes.filter(function(x){return x.id===b.classId;})[0]||{};
-      h+='<div class="ba-item"><div class="ba-row"><div><b>'+esc(b.name)+'</b>'+(b.noShow?' <span class="ba-badge warn">no-show</span>':'')+' <span class="ba-meta" style="margin:0">'+esc(b.bookerEmail||'')+' · '+esc(c.title||'?')+' · '+fmtDate(b.date)+' '+esc(c.time||'')+' · '+(b.payment==='stripe'?'Stripe':'tegoed')+'</span></div>'+
-         '<div class="ba-row" style="gap:6px"><select data-act="moveto" data-b="'+b.id+'" style="width:auto">'+occOptions(b.classId+'|'+b.date)+'</select>'+
-         '<button class="ba-btn '+(b.present?'':'ghost')+' sm" data-act="present" data-b="'+b.id+'">'+(b.present?'✓ aanwezig':'aanwezig')+'</button>'+
-         '<button class="ba-btn '+(b.noShow?'warn':'ghost')+' sm" data-act="noshow" data-b="'+b.id+'" title="No-show: klant kwam niet en is z\\u2019n tegoed kwijt">'+(b.noShow?'✓ no-show':'no-show')+'</button>'+
-         (b.payment==='stripe'&&b.paymentIntent&&!b.refunded?'<button class="ba-btn ghost sm" data-act="refundbk" data-b="'+b.id+'">Annuleer + terugbetalen</button>':'<button class="ba-btn warn sm" data-act="cancel" data-b="'+b.id+'">Annuleer</button>')+'</div></div></div>';});
+    var grp={};bs.forEach(function(b){var k=b.classId+'|'+b.date;(grp[k]=grp[k]||[]).push(b);});
+    var today0=ymd(new Date());
+    Object.keys(grp).sort(function(a,b){var da=a.split('|')[1],dbb=b.split('|')[1];return da<dbb?-1:da>dbb?1:0;}).forEach(function(k){
+      var arr=grp[k];var c=S.classes.filter(function(x){return x.id===arr[0].classId;})[0]||{};
+      var pres=arr.filter(function(b){return b.present;}).length;var dt=k.split('|')[1];
+      h+='<details class="ba-att"'+(dt===today0?' open':'')+'><summary><b>'+esc(c.title||'?')+'</b> <span class="ba-meta" style="margin:0">'+fmtDate(dt)+' '+esc(c.time||'')+locLabel(c)+' &middot; '+arr.length+' geboekt'+(pres?(' &middot; '+pres+' aanwezig'):'')+'</span></summary>';
+      arr.forEach(function(b){
+        h+='<div class="ba-item"><div class="ba-row"><div><b>'+esc(b.name)+'</b>'+(b.noShow?' <span class="ba-badge warn">no-show</span>':'')+' <span class="ba-meta" style="margin:0">'+esc(b.bookerEmail||'')+' &middot; '+(b.payment==='stripe'?'Stripe':'tegoed')+'</span></div>'+
+          '<div class="ba-row" style="gap:6px"><select data-act="moveto" data-b="'+b.id+'" style="width:auto">'+occOptions(b.classId+'|'+b.date)+'</select>'+
+          '<button class="ba-btn '+(b.present?'':'ghost')+' sm" data-act="present" data-b="'+b.id+'">'+(b.present?'✓ aanwezig':'aanwezig')+'</button>'+
+          '<button class="ba-btn '+(b.noShow?'warn':'ghost')+' sm" data-act="noshow" data-b="'+b.id+'" title="No-show: klant kwam niet en is z\\u2019n tegoed kwijt">'+(b.noShow?'✓ no-show':'no-show')+'</button>'+
+          (b.payment==='stripe'&&b.paymentIntent&&!b.refunded?'<button class="ba-btn ghost sm" data-act="refundbk" data-b="'+b.id+'">Annuleer + terugbetalen</button>':'<button class="ba-btn warn sm" data-act="cancel" data-b="'+b.id+'">Annuleer</button>')+'</div></div></div>';
+      });
+      h+='</details>';
+    });
     h+='</div><p class="ba-note">Kies een andere les in het menu om een boeking te verplaatsen.</p></div>';
     // Cancellations log (the admin can remove individual entries or clear the whole log)
     var cx=S.bookings.filter(function(b){return b.status==='cancelled';});
@@ -778,13 +795,22 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
     h+='<div class="ba-2">'+createClassCard(email)+
       '<div class="ba-card"><h4>Mijn klassen</h4><div class="ba-list" style="margin-top:10px">'+
       (own.length?own.map(classRow).join(''):'<p class="ba-meta">Je hebt nog geen lessen.</p>')+'</div></div></div>';
-    h+='<div class="ba-card" style="margin-top:16px"><h4>Boekingen op mijn lessen — aanwezigheid</h4><div class="ba-list" style="margin-top:10px">';
+    h+='<div class="ba-card" style="margin-top:16px"><h4>Presentielijst per les</h4><p class="ba-meta">Klik op een les om de namen af te vinken. Lessen van vandaag staan open.</p><div style="margin-top:10px">';
     var bs=S.bookings.filter(function(b){return b.status==='booked'&&ownIds[b.classId];});
     if(!bs.length)h+='<p class="ba-meta">Nog geen boekingen op jouw lessen.</p>';
-    bs.forEach(function(b){var c=S.classes.filter(function(x){return x.id===b.classId;})[0]||{};
-      h+='<div class="ba-item"><div class="ba-row"><span>'+esc(b.name)+(b.noShow?' <span class="ba-badge warn">no-show</span>':'')+' — '+esc(c.title||'?')+' · '+fmtDate(b.date)+' '+esc(c.time||'')+'</span>'+
-         '<div class="ba-row" style="gap:6px"><button class="ba-btn '+(b.present?'':'ghost')+' sm" data-act="present" data-b="'+b.id+'">'+(b.present?'✓ aanwezig':'markeer aanwezig')+'</button>'+
-         '<button class="ba-btn '+(b.noShow?'warn':'ghost')+' sm" data-act="noshow" data-b="'+b.id+'">'+(b.noShow?'✓ no-show':'no-show')+'</button></div></div></div>';});
+    var tgrp={};bs.forEach(function(b){var k=b.classId+'|'+b.date;(tgrp[k]=tgrp[k]||[]).push(b);});
+    var ttoday=ymd(new Date());
+    Object.keys(tgrp).sort(function(a,b){var da=a.split('|')[1],dbb=b.split('|')[1];return da<dbb?-1:da>dbb?1:0;}).forEach(function(k){
+      var arr=tgrp[k];var c=S.classes.filter(function(x){return x.id===arr[0].classId;})[0]||{};
+      var pres=arr.filter(function(b){return b.present;}).length;var dt=k.split('|')[1];
+      h+='<details class="ba-att"'+(dt===ttoday?' open':'')+'><summary><b>'+esc(c.title||'?')+'</b> <span class="ba-meta" style="margin:0">'+fmtDate(dt)+' '+esc(c.time||'')+locLabel(c)+' &middot; '+arr.length+' geboekt'+(pres?(' &middot; '+pres+' aanwezig'):'')+'</span></summary>';
+      arr.forEach(function(b){
+        h+='<div class="ba-item"><div class="ba-row"><span><b>'+esc(b.name)+'</b>'+(b.noShow?' <span class="ba-badge warn">no-show</span>':'')+'</span>'+
+           '<div class="ba-row" style="gap:6px"><button class="ba-btn '+(b.present?'':'ghost')+' sm" data-act="present" data-b="'+b.id+'">'+(b.present?'✓ aanwezig':'markeer aanwezig')+'</button>'+
+           '<button class="ba-btn '+(b.noShow?'warn':'ghost')+' sm" data-act="noshow" data-b="'+b.id+'">'+(b.noShow?'✓ no-show':'no-show')+'</button></div></div></div>';
+      });
+      h+='</details>';
+    });
     h+='</div></div>';
     return h;
   }

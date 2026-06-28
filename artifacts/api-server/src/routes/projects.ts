@@ -4,7 +4,8 @@ import { lookup as dnsLookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import { Agent, fetch as safeFetch } from "undici";
 import { load as cheerioLoad } from "cheerio";
-import { db, projects, projectMessages, projectFiles, projectSnapshots, learnings, emailReminders, studioClasses, studioUsers, studioBookings } from "@workspace/db";
+import { db, projects, projectMessages, projectFiles, projectSnapshots, learnings, emailReminders, studioClasses, studioUsers, studioBookings, type PlatformUser } from "@workspace/db";
+import { getSessionUser, tokenFrom } from "../lib/platform-auth.js";
 import {
   CreateProjectBody,
   GetProjectParams,
@@ -3645,8 +3646,43 @@ async function persistGeneratedFiles(
   return written;
 }
 
+// ── Platform-account ownership (multi-tenant): each account only sees/owns its own projects ──
+async function currentUser(req: unknown): Promise<PlatformUser | null> {
+  return getSessionUser(tokenFrom(req as { headers: Record<string, unknown>; query?: Record<string, unknown> }));
+}
+
+// Defense-in-depth: for ANY /projects/<id>/... builder request that carries a VALID platform token,
+// the token's user must own the project — otherwise 403. Requests without a platform token (the
+// preview iframe, published sites, and booking-app /studio calls which use a different token) pass
+// straight through unchanged, so nothing public breaks.
+router.use(async (req, res, next) => {
+  const m = req.path.match(/^\/projects\/(\d+)(?:\/|$)/);
+  if (!m) return next();
+  const token = tokenFrom(req as { headers: Record<string, unknown>; query?: Record<string, unknown> });
+  if (!token) return next();
+  try {
+    const u = await getSessionUser(token);
+    if (!u) return next(); // not a platform token (e.g. a studio booking-client token) → leave as-is
+    const [p] = await db.select().from(projects).where(eq(projects.id, Number(m[1])));
+    if (p && p.ownerId != null && p.ownerId !== u.id) { res.status(403).json({ error: "Geen toegang tot dit project." }); return; }
+    return next();
+  } catch { return next(); }
+});
+// Returns the logged-in owner of `projectId`, or sends 401/403/404 and returns null. ownerless
+// (legacy) projects are allowed through so older data isn't locked out.
+async function requireOwner(req: unknown, res: { status: (n: number) => { json: (o: unknown) => void } }, projectId: number): Promise<PlatformUser | null> {
+  const u = await currentUser(req);
+  if (!u) { res.status(401).json({ error: "Niet ingelogd." }); return null; }
+  const [p] = await db.select().from(projects).where(eq(projects.id, projectId));
+  if (!p) { res.status(404).json({ error: "Project niet gevonden." }); return null; }
+  if (p.ownerId != null && p.ownerId !== u.id) { res.status(403).json({ error: "Geen toegang tot dit project." }); return null; }
+  return u;
+}
+
 router.get("/projects", async (req, res) => {
   try {
+    const u = await currentUser(req);
+    if (!u) { res.json([]); return; } // not logged in → no projects
     const rows = await db
       .select({
         id: projects.id,
@@ -3659,6 +3695,7 @@ router.get("/projects", async (req, res) => {
         fileCount: sql<number>`(select count(*) from project_files where project_id = ${projects.id})::int`,
       })
       .from(projects)
+      .where(eq(projects.ownerId, u.id))
       .orderBy(desc(projects.updatedAt));
     res.json(rows);
   } catch (err) {
@@ -3681,6 +3718,7 @@ router.get("/projects/recent", async (req, res) => {
         fileCount: sql<number>`(select count(*) from project_files where project_id = ${projects.id})::int`,
       })
       .from(projects)
+      .where(sql`${projects.ownerId} = ${(await currentUser(req))?.id ?? -1}`)
       .orderBy(desc(projects.updatedAt))
       .limit(6);
     res.json(rows);
@@ -3697,9 +3735,12 @@ router.post("/projects", async (req, res) => {
     return;
   }
   try {
+    const u = await currentUser(req);
+    if (!u) { res.status(401).json({ error: "Niet ingelogd." }); return; }
     const [project] = await db
       .insert(projects)
       .values({
+        ownerId: u.id,
         name: parsed.data.name,
         description: parsed.data.description ?? "",
         source: "jordy",
@@ -3725,6 +3766,8 @@ router.post("/projects/import-url", async (req, res) => {
     res.status(400).json({ error: "A url is required." });
     return;
   }
+  const owner = await currentUser(req);
+  if (!owner) { res.status(401).json({ error: "Niet ingelogd." }); return; }
 
   // Allow users to paste a bare domain (e.g. "stripe.com").
   let rawUrl = parsed.data.url.trim();
@@ -3781,6 +3824,7 @@ router.post("/projects/import-url", async (req, res) => {
     const [project] = await db
       .insert(projects)
       .values({
+        ownerId: owner.id,
         name: hostname,
         description: `Imported from ${crawled.finalUrl}`,
         source: "yogilates",
@@ -3819,6 +3863,7 @@ router.get("/projects/:projectId", async (req, res) => {
     return;
   }
   try {
+    if (!(await requireOwner(req, res, parsed.data.projectId))) return;
     const rows = await db
       .select({
         id: projects.id,
@@ -3850,6 +3895,7 @@ router.delete("/projects/:projectId", async (req, res) => {
     return;
   }
   try {
+    if (!(await requireOwner(req, res, parsed.data.projectId))) return;
     await db.delete(projects).where(eq(projects.id, parsed.data.projectId));
     res.status(204).send();
   } catch (err) {

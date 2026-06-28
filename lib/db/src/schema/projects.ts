@@ -2,8 +2,28 @@ import { pgTable, serial, text, timestamp, integer, real, uniqueIndex, index } f
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
+// Platform (builder) user accounts — each account owns its own projects (multi-tenant). Separate
+// from studio_users, which are per-project booking-app customers.
+export const platformUsers = pgTable("platform_users", {
+  id: serial("id").primaryKey(),
+  email: text("email").notNull().unique(),
+  passwordHash: text("password_hash").notNull(),
+  name: text("name").notNull().default(""),
+  birthdate: text("birthdate").notNull().default(""), // yyyy-mm-dd
+  phone: text("phone").notNull().default(""),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const platformSessions = pgTable("platform_sessions", {
+  token: text("token").primaryKey(),
+  userId: integer("user_id").notNull().references(() => platformUsers.id, { onDelete: "cascade" }),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
 export const projects = pgTable("projects", {
   id: serial("id").primaryKey(),
+  ownerId: integer("owner_id").references(() => platformUsers.id, { onDelete: "cascade" }), // null = legacy/unowned
   name: text("name").notNull(),
   description: text("description").notNull().default(""),
   source: text("source").notNull().default("jordy"),
@@ -482,3 +502,5 @@ export type StudioLocation = typeof studioLocations.$inferSelect;
 export type StudioNudge = typeof studioNudges.$inferSelect;
 export type StudioSettings = typeof studioSettings.$inferSelect;
 export type SitePublish = typeof sitePublishes.$inferSelect;
+export type PlatformUser = typeof platformUsers.$inferSelect;
+export type PlatformSession = typeof platformSessions.$inferSelect;
