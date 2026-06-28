@@ -438,6 +438,41 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
     }).catch(function(){alert('Code kon niet worden gecontroleerd.');go(amount,'',0);});
   }
 
+  // ── Aanwezigheid in een APART VENSTER (modal) ──
+  // A teacher/admin clicks a lesson and gets a focused pop-up with that lesson's booked students
+  // and present / no-show toggles. attKey = "<classId>|<date>". Re-renders on every state change.
+  var attKey=null;
+  function attBookings(){if(!attKey)return [];var cid=attKey.split('|')[0],dt=attKey.split('|')[1];
+    return S.bookings.filter(function(b){return b.status==='booked'&&String(b.classId)===String(cid)&&b.date===dt;});}
+  function renderAttModal(){var ov=root.querySelector('#ba-att-ov');if(!ov||!attKey)return;
+    var cid=attKey.split('|')[0],dt=attKey.split('|')[1];
+    var c=S.classes.filter(function(x){return String(x.id)===String(cid);})[0]||{};
+    var arr=attBookings();var pres=arr.filter(function(b){return b.present;}).length;
+    var h='<div style="background:#fff;border-radius:14px;max-width:460px;width:100%;max-height:85vh;overflow:auto;padding:22px;font-family:inherit;color:#1f2937" onclick="event.stopPropagation()">'+
+      '<div class="ba-row" style="align-items:flex-start"><div><h3 style="margin:0 0 2px;font-size:18px">'+esc(c.title||'Les')+'</h3>'+
+      '<p style="color:#6b7280;font-size:13px;margin:0">'+fmtDate(dt)+' &middot; '+esc(c.time||'')+locLabel(c)+'</p></div>'+
+      '<button id="ba-att-x" class="ba-btn ghost sm">Sluiten</button></div>'+
+      '<p class="ba-meta" style="margin:12px 0 8px">'+arr.length+' geboekt &middot; '+pres+' aanwezig</p><div class="ba-list">';
+    if(!arr.length)h+='<p class="ba-meta">Nog geen boekingen op deze les.</p>';
+    arr.forEach(function(b){
+      h+='<div class="ba-item"><div class="ba-row"><span><b>'+esc(b.name)+'</b>'+(b.noShow?' <span class="ba-badge warn">no-show</span>':'')+'</span>'+
+         '<div class="ba-row" style="gap:6px"><button class="ba-btn '+(b.present?'':'ghost')+' sm" data-act="present" data-b="'+b.id+'">'+(b.present?'✓ aanwezig':'markeer aanwezig')+'</button>'+
+         '<button class="ba-btn '+(b.noShow?'warn':'ghost')+' sm" data-act="noshow" data-b="'+b.id+'">'+(b.noShow?'✓ no-show':'no-show')+'</button></div></div></div>';
+    });
+    h+='</div></div>';
+    ov.innerHTML=h;
+    var x=ov.querySelector('#ba-att-x');if(x)x.onclick=closeAttModal;
+    translateDOM(ov);
+  }
+  function openAttModal(key){attKey=key;var ov=root.querySelector('#ba-att-ov');
+    if(!ov){ov=document.createElement('div');ov.id='ba-att-ov';
+      ov.style.cssText='position:fixed;inset:0;z-index:2147483646;background:rgba(15,23,42,.55);display:flex;align-items:center;justify-content:center;padding:20px';
+      ov.addEventListener('click',function(e){if(e.target===ov)closeAttModal();});
+      root.appendChild(ov);}
+    renderAttModal();
+  }
+  function closeAttModal(){attKey=null;var ov=root.querySelector('#ba-att-ov');if(ov&&ov.parentNode)ov.parentNode.removeChild(ov);}
+
   function teacherAccounts(){return S.accounts.filter(function(a){return a.role==='teacher';});}
   function teacherOptions(sel){return teacherAccounts().map(function(a){return '<option value="'+esc(a.email)+'"'+(a.email===sel?' selected':'')+'>'+esc(a.name)+'</option>';}).join('');}
   function accName(email){var a=S.accounts.filter(function(x){return x.email===email;})[0];return a?a.name:'';}
@@ -795,21 +830,16 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
     h+='<div class="ba-2">'+createClassCard(email)+
       '<div class="ba-card"><h4>Mijn klassen</h4><div class="ba-list" style="margin-top:10px">'+
       (own.length?own.map(classRow).join(''):'<p class="ba-meta">Je hebt nog geen lessen.</p>')+'</div></div></div>';
-    h+='<div class="ba-card" style="margin-top:16px"><h4>Presentielijst per les</h4><p class="ba-meta">Klik op een les om de namen af te vinken. Lessen van vandaag staan open.</p><div style="margin-top:10px">';
+    h+='<div class="ba-card" style="margin-top:16px"><h4>Presentielijst per les</h4><p class="ba-meta">Klik op een les om in een apart venster de aanwezigheid af te vinken.</p><div class="ba-list" style="margin-top:10px">';
     var bs=S.bookings.filter(function(b){return b.status==='booked'&&ownIds[b.classId];});
     if(!bs.length)h+='<p class="ba-meta">Nog geen boekingen op jouw lessen.</p>';
     var tgrp={};bs.forEach(function(b){var k=b.classId+'|'+b.date;(tgrp[k]=tgrp[k]||[]).push(b);});
-    var ttoday=ymd(new Date());
     Object.keys(tgrp).sort(function(a,b){var da=a.split('|')[1],dbb=b.split('|')[1];return da<dbb?-1:da>dbb?1:0;}).forEach(function(k){
       var arr=tgrp[k];var c=S.classes.filter(function(x){return x.id===arr[0].classId;})[0]||{};
       var pres=arr.filter(function(b){return b.present;}).length;var dt=k.split('|')[1];
-      h+='<details class="ba-att"'+(dt===ttoday?' open':'')+'><summary><b>'+esc(c.title||'?')+'</b> <span class="ba-meta" style="margin:0">'+fmtDate(dt)+' '+esc(c.time||'')+locLabel(c)+' &middot; '+arr.length+' geboekt'+(pres?(' &middot; '+pres+' aanwezig'):'')+'</span></summary>';
-      arr.forEach(function(b){
-        h+='<div class="ba-item"><div class="ba-row"><span><b>'+esc(b.name)+'</b>'+(b.noShow?' <span class="ba-badge warn">no-show</span>':'')+'</span>'+
-           '<div class="ba-row" style="gap:6px"><button class="ba-btn '+(b.present?'':'ghost')+' sm" data-act="present" data-b="'+b.id+'">'+(b.present?'✓ aanwezig':'markeer aanwezig')+'</button>'+
-           '<button class="ba-btn '+(b.noShow?'warn':'ghost')+' sm" data-act="noshow" data-b="'+b.id+'">'+(b.noShow?'✓ no-show':'no-show')+'</button></div></div></div>';
-      });
-      h+='</details>';
+      h+='<button class="ba-item" data-act="att-open" data-k="'+esc(k)+'" style="display:block;width:100%;text-align:left;cursor:pointer;border:0;font:inherit;font-family:inherit;background:#fff">'+
+         '<div class="ba-row"><div><b>'+esc(c.title||'?')+'</b><div class="ba-meta" style="margin:0">'+fmtDate(dt)+' '+esc(c.time||'')+locLabel(c)+'</div></div>'+
+         '<span class="ba-badge'+(pres?' ok':'')+'">'+arr.length+' geboekt'+(pres?(' &middot; '+pres+' aanwezig'):'')+' &rsaquo;</span></div></button>';
     });
     h+='</div></div>';
     return h;
@@ -1279,7 +1309,7 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
     return '<div class="ba-row" style="margin-bottom:14px"><div><div class="ba-h" style="font-size:22px">Boekingen</div><div class="ba-meta" style="margin:0">Ingelogd als '+esc(u.name)+'</div></div><div class="ba-row" style="gap:8px">'+langSelect()+'<button class="ba-btn ghost sm" data-act="logout">Uitloggen</button></div></div>'+
       '<div class="ba-tabs">'+tb+'</div><div class="ba-host"></div>';
   }
-  function renderHost(){var host=root.querySelector('.ba-host');if(host){host.innerHTML=(PANELS[activeTab]||pBoeken)();if(activeTab==='koppel'){refreshStripeStatus();refreshInvoiceSettings();refreshImportStatus();}if(activeTab==='comm')refreshEmailStatus();if(activeTab==='studio')refreshInvoices();translateDOM(host);}}
+  function renderHost(){var host=root.querySelector('.ba-host');if(host){host.innerHTML=(PANELS[activeTab]||pBoeken)();if(activeTab==='koppel'){refreshStripeStatus();refreshInvoiceSettings();refreshImportStatus();}if(activeTab==='comm')refreshEmailStatus();if(activeTab==='studio')refreshInvoices();translateDOM(host);}renderAttModal();}
   function render(){
     initI18n();
     var sc=!S.session?'login':'app';
@@ -1462,6 +1492,7 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
     if(act==='delclass'){var id=a.getAttribute('data-c');
       if(SRV){sdel('classes/'+id).then(function(r){if(!r.ok){alert((r.d&&r.d.error)||'Verwijderen mislukt.');return;}refreshAndRender().then(syncCalendar);});return;}
       S.classes=S.classes.filter(function(c){return c.id!==id;});save();renderHost();syncCalendar();return;}
+    if(act==='att-open'){if(e.preventDefault)e.preventDefault();openAttModal(a.getAttribute('data-k'));return;}
     if(act==='present'){var bid2=a.getAttribute('data-b');
       if(SRV){spost('present',{bookingId:bid2}).then(function(r){if(r.ok)refreshAndRender();});return;}
       var b2=S.bookings.filter(function(b){return b.id===bid2;})[0];if(b2)b2.present=!b2.present;save();renderHost();return;}
