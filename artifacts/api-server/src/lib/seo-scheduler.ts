@@ -6,6 +6,7 @@
 import { db, projectSeo } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { publishArticle, publishedToday } from "./seo.js";
+import { projectOwnerSubscribed } from "./billing.js";
 import { logger } from "./logger";
 
 let started = false;
@@ -16,6 +17,8 @@ async function tick(): Promise<void> {
     const now = Date.now();
     for (const row of rows) {
       try {
+        // Auto SEO is a paid feature: skip projects whose owner isn't an active subscriber.
+        if (!(await projectOwnerSubscribed(row.projectId))) continue;
         // HARD CAP: never publish more than 1 article per day per website.
         const perDay = 1;
         // Already published today?

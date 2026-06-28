@@ -8,8 +8,10 @@ import { eq } from "drizzle-orm";
 import type { Request, Response } from "express";
 import { getPublishedFiles } from "./site-publish.js";
 
-// A non-removable "Made with Nebula" badge (injected at serve time) for FREE (unsubscribed) sites.
-const NEBULA_BADGE = `<a href="https://nebulabookings.com" target="_blank" rel="noopener" style="position:fixed;right:14px;bottom:14px;z-index:2147483647;display:flex;align-items:center;gap:6px;background:#fff;color:#111827;font:600 13px/1 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;padding:8px 13px;border-radius:999px;box-shadow:0 2px 14px rgba(0,0,0,.2);text-decoration:none">Made with <span style="color:#7a00df">Nebula</span></a>`;
+// A large, non-removable Nebula branding badge (injected at serve time) for FREE (unsubscribed)
+// sites. Deliberately big and prominent in the corner so a free site can't be used commercially —
+// subscribing (€69,99/mo) removes it entirely.
+const NEBULA_BADGE = `<a href="https://nebulabookings.com" target="_blank" rel="noopener" style="position:fixed;right:24px;bottom:24px;z-index:2147483647;display:flex;flex-direction:column;align-items:flex-start;gap:2px;background:#fff;color:#111827;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;padding:18px 26px;border-radius:20px;box-shadow:0 10px 40px rgba(0,0,0,.30);text-decoration:none;border:3px solid #7a00df"><span style="font:800 30px/1.05 system-ui,-apple-system,Segoe UI,Roboto,sans-serif">⚡ Gemaakt met <span style="color:#7a00df">Nebula</span></span><span style="font:600 14px/1.2 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:#6b7280">Maak gratis je eigen site op nebulabookings.com</span></a>`;
 
 // Is the project's owner a paying subscriber? (ownerless/legacy projects count as NOT subscribed.)
 async function ownerSubscribed(projectId: number): Promise<boolean> {

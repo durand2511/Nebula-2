@@ -3,7 +3,7 @@
  * change is charged at its real token cost × 2 (a 100% markup) and deducted from the wallet. Paid
  * subscribers get €7,50 of AI credit refilled every billing month; extra can be topped up.
  */
-import { db, platformUsers, platformAiUsage, type PlatformUser } from "@workspace/db";
+import { db, platformUsers, platformAiUsage, projects, type PlatformUser } from "@workspace/db";
 import { eq, sql, desc } from "drizzle-orm";
 import { logger } from "./logger";
 
@@ -30,6 +30,14 @@ export function aiCostEur(model: string, inputTokens: number, outputTokens: numb
 
 export function isSubscribed(u: Pick<PlatformUser, "subscriptionStatus"> | null | undefined): boolean {
   return !!u && u.subscriptionStatus === "active";
+}
+
+/** Is the project's owner a paying subscriber? Ownerless/legacy projects count as NOT subscribed. */
+export async function projectOwnerSubscribed(projectId: number): Promise<boolean> {
+  const [p] = await db.select().from(projects).where(eq(projects.id, projectId));
+  if (!p?.ownerId) return false;
+  const [u] = await db.select().from(platformUsers).where(eq(platformUsers.id, p.ownerId));
+  return u?.subscriptionStatus === "active";
 }
 
 /** Deduct an AI change's cost from the wallet (floored at 0) + log it. Returns {cost, remaining}. */

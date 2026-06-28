@@ -7,8 +7,11 @@ import { db, projectSeo, seoArticles } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { logger } from "../lib/logger";
 import { publishArticle, publishedToday, improveArticle, publishDraft, publishManualArticle } from "../lib/seo.js";
+import { projectOwnerSubscribed } from "../lib/billing.js";
 
 const router = Router();
+
+const SEO_PAYWALL = "De SEO-tekstgenerator en automatische SEO zijn onderdeel van het abonnement (€69,99/maand). Abonneer je in je profiel om AI-artikelen te genereren en automatisch te publiceren.";
 
 // Manually publish a blog post (no AI): the studio writes title + body (+ optional image).
 router.post("/projects/:id/blog/manual", json({ limit: "512kb" }), async (req, res) => {
@@ -47,6 +50,7 @@ router.get("/projects/:id/seo", async (req, res) => {
 router.post("/projects/:id/seo/article", json({ limit: "64kb" }), async (req, res) => {
   const projectId = Number(req.params.id);
   if (isNaN(projectId)) { res.status(400).json({ error: "Invalid project ID" }); return; }
+  if (!(await projectOwnerSubscribed(projectId))) { res.status(402).json({ error: SEO_PAYWALL }); return; }
   try {
     const r = await publishArticle(projectId, new Date().toISOString(), { mode: "manual" });
     if (!r) { res.status(400).json({ error: "Kon geen artikel genereren (geen website-content gevonden?)." }); return; }
@@ -79,6 +83,7 @@ router.post("/projects/:id/seo/articles/:articleId/publish", async (req, res) =>
 router.post("/projects/:id/seo/refresh", json({ limit: "16kb" }), async (req, res) => {
   const projectId = Number(req.params.id);
   if (isNaN(projectId)) { res.status(400).json({ error: "Invalid project ID" }); return; }
+  if (!(await projectOwnerSubscribed(projectId))) { res.status(402).json({ error: SEO_PAYWALL }); return; }
   try {
     const r = await improveArticle(projectId, new Date().toISOString(), req.body?.articleId ? Number(req.body.articleId) : undefined);
     if (!r) { res.status(400).json({ error: "Geen artikel om te verversen." }); return; }
@@ -91,6 +96,7 @@ router.post("/projects/:id/seo/auto", json({ limit: "16kb" }), async (req, res) 
   const projectId = Number(req.params.id);
   if (isNaN(projectId)) { res.status(400).json({ error: "Invalid project ID" }); return; }
   const enabled = req.body?.enabled === true;
+  if (enabled && !(await projectOwnerSubscribed(projectId))) { res.status(402).json({ error: SEO_PAYWALL }); return; }
   const cadenceDays = Math.max(1, Math.min(30, Number(req.body?.cadenceDays) || 7));
   const maxPerDay = Math.max(1, Math.min(10, Number(req.body?.maxPerDay) || 2));
   const autoPublishMin = Math.max(50, Math.min(100, Number(req.body?.autoPublishMin) || 85));
