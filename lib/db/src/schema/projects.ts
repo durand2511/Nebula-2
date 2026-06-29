@@ -402,6 +402,20 @@ export const studioWallets = pgTable("studio_wallets", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 }, (t) => ({ projEmail: uniqueIndex("studio_wallets_proj_email").on(t.projectId, t.email) }));
 
+// Per-purchase strippenkaart "potjes": each bought strippenkaart is its own batch of credits with its
+// own expiry, so credits from different purchases don't share one bucket. Booking consumes the
+// soonest-expiring batch first; only that batch's leftover expires on its own date. (Legacy credits
+// from before this table live on as studio_wallets.credits + creditsUntil = a synthetic "lot 0".)
+export const studioCreditLots = pgTable("studio_credit_lots", {
+  id: serial("id").primaryKey(),
+  projectId: integer("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  email: text("email").notNull().default(""),
+  credits: integer("credits").notNull().default(0),  // remaining in this batch
+  expiresAt: text("expires_at").notNull().default(""), // yyyy-mm-dd, "" = nooit
+  source: text("source").notNull().default(""),        // strippenkaart-naam (voor weergave)
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => ({ byProjEmail: index("studio_credit_lots_proj_email").on(t.projectId, t.email) }));
+
 // Bookings (booked / waitlist / cancelled). Capacity is enforced server-side at booking time.
 export const studioBookings = pgTable("studio_bookings", {
   id: serial("id").primaryKey(),
@@ -413,6 +427,7 @@ export const studioBookings = pgTable("studio_bookings", {
   status: text("status").notNull().default("booked"), // booked | waitlist | cancelled
   payment: text("payment").notNull().default("tegoed"),
   usedCredit: text("used_credit").notNull().default("false"),
+  creditLotId: integer("credit_lot_id").notNull().default(0), // welk potje is gebruikt (0 = legacy wallet-credits)
   usedMonthly: text("used_monthly").notNull().default("false"),
   present: text("present").notNull().default("false"),
   noShow: text("no_show").notNull().default("false"), // gemarkeerd als no-show → tegoed wordt niet terugbetaald
@@ -529,6 +544,7 @@ export type StudioSession = typeof studioSessions.$inferSelect;
 export type StudioClass = typeof studioClasses.$inferSelect;
 export type StudioMember = typeof studioMembers.$inferSelect;
 export type StudioWallet = typeof studioWallets.$inferSelect;
+export type StudioCreditLot = typeof studioCreditLots.$inferSelect;
 export type StudioBooking = typeof studioBookings.$inferSelect;
 export type StudioPurchase = typeof studioPurchases.$inferSelect;
 export type StudioVideo = typeof studioVideos.$inferSelect;

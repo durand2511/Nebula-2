@@ -500,7 +500,7 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
   if(!S.wallets)S.wallets={};
   if(!S.pay)S.pay={tegoed:true,stripe:true};
   if(!S.sell)S.sell={strippenkaart:true,abonnement:true};
-  function walletFor(email){if(!S.wallets[email])S.wallets[email]={credits:0,membership:null,validUntil:null,creditsUntil:null};return S.wallets[email];}
+  function walletFor(email){if(!S.wallets[email])S.wallets[email]={credits:0,membership:null,validUntil:null,creditsUntil:null,creditLots:[]};return S.wallets[email];}
   // Strippenkaart-credits zijn verlopen als hun geldigheidsdatum (creditsUntil) gepasseerd is.
   function creditsExpired(W){return !!(W&&W.creditsUntil&&W.creditsUntil<ymd(new Date()));}
   // A membership is "unlimited" when explicitly flagged, or (legacy) an abonnement without a lesson count.
@@ -895,7 +895,15 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
   function pLeden(){
     var W=walletFor(myEmail());
     var cur=walletBadge(W);
-    var h='<div class="ba-row" style="margin-bottom:14px"><div class="ba-meta" style="margin:0">Huidig: '+cur+(W.validUntil?(' · geldig t/m '+W.validUntil):'')+'</div></div><div class="ba-grid">';
+    var h='<div class="ba-row" style="margin-bottom:14px"><div class="ba-meta" style="margin:0">Huidig: '+cur+(W.validUntil?(' · geldig t/m '+W.validUntil):'')+'</div></div>';
+    // Aparte strippenkaart-potjes (elk met eigen vervaldatum) — alleen tonen als er meer dan één is.
+    var lots=(W.creditLots||[]).filter(function(l){return l.credits>0;});
+    if(lots.length>1){
+      h+='<div class="ba-card" style="margin-bottom:14px"><b>Je strippenkaarten</b><div class="ba-list" style="margin-top:8px">'+
+        lots.map(function(l){return '<div class="ba-item"><div class="ba-row"><span>'+l.credits+' lessen</span><span class="ba-meta">'+(l.expiresAt?('geldig t/m '+fmtDate(l.expiresAt)):'geen vervaldatum')+'</span></div></div>';}).join('')+
+        '</div><p class="ba-note">De kaart die het eerst verloopt wordt als eerste gebruikt.</p></div>';
+    }
+    h+='<div class="ba-grid">';
     if(!S.members.length)h+='<p class="ba-meta">Er zijn op dit moment geen lidmaatschappen te koop.</p>';
     S.members.forEach(function(m){
       var inhoud=isUnlimited(m)?'onbeperkt lessen':((m.credits||0)+' lessen'+(m.type==='abonnement'?' per maand':''));
@@ -1249,7 +1257,7 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
     S.subscribers=d.subscribers||[];
     S.accounts=d.users?d.users.map(function(u){return {role:u.role,name:u.name,email:u.email,phone:u.phone};}):(d.user?[{role:d.user.role,name:d.user.name,email:d.user.email,phone:d.user.phone}]:[]);
     S.wallets={};
-    if(d.user&&d.wallet){var nowM=ymd(new Date()).slice(0,7);S.wallets[d.user.email]={credits:d.wallet.credits||0,membership:d.wallet.membership||null,unlimited:!!d.wallet.unlimited,monthly:(d.wallet.monthlyLimit!=null?{limit:d.wallet.monthlyLimit,remaining:d.wallet.monthlyRemaining,period:nowM}:null),validUntil:d.wallet.validUntil||null,creditsUntil:d.wallet.creditsUntil||null,needsPayment:!!d.wallet.needsPayment};}
+    if(d.user&&d.wallet){var nowM=ymd(new Date()).slice(0,7);S.wallets[d.user.email]={credits:d.wallet.credits||0,membership:d.wallet.membership||null,unlimited:!!d.wallet.unlimited,monthly:(d.wallet.monthlyLimit!=null?{limit:d.wallet.monthlyLimit,remaining:d.wallet.monthlyRemaining,period:nowM}:null),validUntil:d.wallet.validUntil||null,creditsUntil:d.wallet.creditsUntil||null,creditLots:d.wallet.creditLots||[],needsPayment:!!d.wallet.needsPayment};}
   }
   // After a server mutation: re-fetch the snapshot and re-render. 401 → session expired → back to login.
   function refreshAndRender(){return sget('state').then(function(r){if(r.status===401){S.session=null;setSrvToken('');}else if(r.ok)applyServerState(r.d);render();});}

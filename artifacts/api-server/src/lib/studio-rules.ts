@@ -41,6 +41,30 @@ export function applyCreditExpiry(w: Wallet, todayYmd: string): { credits: numbe
   return { credits: w.credits, creditsUntil: w.creditsUntil, changed: false };
 }
 
+// ── Strippenkaart "potjes" (credit lots) ──────────────────────────────────────
+// Each bought strippenkaart is its own batch with its own expiry. id 0 is reserved for the legacy
+// single bucket (studio_wallets.credits). These are pure so the consume/refund order is unit-tested.
+export type CreditLot = { id: number; credits: number; expiresAt: string }; // expiresAt "" = nooit
+export function lotActive(l: CreditLot, todayYmd: string): boolean {
+  return (l.credits || 0) > 0 && (!l.expiresAt || l.expiresAt >= todayYmd);
+}
+/** Total usable credits across all non-expired batches. */
+export function sumActiveCredits(lots: CreditLot[], todayYmd: string): number {
+  return lots.reduce((s, l) => s + (lotActive(l, todayYmd) ? l.credits : 0), 0);
+}
+/** Which batch to spend first: the soonest-expiring active one (never-expiring batches go last). */
+export function pickLotToConsume(lots: CreditLot[], todayYmd: string): number | null {
+  const active = lots.filter((l) => lotActive(l, todayYmd));
+  if (!active.length) return null;
+  active.sort((a, b) => { const ax = a.expiresAt || "9999-12-31", bx = b.expiresAt || "9999-12-31"; return ax < bx ? -1 : ax > bx ? 1 : a.id - b.id; });
+  return active[0].id;
+}
+/** Soonest upcoming expiry across active batches (for the "geldig t/m" badge); null if none expire. */
+export function soonestExpiry(lots: CreditLot[], todayYmd: string): string | null {
+  const dates = lots.filter((l) => lotActive(l, todayYmd) && l.expiresAt).map((l) => l.expiresAt).sort();
+  return dates.length ? dates[0] : null;
+}
+
 /** What can this wallet use to book? Assumes the monthly period + credit expiry are reset for today. */
 export function creditDecision(w: Wallet, todayYmd: string): CreditDecision {
   // Strippenkaart-credits gelden alleen binnen hun geldigheidsperiode; verlopen credits tellen niet mee.

@@ -4,13 +4,13 @@
  * Classes, bookings, wallets, members & purchases follow in the next steps.
  */
 import { Router, json, type Request, type Response } from "express";
-import { db, studioUsers, studioClasses, studioMembers, studioWallets, studioBookings, studioPurchases, studioVideos, studioVideoPlans, studioVideoAccess, studioCodes, studioLocations, studioSettings, type StudioUser } from "@workspace/db";
+import { db, studioUsers, studioClasses, studioMembers, studioWallets, studioCreditLots, studioBookings, studioPurchases, studioVideos, studioVideoPlans, studioVideoAccess, studioCodes, studioLocations, studioSettings, type StudioUser } from "@workspace/db";
 import { and, eq, sql } from "drizzle-orm";
 import { logger } from "../lib/logger";
 import { hashPassword, verifyPassword } from "../lib/password.js";
 import { createSession, getSessionUser, deleteSession, tokenFrom, publicUser, seedStaffAccounts } from "../lib/studio-auth.js";
 import { sendBookingEmail, sendPaymentEmail } from "../lib/email.js";
-import { type Wallet, ymd, applyMonthlyReset, applyCreditExpiry, creditDecision, isPast, bookTooEarly, bookOpensOn, cancelClosed, purchaseWalletUpdate, addMonths } from "../lib/studio-rules.js";
+import { type Wallet, type CreditLot, ymd, applyMonthlyReset, sumActiveCredits, pickLotToConsume, soonestExpiry, lotActive, creditDecision, isPast, bookTooEarly, bookOpensOn, cancelClosed, purchaseWalletUpdate, addMonths } from "../lib/studio-rules.js";
 import { verifyStripeSession, stripeRefund, cancelStripeSubscription } from "./stripe.js";
 import { getInvoiceSettings, createInvoice, renderInvoiceHtml, renderInvoicePdf } from "../lib/invoice.js";
 
@@ -36,20 +36,49 @@ async function loadWallet(projectId: number, email: string, exec: Exec = db): Pr
   const nowMonth = ymd(new Date()).slice(0, 7);
   const today = ymd(new Date());
   const [r] = await exec.select().from(studioWallets).where(and(eq(studioWallets.projectId, projectId), eq(studioWallets.email, email)));
-  if (!r) return { credits: 0, membership: null, unlimited: false, monthlyLimit: null, monthlyRemaining: null, monthlyPeriod: nowMonth, validUntil: null, creditsUntil: null, needsPayment: false };
-  const w: Wallet = { credits: r.credits, membership: r.membership, unlimited: r.unlimited === "true", monthlyLimit: r.monthlyLimit, monthlyRemaining: r.monthlyRemaining, monthlyPeriod: r.monthlyPeriod, validUntil: r.validUntil, creditsUntil: r.creditsUntil, needsPayment: r.needsPayment === "true" };
+  const lots = await loadLots(projectId, email, exec, r);
+  const credits = sumActiveCredits(lots, today);
+  const creditsUntil = soonestExpiry(lots, today);
+  if (!r) return { credits, membership: null, unlimited: false, monthlyLimit: null, monthlyRemaining: null, monthlyPeriod: nowMonth, validUntil: null, creditsUntil, needsPayment: false };
+  const w: Wallet = { credits, membership: r.membership, unlimited: r.unlimited === "true", monthlyLimit: r.monthlyLimit, monthlyRemaining: r.monthlyRemaining, monthlyPeriod: r.monthlyPeriod, validUntil: r.validUntil, creditsUntil, needsPayment: r.needsPayment === "true" };
   const reset = applyMonthlyReset(w, nowMonth);
   if (reset.changed) {
     await exec.update(studioWallets).set({ monthlyRemaining: reset.monthlyRemaining, monthlyPeriod: reset.monthlyPeriod, updatedAt: new Date() }).where(and(eq(studioWallets.projectId, projectId), eq(studioWallets.email, email)));
     w.monthlyRemaining = reset.monthlyRemaining; w.monthlyPeriod = reset.monthlyPeriod;
   }
-  // Strippenkaart-credits die hun geldigheidsdatum voorbij zijn → vervallen (op 0).
-  const exp = applyCreditExpiry(w, today);
-  if (exp.changed) {
-    await exec.update(studioWallets).set({ credits: exp.credits, creditsUntil: exp.creditsUntil, updatedAt: new Date() }).where(and(eq(studioWallets.projectId, projectId), eq(studioWallets.email, email)));
-    w.credits = exp.credits; w.creditsUntil = exp.creditsUntil;
-  }
   return w;
+}
+
+// All credit "potjes" for a customer: each bought strippenkaart batch + the legacy single bucket
+// (studio_wallets.credits + creditsUntil) as a synthetic lot 0. walletRow may be passed to avoid a re-read.
+async function loadLots(projectId: number, email: string, exec: Exec = db, walletRow?: typeof studioWallets.$inferSelect): Promise<CreditLot[]> {
+  const r = walletRow !== undefined ? walletRow : (await exec.select().from(studioWallets).where(and(eq(studioWallets.projectId, projectId), eq(studioWallets.email, email))))[0];
+  const dbLots = (await exec.select().from(studioCreditLots).where(and(eq(studioCreditLots.projectId, projectId), eq(studioCreditLots.email, email)))).map((l) => ({ id: l.id, credits: l.credits, expiresAt: l.expiresAt }));
+  return (r && r.credits > 0) ? [{ id: 0, credits: r.credits, expiresAt: r.creditsUntil || "" }, ...dbLots] : dbLots;
+}
+
+// Spend one credit from the soonest-expiring batch. Returns the lot id spent (0 = legacy bucket), or -1.
+async function spendCredit(projectId: number, email: string, exec: Exec = db): Promise<number> {
+  const lots = await loadLots(projectId, email, exec);
+  const lotId = pickLotToConsume(lots, ymd(new Date()));
+  if (lotId == null) return -1;
+  if (lotId === 0) { await bumpWallet(projectId, email, "credits", -1, exec); return 0; }
+  const [l] = await exec.select().from(studioCreditLots).where(and(eq(studioCreditLots.projectId, projectId), eq(studioCreditLots.id, lotId)));
+  if (l) await exec.update(studioCreditLots).set({ credits: Math.max(0, l.credits - 1) }).where(eq(studioCreditLots.id, lotId));
+  return lotId;
+}
+
+// Refund one credit to the exact batch it came from — but only if that batch is still valid; an expired
+// batch forfeits the credit (the strippenkaart is simply over). lotId 0 = legacy bucket.
+async function refundCreditToLot(projectId: number, email: string, lotId: number, exec: Exec = db): Promise<void> {
+  const today = ymd(new Date());
+  if (lotId === 0) {
+    const [r] = await exec.select().from(studioWallets).where(and(eq(studioWallets.projectId, projectId), eq(studioWallets.email, email)));
+    if (r && (!r.creditsUntil || r.creditsUntil >= today)) await bumpWallet(projectId, email, "credits", 1, exec);
+    return;
+  }
+  const [l] = await exec.select().from(studioCreditLots).where(and(eq(studioCreditLots.projectId, projectId), eq(studioCreditLots.id, lotId)));
+  if (l && (!l.expiresAt || l.expiresAt >= today)) await exec.update(studioCreditLots).set({ credits: l.credits + 1 }).where(eq(studioCreditLots.id, lotId));
 }
 
 // Adjust credits / monthly allotment by a delta (e.g. -1 on booking, +1 on cancel). Creates the row if missing.
@@ -197,6 +226,8 @@ router.get("/projects/:id/studio/state", async (req, res) => {
       if (b.status === "booked") counts[k].booked++; else counts[k].waitlist++;
     }
     const wallet = await loadWallet(projectId, u.email);
+    const today0 = ymd(new Date());
+    const creditLots = (await loadLots(projectId, u.email)).filter((l) => lotActive(l, today0)).map((l) => ({ credits: l.credits, expiresAt: l.expiresAt }));
     const myBookings = allBookings.filter((b) => b.bookerEmail === u.email && b.status !== "cancelled").map(bkOut);
     const videos = await db.select().from(studioVideos).where(eq(studioVideos.projectId, projectId));
     const videoPlans = await db.select().from(studioVideoPlans).where(eq(studioVideoPlans.projectId, projectId));
@@ -210,7 +241,7 @@ router.get("/projects/:id/studio/state", async (req, res) => {
     ];
     const locations = await db.select().from(studioLocations).where(and(eq(studioLocations.projectId, projectId), eq(studioLocations.active, "true")));
     const out: Record<string, unknown> = {
-      user: publicUser(u), classes: classes.map(clsOut), members: members.map(memOut), counts, wallet: walletOut(wallet), myBookings,
+      user: publicUser(u), classes: classes.map(clsOut), members: members.map(memOut), counts, wallet: { ...walletOut(wallet), creditLots }, myBookings,
       locations: locations.map((l) => ({ id: l.id, name: l.name, address: l.address })),
       videos: videos.map((v) => ({ id: v.id, category: v.category, title: v.title, url: v.url, weekNo: v.weekNo })),
       videoPlans: videoPlans.map((p) => ({ category: p.category, price: p.price, validDays: p.validDays })),
@@ -357,15 +388,15 @@ router.post("/projects/:id/studio/book", body, async (req, res) => {
       const full = existing.filter((x) => x.status === "booked").length >= c.cap;
       if (full && !wantWaitlist) return { full: true as const };
       const status = full ? "waitlist" : "booked";
-      let usedCredit = false, usedMonthly = false;
+      let usedCredit = false, usedMonthly = false, usedLotId = 0;
       if (status === "booked") {
         const w = await loadWallet(projectId, u.email, tx);
         const dec = creditDecision(w, ymd(new Date()));
         if (!dec.ok) return { error: dec.reason };
-        if (dec.type === "credit") { await bumpWallet(projectId, u.email, "credits", -1, tx); usedCredit = true; }
+        if (dec.type === "credit") { usedLotId = await spendCredit(projectId, u.email, tx); usedCredit = true; if (usedLotId < 0) return { error: "Je tegoed is op of verlopen." }; }
         else if (dec.type === "monthly") { await bumpWallet(projectId, u.email, "monthlyRemaining", -1, tx); usedMonthly = true; }
       }
-      const [nb] = await tx.insert(studioBookings).values({ projectId, classId, date, bookerEmail: u.email, name: u.name, status, payment: "tegoed", usedCredit: usedCredit ? "true" : "false", usedMonthly: usedMonthly ? "true" : "false" }).returning();
+      const [nb] = await tx.insert(studioBookings).values({ projectId, classId, date, bookerEmail: u.email, name: u.name, status, payment: "tegoed", usedCredit: usedCredit ? "true" : "false", creditLotId: usedLotId, usedMonthly: usedMonthly ? "true" : "false" }).returning();
       return { booking: nb, status };
     });
     if ("error" in result && result.error) { res.status(400).json({ error: result.error }); return; }
@@ -393,7 +424,7 @@ router.post("/projects/:id/studio/cancel", body, async (req, res) => {
     const wasBooked = bk.status === "booked";
     // A no-show forfeits the credit — never refund it on a later cancel.
     const refundCredit = wasBooked && bk.noShow !== "true";
-    if (refundCredit && bk.usedCredit === "true") await bumpWallet(projectId, bk.bookerEmail, "credits", 1);
+    if (refundCredit && bk.usedCredit === "true") await refundCreditToLot(projectId, bk.bookerEmail, bk.creditLotId, db);
     if (refundCredit && bk.usedMonthly === "true") await bumpWallet(projectId, bk.bookerEmail, "monthlyRemaining", 1);
     await db.update(studioBookings).set({ status: "cancelled", cancelledAt: ymd(new Date()) }).where(eq(studioBookings.id, bookingId));
     try { await sendBookingEmail(projectId, bk.bookerEmail, "cancel", { name: bk.name, classTitle: c?.title || "les", date: bk.date } as any); } catch { /* best-effort */ }
@@ -465,11 +496,18 @@ router.post("/projects/:id/studio/stripe/finalize", body, async (req, res) => {
       const validUntil = ymd(new Date(Date.now() + (m.validDays || 30) * 86400000));
       // Vaste looptijd (maandelijks vast contract): klant kan pas opzeggen na commitMonths maanden.
       const commitUntil = m.commitMonths > 0 ? addMonths(today, m.commitMonths) : "";
-      const [w] = await db.select().from(studioWallets).where(and(eq(studioWallets.projectId, projectId), eq(studioWallets.email, u.email)));
-      const upd = purchaseWalletUpdate({ name: m.name, type: m.type, unlimited: m.unlimited === "true", credits: m.credits, resetMonthly: m.resetMonthly === "true" }, w?.credits || 0, validUntil, nowMonth, w?.creditsUntil || null);
-      const set = { credits: upd.credits, membership: upd.membership, unlimited: upd.unlimited ? "true" : "false", monthlyLimit: upd.monthlyLimit, monthlyRemaining: upd.monthlyRemaining, monthlyPeriod: upd.monthlyPeriod, validUntil: upd.validUntil, creditsUntil: upd.creditsUntil, commitUntil: commitUntil || null, needsPayment: "false", updatedAt: new Date() };
-      if (w) await db.update(studioWallets).set(set).where(and(eq(studioWallets.projectId, projectId), eq(studioWallets.email, u.email)));
-      else await db.insert(studioWallets).values({ projectId, email: u.email, ...set });
+      // Gewone strippenkaart → eigen potje (credit lot) met eigen vervaldatum. Abonnement of
+      // "tegoed vervalt elke maand" → wallet-update (membership / maandbundel) zoals voorheen.
+      const plainStrippenkaart = m.type !== "abonnement" && m.resetMonthly !== "true";
+      if (plainStrippenkaart) {
+        await db.insert(studioCreditLots).values({ projectId, email: u.email, credits: m.credits || 0, expiresAt: validUntil, source: m.name });
+      } else {
+        const [w] = await db.select().from(studioWallets).where(and(eq(studioWallets.projectId, projectId), eq(studioWallets.email, u.email)));
+        const upd = purchaseWalletUpdate({ name: m.name, type: m.type, unlimited: m.unlimited === "true", credits: m.credits, resetMonthly: m.resetMonthly === "true" }, w?.credits || 0, validUntil, nowMonth, w?.creditsUntil || null);
+        const set = { credits: upd.credits, membership: upd.membership, unlimited: upd.unlimited ? "true" : "false", monthlyLimit: upd.monthlyLimit, monthlyRemaining: upd.monthlyRemaining, monthlyPeriod: upd.monthlyPeriod, validUntil: upd.validUntil, creditsUntil: upd.creditsUntil, commitUntil: commitUntil || null, needsPayment: "false", updatedAt: new Date() };
+        if (w) await db.update(studioWallets).set(set).where(and(eq(studioWallets.projectId, projectId), eq(studioWallets.email, u.email)));
+        else await db.insert(studioWallets).values({ projectId, email: u.email, ...set });
+      }
       await db.insert(studioPurchases).values({ projectId, email: u.email, type: m.type, name: m.name, amount, paymentIntent: v.paymentIntent || "", subscription: v.subscription || "", commitUntil, date: ymd(new Date()) });
       await issueInvoice(projectId, u.name, u.email, (m.type === "abonnement" ? "Abonnement" : "Strippenkaart") + " — " + m.name, amount);
       await redeemCode(projectId, upperCode(b.code), Number(b.discount) || 0);

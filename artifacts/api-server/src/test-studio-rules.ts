@@ -1,5 +1,5 @@
 /** Unit test for the pure server-side booking rules (no DB). */
-import { ymd, membershipExpired, applyMonthlyReset, applyCreditExpiry, creditDecision, isPast, bookTooEarly, bookOpensOn, cancelClosed, purchaseWalletUpdate, addMonths, type Wallet } from "./lib/studio-rules.js";
+import { ymd, membershipExpired, applyMonthlyReset, applyCreditExpiry, creditDecision, isPast, bookTooEarly, bookOpensOn, cancelClosed, purchaseWalletUpdate, addMonths, lotActive, sumActiveCredits, pickLotToConsume, soonestExpiry, type Wallet, type CreditLot } from "./lib/studio-rules.js";
 
 let pass = 0, fail = 0;
 const ok = (n: string, c: boolean) => c ? (pass++, console.log("  ✓", n)) : (fail++, console.log("  ✗ FAIL:", n));
@@ -70,6 +70,22 @@ ok("addMonths +12 (jaar)", addMonths("2026-06-29", 12) === "2027-06-29");
 ok("addMonths +24 (2 jaar)", addMonths("2026-06-29", 24) === "2028-06-29");
 ok("addMonths clamps 31→eind feb", addMonths("2026-01-31", 1) === "2026-02-28");
 ok("addMonths 0 = ongewijzigd", addMonths("2026-06-29", 0) === "2026-06-29");
+
+// credit lots ("potjes"): aparte strippenkaart-batches met eigen vervaldatum
+const L = (id: number, credits: number, expiresAt: string): CreditLot => ({ id, credits, expiresAt });
+const today2 = "2026-06-22";
+ok("lotActive: geldig", lotActive(L(1, 3, "2026-09-01"), today2) === true);
+ok("lotActive: verlopen", lotActive(L(1, 3, "2026-05-01"), today2) === false);
+ok("lotActive: leeg potje telt niet", lotActive(L(1, 0, "2026-09-01"), today2) === false);
+ok("lotActive: lege datum = nooit verloopt", lotActive(L(1, 3, ""), today2) === true);
+const lots = [L(1, 3, "2026-09-01"), L(2, 5, "2026-07-01"), L(3, 2, "2026-05-01")];
+ok("sumActiveCredits telt alleen geldige potjes (3+5, niet verlopen 2)", sumActiveCredits(lots, today2) === 8);
+ok("pickLotToConsume kiest het potje dat het eerst verloopt", pickLotToConsume(lots, today2) === 2);
+ok("pickLotToConsume slaat verlopen/lege potjes over", pickLotToConsume([L(3, 2, "2026-05-01"), L(4, 0, "2026-08-01"), L(5, 1, "2026-08-01")], today2) === 5);
+ok("pickLotToConsume null als niets beschikbaar", pickLotToConsume([L(3, 2, "2026-05-01")], today2) === null);
+ok("pickLotToConsume: nooit-verloopt potje gaat als laatste", pickLotToConsume([L(6, 1, ""), L(7, 1, "2026-08-01")], today2) === 7);
+ok("soonestExpiry = eerstvolgende vervaldatum", soonestExpiry(lots, today2) === "2026-07-01");
+ok("soonestExpiry negeert lege datums", soonestExpiry([L(6, 1, ""), L(7, 1, "2026-08-01")], today2) === "2026-08-01");
 
 console.log(`\n=== ${pass} passed, ${fail} failed ===`);
 process.exit(fail ? 1 : 0);
