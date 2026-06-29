@@ -56,7 +56,7 @@ async function bumpWallet(projectId: number, email: string, field: "credits" | "
   await exec.update(studioWallets).set({ [field]: next, updatedAt: new Date() } as any).where(and(eq(studioWallets.projectId, projectId), eq(studioWallets.email, email)));
 }
 
-const clsOut = (c: typeof studioClasses.$inferSelect) => ({ id: c.id, title: c.title, teacherEmail: c.teacherEmail, teacher: c.teacher, date: c.date, time: c.time, cap: c.cap, price: c.price, mode: c.mode, onlineLink: c.onlineLink, onlineInfo: c.onlineInfo, bookDays: c.bookDays, cancelHours: c.cancelHours, locationId: c.locationId });
+const clsOut = (c: typeof studioClasses.$inferSelect) => ({ id: c.id, title: c.title, teacherEmail: c.teacherEmail, teacher: c.teacher, date: c.date, time: c.time, endTime: c.endTime, cap: c.cap, price: c.price, mode: c.mode, onlineLink: c.onlineLink, onlineInfo: c.onlineInfo, bookDays: c.bookDays, cancelHours: c.cancelHours, locationId: c.locationId });
 const memOut = (m: typeof studioMembers.$inferSelect) => ({ id: m.id, name: m.name, type: m.type, unlimited: m.unlimited === "true", credits: m.credits, price: m.price, validDays: m.validDays, recurring: m.recurring === "true" });
 const bkOut = (b: typeof studioBookings.$inferSelect) => ({ id: b.id, classId: b.classId, date: b.date, bookerEmail: b.bookerEmail, name: b.name, status: b.status, payment: b.payment, usedCredit: b.usedCredit === "true", usedMonthly: b.usedMonthly === "true", present: b.present === "true", noShow: b.noShow === "true", amount: b.amount, paymentIntent: b.paymentIntent, refunded: b.refunded === "true", refundedAmount: b.refundedAmount });
 
@@ -249,7 +249,7 @@ router.post("/projects/:id/studio/classes", body, async (req, res) => {
     const weeks = Math.min(52, Math.max(1, parseInt(b.repeatWeeks, 10) || 1));
     const common = {
       projectId, title: String(b.title || "").trim() || "Les", teacherEmail, teacher: teacherName,
-      time: String(b.time || "09:00"), cap: Math.max(1, parseInt(b.cap, 10) || 12), price: Math.max(0, Number(b.price) || 0),
+      time: String(b.time || "09:00"), endTime: String(b.endTime || ""), cap: Math.max(1, parseInt(b.cap, 10) || 12), price: Math.max(0, Number(b.price) || 0),
       mode, onlineLink: String(b.onlineLink || ""), onlineInfo: String(b.onlineInfo || ""),
       bookDays: Math.max(0, parseInt(b.bookDays, 10) || 0), cancelHours: Math.max(0, parseInt(b.cancelHours, 10) || 0),
       locationId: Math.max(0, parseInt(b.locationId, 10) || 0),

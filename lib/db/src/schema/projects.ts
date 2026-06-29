@@ -316,7 +316,8 @@ export const studioClasses = pgTable("studio_classes", {
   teacherEmail: text("teacher_email").notNull().default(""),
   teacher: text("teacher").notNull().default(""),
   date: text("date").notNull().default(""),          // yyyy-mm-dd
-  time: text("time").notNull().default(""),
+  time: text("time").notNull().default(""),           // start HH:MM
+  endTime: text("end_time").notNull().default(""),    // end HH:MM ("" = +1h default)
   cap: integer("cap").notNull().default(12),
   price: real("price").notNull().default(0),
   mode: text("mode").notNull().default("fysiek"),    // fysiek | online | hybride

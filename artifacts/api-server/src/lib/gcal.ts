@@ -119,7 +119,7 @@ function eventBody(l: Lesson): Record<string, unknown> {
     description: descParts.join("\n"),
     location: online || undefined,
     start: { dateTime: localDT(l.date, l.time), timeZone: TZID },
-    end: { dateTime: localDT(l.date, l.time, 1), timeZone: TZID },
+    end: { dateTime: l.endTime ? localDT(l.date, l.endTime) : localDT(l.date, l.time, 1), timeZone: TZID },
   };
 }
 

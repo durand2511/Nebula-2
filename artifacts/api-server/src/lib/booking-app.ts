@@ -66,7 +66,7 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
 #booking-app .ba-agenda{display:flex;flex-direction:column;gap:18px}
 #booking-app .ba-day-h{font-weight:800;font-size:15px;text-transform:capitalize;margin:0 0 10px;padding-bottom:6px;border-bottom:2px solid var(--ba-line)}
 #booking-app .ba-appt{display:flex;gap:14px;align-items:stretch;margin-bottom:10px}
-#booking-app .ba-appt-time{flex:0 0 56px;font-weight:700;font-size:14px;color:#6b7280;padding-top:14px;text-align:right}
+#booking-app .ba-appt-time{flex:0 0 72px;font-weight:700;font-size:14px;color:#6b7280;padding-top:14px;text-align:right;white-space:nowrap}
 #booking-app .ba-appt-card{flex:1;border:1px solid var(--ba-line);border-left:5px solid var(--ba);border-radius:12px;padding:12px 14px;background:#fff;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
 #booking-app .ba-appt-card.is-full{border-left-color:#dc2626}
 #booking-app .ba-appt-card.is-mine{border-left-color:#047857;background:#f0fdf8}
@@ -576,7 +576,7 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
     if(S.pay.stripe)payOpts+='<option value="stripe">Stripe</option>';
     var paySel=(!mineBooked&&!(me&&me.status==='waitlist')&&!o.past&&!tooEarly&&!full&&S.pay.tegoed&&S.pay.stripe)?('<select class="ba-pay" data-c="'+o.cls.id+'" data-d="'+o.date+'" style="width:auto">'+payOpts+'</select>'):'';
     var cls='ba-appt-card'+(mineBooked?' is-mine':(full?' is-full':''));
-    return '<div class="ba-appt"><div class="ba-appt-time">'+esc(o.cls.time)+'</div>'+
+    return '<div class="ba-appt"><div class="ba-appt-time">'+tRange(o.cls)+'</div>'+
       '<div class="'+cls+'"><div class="ba-appt-main"><b>'+esc(o.cls.title)+'</b> '+status+'<div class="ba-meta" style="margin:2px 0 0">'+esc(o.cls.teacher||'')+(o.cls.price?(' · €'+o.cls.price):'')+locLabel(o.cls)+'</div>'+onlineLine(o.cls)+'</div>'+
       '<div class="ba-row" style="gap:6px;justify-content:flex-end">'+paySel+btn+'</div></div></div>';
   }
@@ -612,7 +612,7 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
   function teacherApptBlock(o){
     var b=booked(o.cls.id,o.date),wl=waitN(o.cls.id,o.date);
     var status='<span class="ba-badge'+(b>=o.cls.cap?' full':' ok')+'">'+b+'/'+o.cls.cap+' geboekt'+(wl?(' · '+wl+' wachtlijst'):'')+'</span>';
-    return '<div class="ba-appt"><div class="ba-appt-time">'+esc(o.cls.time)+'</div>'+
+    return '<div class="ba-appt"><div class="ba-appt-time">'+tRange(o.cls)+'</div>'+
       '<div class="ba-appt-card"><div class="ba-appt-main"><b>'+esc(o.cls.title)+'</b> '+modeBadge(o.cls)+' '+status+(o.past?' <span class="ba-meta">(geweest)</span>':'')+(locName(o.cls.locationId)?(' <span class="ba-meta">📍 '+esc(locName(o.cls.locationId))+'</span>'):'')+onlineLine(o.cls)+'</div></div></div>';
   }
   // Teacher's own week agenda — identical look to the booking agenda, but only THEIR lessons
@@ -654,8 +654,9 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
     return '<div class="ba-card"><h4>Nieuwe les inplannen</h4>'+
       '<label class="ba-f">Titel</label><input id="ba-ct" placeholder="bijv. Vinyasa Flow">'+
       teacherField+
-      '<div class="ba-2"><div><label class="ba-f">Datum</label><input id="ba-cdate" type="date" value="'+ymd(new Date())+'" min="'+ymd(new Date())+'"></div>'+
-      '<div><label class="ba-f">Tijd</label><input id="ba-ctm" type="time" value="09:00"></div></div>'+
+      '<label class="ba-f">Datum</label><input id="ba-cdate" type="date" value="'+ymd(new Date())+'" min="'+ymd(new Date())+'">'+
+      '<div class="ba-2"><div><label class="ba-f">Begintijd</label><input id="ba-ctm" type="time" value="09:00"></div>'+
+      '<div><label class="ba-f">Eindtijd</label><input id="ba-cend" type="time" value="10:00"></div></div>'+
       '<div class="ba-2"><div><label class="ba-f">Max. plekken</label><input id="ba-cc" type="number" value="12"></div>'+
       '<div><label class="ba-f">Prijs per les (€, voor Stripe)</label><input id="ba-cp" type="number" step="0.01" value="15"></div></div>'+
       '<div class="ba-2"><div><label class="ba-f">Boeken kan tot … dagen vooraf</label><input id="ba-cbook" type="number" min="0" value="14"><span class="ba-note" style="margin:0">0 = geen limiet</span></div>'+
@@ -672,8 +673,10 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
       '<div style="margin-top:12px"><button class="ba-btn" data-act="addclass">Les toevoegen</button></div></div>';
   }
 
+  // "09:00–10:00" when an end time is set, otherwise just the start time.
+  function tRange(c){return c.endTime?(esc(c.time)+'–'+esc(c.endTime)):esc(c.time);}
   function classRow(c){
-    return '<div class="ba-item"><div class="ba-row"><div><b>'+esc(c.title)+'</b> '+modeBadge(c)+'<div class="ba-meta" style="margin:0">'+(c.recurring?('elke '+DOWF[c.day]):fmtDate(c.date))+' · '+esc(c.time)+' · max '+c.cap+(c.teacher?(' · '+esc(c.teacher)):'')+locLabel(c)+'</div>'+onlineLine(c)+'</div>'+
+    return '<div class="ba-item"><div class="ba-row"><div><b>'+esc(c.title)+'</b> '+modeBadge(c)+'<div class="ba-meta" style="margin:0">'+(c.recurring?('elke '+DOWF[c.day]):fmtDate(c.date))+' · '+tRange(c)+' · max '+c.cap+(c.teacher?(' · '+esc(c.teacher)):'')+locLabel(c)+'</div>'+onlineLine(c)+'</div>'+
       '<div class="ba-row" style="gap:6px">€ <input type="number" step="0.01" min="0" data-act="classprice" data-c="'+c.id+'" value="'+(c.price||0)+'" title="Prijs per les aanpassen" style="width:78px;padding:6px 8px">'+
       '<button class="ba-btn warn sm" data-act="delclass" data-c="'+c.id+'">Verwijderen</button></div></div></div>';
   }
@@ -1217,7 +1220,7 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
   function applyServerState(d){
     if(!d)return;
     S.session=d.user?{email:d.user.email,role:d.user.role,name:d.user.name}:null;
-    S.classes=(d.classes||[]).map(function(c){return {id:c.id,title:c.title,teacherEmail:c.teacherEmail,teacher:c.teacher,date:c.date,time:c.time,cap:c.cap,price:c.price,mode:c.mode,onlineLink:c.onlineLink,onlineInfo:c.onlineInfo,bookDays:c.bookDays,cancelHours:c.cancelHours,locationId:c.locationId||0,recurring:false};});
+    S.classes=(d.classes||[]).map(function(c){return {id:c.id,title:c.title,teacherEmail:c.teacherEmail,teacher:c.teacher,date:c.date,time:c.time,endTime:c.endTime||'',cap:c.cap,price:c.price,mode:c.mode,onlineLink:c.onlineLink,onlineInfo:c.onlineInfo,bookDays:c.bookDays,cancelHours:c.cancelHours,locationId:c.locationId||0,recurring:false};});
     S.members=(d.members||[]).map(function(m){return {id:m.id,name:m.name,type:m.type,unlimited:m.unlimited,credits:m.credits,price:m.price,validDays:m.validDays,recurring:m.recurring};});
     S.counts=d.counts||{};
     S.myBookings=(d.myBookings||[]).map(srvBk);
@@ -1246,7 +1249,7 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
   function genInvoice(p){try{if(!projId())return;fetch(api('invoice'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)}).catch(function(){});}catch(e){}}
   // Push the current lessons to the server so the subscribed calendar feed (.ics) stays up to date.
   function syncCalendar(){try{if(!projId())return;
-    var ls=(S.classes||[]).filter(function(c){return c.date;}).map(function(c){return {id:c.id,title:c.title,date:c.date,time:c.time,mode:c.mode||'fysiek',onlineLink:c.onlineLink||'',onlineInfo:c.onlineInfo||'',teacher:c.teacher||''};});
+    var ls=(S.classes||[]).filter(function(c){return c.date;}).map(function(c){return {id:c.id,title:c.title,date:c.date,time:c.time,endTime:c.endTime||'',mode:c.mode||'fysiek',onlineLink:c.onlineLink||'',onlineInfo:c.onlineInfo||'',teacher:c.teacher||''};});
     fetch(api('calendar/sync'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lessons:ls})}).catch(function(){});}catch(e){}}
   // Look up a class by id → {title,time} for e-mail content.
   function classMeta(cid){var c=(S.classes||[]).filter(function(x){return x.id===cid;})[0];return c?{title:c.title||'les',time:c.time||'',mode:c.mode||'fysiek',link:c.onlineLink||'',info:c.onlineInfo||''}:{title:'les',time:'',mode:'fysiek',link:'',info:''};}
@@ -1497,11 +1500,13 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
       var cbook=Math.max(0,parseInt(q('ba-cbook')?q('ba-cbook').value:'0',10)||0);
       var ccancel=Math.max(0,parseInt(q('ba-ccancel')?q('ba-ccancel').value:'0',10)||0);
       var ccap=Math.max(1,parseInt(q('ba-cc').value,10)||12),cprice=Math.max(0,parseFloat(q('ba-cp')?q('ba-cp').value:'0')||0),ctime=q('ba-ctm').value||'09:00';
+      var cend=q('ba-cend')?(q('ba-cend').value||''):'';
+      if(cend&&cend<=ctime){alert('De eindtijd moet ná de begintijd liggen.');return;}
       var cweeks=Math.min(52,Math.max(1,parseInt(q('ba-cweeks')?q('ba-cweeks').value:'1',10)||1));
       var cloc=Math.max(0,parseInt(q('ba-cloc')?q('ba-cloc').value:'0',10)||0);
-      if(SRV){spost('classes',{title:title,teacherEmail:temail,date:cdate,time:ctime,cap:ccap,price:cprice,mode:cmode,onlineLink:clink,onlineInfo:cinfo,bookDays:cbook,cancelHours:ccancel,repeatWeeks:cweeks,locationId:cloc}).then(function(r){
+      if(SRV){spost('classes',{title:title,teacherEmail:temail,date:cdate,time:ctime,endTime:cend,cap:ccap,price:cprice,mode:cmode,onlineLink:clink,onlineInfo:cinfo,bookDays:cbook,cancelHours:ccancel,repeatWeeks:cweeks,locationId:cloc}).then(function(r){
         if(!r.ok){alert((r.d&&r.d.error)||'Les toevoegen mislukt.');return;}refreshAndRender().then(syncCalendar);});return;}
-      for(var wi=0;wi<cweeks;wi++){var wd=new Date(cdate+'T00:00:00');wd.setDate(wd.getDate()+wi*7);S.classes.push({id:uid(),title:title,teacherEmail:temail,teacher:accName(temail),date:ymd(wd),time:ctime,cap:ccap,price:cprice,mode:cmode,onlineLink:clink,onlineInfo:cinfo,bookDays:cbook,cancelHours:ccancel,locationId:cloc,recurring:false});}
+      for(var wi=0;wi<cweeks;wi++){var wd=new Date(cdate+'T00:00:00');wd.setDate(wd.getDate()+wi*7);S.classes.push({id:uid(),title:title,teacherEmail:temail,teacher:accName(temail),date:ymd(wd),time:ctime,endTime:cend,cap:ccap,price:cprice,mode:cmode,onlineLink:clink,onlineInfo:cinfo,bookDays:cbook,cancelHours:ccancel,locationId:cloc,recurring:false});}
       save();renderHost();syncCalendar();return;}
     if(act==='delclass'){var id=a.getAttribute('data-c');
       if(SRV){sdel('classes/'+id).then(function(r){if(!r.ok){alert((r.d&&r.d.error)||'Verwijderen mislukt.');return;}refreshAndRender().then(syncCalendar);});return;}

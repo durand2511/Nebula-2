@@ -7,7 +7,7 @@ import { db, projectCalendar } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import crypto from "node:crypto";
 
-export type Lesson = { id: string; title: string; date: string; time: string; mode?: string; onlineLink?: string; onlineInfo?: string; teacher?: string };
+export type Lesson = { id: string; title: string; date: string; time: string; endTime?: string; mode?: string; onlineLink?: string; onlineInfo?: string; teacher?: string };
 
 // Base URL for the .ics feed. Prefer the live host the request came in on (passed by the route),
 // then PUBLIC_API_URL, then a dev fallback — so studios never get a localhost subscription link.
@@ -84,7 +84,8 @@ export function buildIcs(studio: string, domain: string, lessons: Lesson[]): str
     lines.push(`UID:lesson-${icsEsc(l.id)}@${host}`);
     lines.push(`DTSTAMP:${stamp}`);
     lines.push(`DTSTART;TZID=${TZID}:${start}`);
-    lines.push(`DTEND;TZID=${TZID}:${plusHour(l.date, l.time)}`);
+    const end = l.endTime ? dt(l.date, l.endTime) : "";
+    lines.push(`DTEND;TZID=${TZID}:${end || plusHour(l.date, l.time)}`);
     lines.push(`SUMMARY:${icsEsc(l.title || "Les")}${l.mode === "online" ? " (online)" : l.mode === "hybride" ? " (hybride)" : ""}`);
     if (online) lines.push(`LOCATION:${icsEsc(online)}`);
     else lines.push(`LOCATION:${icsEsc(studio)}`);
