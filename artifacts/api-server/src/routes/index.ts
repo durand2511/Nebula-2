@@ -9,6 +9,7 @@ import seoRouter from "./seo";
 import domainsRouter from "./domains";
 import importRouter from "./import";
 import studioRouter from "./studio";
+import gcalRouter from "./gcal";
 
 const router: IRouter = Router();
 
@@ -22,5 +23,6 @@ router.use(seoRouter);
 router.use(domainsRouter);
 router.use(importRouter);
 router.use(studioRouter);
+router.use(gcalRouter);
 
 export default router;

@@ -977,11 +977,18 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
     var h='<div class="ba-grid"><div class="ba-card"><div class="ba-row"><h4>Stripe</h4><span class="ba-badge" id="ba-stripe-badge">controleren…</span></div>'+
       '<p class="ba-meta">Echte betalingen (iDEAL/creditcard). Het geld gaat rechtstreeks naar de studio.</p>'+
       '<button class="ba-btn sm" data-act="stripe-onboard">Koppel met Stripe</button> <span id="ba-stripe-extra" class="ba-note" style="margin:0"></span></div></div>';
-    // Agenda koppelen: één .ics-feed waarop de studio zich abonneert in Google/Outlook/Apple.
+    // Agenda koppelen: Google direct (instant via OAuth) + een .ics-feed voor Outlook/Apple/overig.
     h+='<div class="ba-card" style="margin-top:16px"><h4>Agenda koppelen</h4>'+
-      '<p class="ba-meta">Koppel je eigen agenda (Google, Outlook of Apple) aan de app. Elke nieuwe les verschijnt dan automatisch in je gekoppelde agenda.</p>'+
-      '<div class="ba-row" style="justify-content:flex-start"><button class="ba-btn sm" data-act="cal-connect">Agenda koppelen</button></div>'+
-      '<div id="ba-cal-box" style="margin-top:10px"></div></div>';
+      '<p class="ba-meta">Koppel je eigen agenda aan de app. Lessen verschijnen dan automatisch in je agenda.</p>'+
+      '<div class="ba-card" style="background:#f8fafc"><div class="ba-row"><b>Google Agenda — direct</b> <span class="ba-badge" id="ba-gcal-status">…</span></div>'+
+        '<p class="ba-meta" style="margin:6px 0 10px">Aanbevolen voor Google: lessen verschijnen <b>meteen</b>, geen wachttijd. Je logt eenmalig in met Google.</p>'+
+        '<div class="ba-row" style="justify-content:flex-start;gap:8px"><button class="ba-btn sm" data-act="gcal-connect">Koppel Google Agenda</button><button class="ba-btn ghost sm" data-act="gcal-disconnect">Ontkoppelen</button></div>'+
+        '<div id="ba-gcal-extra" class="ba-note" style="margin:6px 0 0"></div></div>'+
+      '<div style="margin-top:12px"><b style="font-size:14px">Andere agenda (Outlook / Apple) — abonnementslink</b>'+
+        '<p class="ba-meta" style="margin:4px 0 6px">Hierbij bepaalt de agenda-dienst zelf hoe vaak hij ververst (kan enkele uren duren).</p>'+
+        '<div class="ba-row" style="justify-content:flex-start"><button class="ba-btn sm" data-act="cal-connect">Toon abonnementslink</button></div>'+
+        '<div id="ba-cal-box" style="margin-top:10px"></div></div>'+
+      '</div>';
     // Facturatie: studio vult wettelijke gegevens in → factuur gaat automatisch mee bij elke betaling.
     h+='<div class="ba-card" style="margin-top:16px"><h4>Facturatie instellen</h4>'+
       '<div id="ba-inv-status" class="ba-note" style="margin:4px 0 10px">Laden…</div>'+
@@ -1253,6 +1260,13 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
       else if(d.connected){b.textContent='onboarding afronden';b.className='ba-badge';}
       else{b.textContent='niet gekoppeld';b.className='ba-badge';}
     }).catch(function(){b.textContent='—';});}
+  function refreshGcalStatus(){var b=root.querySelector('#ba-gcal-status');if(!b||!projId())return;
+    var ex=root.querySelector('#ba-gcal-extra');
+    fetch(api('gcal/status')).then(function(r){return r.json();}).then(function(d){
+      if(!d.configured){b.textContent='niet beschikbaar';b.className='ba-badge';if(ex)ex.textContent='Google Agenda is nog niet ingesteld door het platform.';return;}
+      if(d.connected){b.textContent='gekoppeld';b.className='ba-badge ok';if(ex)ex.textContent=d.email?('Gekoppeld als '+d.email+'. Lessen synchroniseren direct.'):'Lessen synchroniseren direct.';}
+      else{b.textContent='niet gekoppeld';b.className='ba-badge';if(ex)ex.textContent='';}
+    }).catch(function(){b.textContent='—';});}
 
   // ---------- screens ----------
   // Landing page shown first: site logo + welcome + a "Begin hier" button → login.
@@ -1309,7 +1323,7 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
     return '<div class="ba-row" style="margin-bottom:14px"><div><div class="ba-h" style="font-size:22px">Boekingen</div><div class="ba-meta" style="margin:0">Ingelogd als '+esc(u.name)+'</div></div><div class="ba-row" style="gap:8px">'+langSelect()+'<button class="ba-btn ghost sm" data-act="logout">Uitloggen</button></div></div>'+
       '<div class="ba-tabs">'+tb+'</div><div class="ba-host"></div>';
   }
-  function renderHost(){var host=root.querySelector('.ba-host');if(host){host.innerHTML=(PANELS[activeTab]||pBoeken)();if(activeTab==='koppel'){refreshStripeStatus();refreshInvoiceSettings();refreshImportStatus();}if(activeTab==='comm')refreshEmailStatus();if(activeTab==='studio')refreshInvoices();translateDOM(host);}renderAttModal();}
+  function renderHost(){var host=root.querySelector('.ba-host');if(host){host.innerHTML=(PANELS[activeTab]||pBoeken)();if(activeTab==='koppel'){refreshStripeStatus();refreshGcalStatus();refreshInvoiceSettings();refreshImportStatus();}if(activeTab==='comm')refreshEmailStatus();if(activeTab==='studio')refreshInvoices();translateDOM(host);}renderAttModal();}
   function render(){
     initI18n();
     var sc=!S.session?'login':'app';
@@ -1608,6 +1622,15 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
           if(ex)ex.innerHTML='<a href="'+d.url+'" target="_blank" rel="noopener" style="color:var(--ba);font-weight:700">Open Stripe-onboarding ↗</a> — daarna Integraties opnieuw openen om de status te verversen.';
         } else { if(w){try{w.close();}catch(e){}} if(ex)ex.textContent=d.error||'Koppelen mislukt.'; }
       }).catch(function(){if(w){try{w.close();}catch(e){}}if(ex)ex.textContent='Koppelen mislukt.';});return;}
+    if(act==='gcal-connect'){var gx=root.querySelector('#ba-gcal-extra');if(gx)gx.textContent='Bezig…';
+      var gw=null;try{gw=window.open('about:blank','_blank');}catch(e){} // open SYNC binnen de klik (Safari)
+      fetch(api('gcal/connect'),{method:'POST'}).then(function(r){return r.json();}).then(function(d){
+        if(d.url){try{if(gw)gw.location.href=d.url;}catch(e){}
+          if(gx)gx.innerHTML='<a href="'+d.url+'" target="_blank" rel="noopener" style="color:var(--ba);font-weight:700">Open Google-inlog ↗</a> — na koppelen ververst de status vanzelf.';}
+        else{if(gw){try{gw.close();}catch(e){}}if(gx)gx.textContent=d.error||'Koppelen mislukt.';}
+      }).catch(function(){if(gw){try{gw.close();}catch(e){}}if(gx)gx.textContent='Koppelen mislukt.';});return;}
+    if(act==='gcal-disconnect'){if(!confirm('Google Agenda ontkoppelen? Bestaande lesafspraken in je agenda blijven staan.'))return;
+      fetch(api('gcal/disconnect'),{method:'POST'}).then(function(){refreshGcalStatus();var gx=root.querySelector('#ba-gcal-extra');if(gx)gx.textContent='Ontkoppeld.';}).catch(function(){});return;}
     if(act==='cal-connect'){var cbox=q('ba-cal-box');if(cbox)cbox.textContent='Koppelen…';syncCalendar();
       fetch(api('calendar')).then(function(r){return r.json();}).then(function(d){if(!cbox)return;var url=d.url||'';
         cbox.innerHTML='<label class="ba-f">Jouw agenda-feed (abonneer hierop):</label>'+

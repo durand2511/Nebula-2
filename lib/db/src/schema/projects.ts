@@ -207,6 +207,21 @@ export const projectCalendar = pgTable("project_calendar", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
+// Direct Google Calendar coupling (OAuth) for INSTANT sync: the studio connects their Google
+// account once; the server then writes/updates/deletes lesson events via the Calendar API on every
+// change (no waiting for Google to poll an .ics feed). eventMap = JSON {lessonId: googleEventId}.
+export const projectGcal = pgTable("project_gcal", {
+  projectId: integer("project_id").primaryKey().references(() => projects.id, { onDelete: "cascade" }),
+  refreshToken: text("refresh_token").notNull().default(""),
+  accessToken: text("access_token").notNull().default(""),
+  tokenExpiry: timestamp("token_expiry", { withTimezone: true }),
+  calendarId: text("calendar_id").notNull().default("primary"),
+  email: text("email").notNull().default(""),
+  eventMap: text("event_map").notNull().default("{}"),
+  connectedAt: timestamp("connected_at", { withTimezone: true }).defaultNow().notNull(),
+});
+export type ProjectGcal = typeof projectGcal.$inferSelect;
+
 // Custom domains a customer connects to their site. One domain → one project (unique).
 // status: pending (added) → verified (DNS points to customers.nebulabookings.com) → active (served).
 export const domains = pgTable("domains", {
