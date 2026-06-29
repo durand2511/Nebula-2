@@ -55,13 +55,25 @@ function plusHour(date: string, time: string): string {
   return `${dd.getFullYear()}${pad(dd.getMonth() + 1)}${pad(dd.getDate())}T${pad(dd.getHours())}${pad(dd.getMinutes())}00`;
 }
 
+// Europe/Amsterdam VTIMEZONE (with the standard EU DST rules) so DTSTART;TZID=… is interpreted as
+// real local wall-clock time by Google/Apple/Outlook — otherwise a TZ-less time is read as UTC and
+// shows up shifted (e.g. 10:00 → 12:00 in summer).
+const TZID = "Europe/Amsterdam";
+const VTIMEZONE = [
+  "BEGIN:VTIMEZONE", `TZID:${TZID}`,
+  "BEGIN:DAYLIGHT", "TZOFFSETFROM:+0100", "TZOFFSETTO:+0200", "TZNAME:CEST", "DTSTART:19700329T020000", "RRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=-1SU", "END:DAYLIGHT",
+  "BEGIN:STANDARD", "TZOFFSETFROM:+0200", "TZOFFSETTO:+0100", "TZNAME:CET", "DTSTART:19701025T030000", "RRULE:FREQ=YEARLY;BYMONTH=10;BYDAY=-1SU", "END:STANDARD",
+  "END:VTIMEZONE",
+];
+
 export function buildIcs(studio: string, domain: string, lessons: Lesson[]): string {
   const now = new Date();
   const stamp = `${now.getUTCFullYear()}${pad(now.getUTCMonth() + 1)}${pad(now.getUTCDate())}T${pad(now.getUTCHours())}${pad(now.getUTCMinutes())}${pad(now.getUTCSeconds())}Z`;
   const host = domain || "buildly.app";
   const lines = [
     "BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Buildly//Booking//NL", "CALSCALE:GREGORIAN", "METHOD:PUBLISH",
-    `NAME:${icsEsc(studio)} lessen`, `X-WR-CALNAME:${icsEsc(studio)} lessen`, "X-PUBLISHED-TTL:PT3H", "REFRESH-INTERVAL;VALUE=DURATION:PT3H",
+    `NAME:${icsEsc(studio)} lessen`, `X-WR-CALNAME:${icsEsc(studio)} lessen`, "X-PUBLISHED-TTL:PT1H", "REFRESH-INTERVAL;VALUE=DURATION:PT1H",
+    ...VTIMEZONE,
   ];
   for (const l of lessons) {
     const start = dt(l.date, l.time);
@@ -71,8 +83,8 @@ export function buildIcs(studio: string, domain: string, lessons: Lesson[]): str
     lines.push("BEGIN:VEVENT");
     lines.push(`UID:lesson-${icsEsc(l.id)}@${host}`);
     lines.push(`DTSTAMP:${stamp}`);
-    lines.push(`DTSTART:${start}`);
-    lines.push(`DTEND:${plusHour(l.date, l.time)}`);
+    lines.push(`DTSTART;TZID=${TZID}:${start}`);
+    lines.push(`DTEND;TZID=${TZID}:${plusHour(l.date, l.time)}`);
     lines.push(`SUMMARY:${icsEsc(l.title || "Les")}${l.mode === "online" ? " (online)" : l.mode === "hybride" ? " (hybride)" : ""}`);
     if (online) lines.push(`LOCATION:${icsEsc(online)}`);
     else lines.push(`LOCATION:${icsEsc(studio)}`);
