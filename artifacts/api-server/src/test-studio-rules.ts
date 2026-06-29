@@ -1,10 +1,10 @@
 /** Unit test for the pure server-side booking rules (no DB). */
-import { ymd, membershipExpired, applyMonthlyReset, creditDecision, isPast, bookTooEarly, bookOpensOn, cancelClosed, purchaseWalletUpdate, addMonths, type Wallet } from "./lib/studio-rules.js";
+import { ymd, membershipExpired, applyMonthlyReset, applyCreditExpiry, creditDecision, isPast, bookTooEarly, bookOpensOn, cancelClosed, purchaseWalletUpdate, addMonths, type Wallet } from "./lib/studio-rules.js";
 
 let pass = 0, fail = 0;
 const ok = (n: string, c: boolean) => c ? (pass++, console.log("  ✓", n)) : (fail++, console.log("  ✗ FAIL:", n));
 
-const W = (o: Partial<Wallet> = {}): Wallet => ({ credits: 0, membership: null, unlimited: false, monthlyLimit: null, monthlyRemaining: null, monthlyPeriod: "2026-06", validUntil: null, needsPayment: false, ...o });
+const W = (o: Partial<Wallet> = {}): Wallet => ({ credits: 0, membership: null, unlimited: false, monthlyLimit: null, monthlyRemaining: null, monthlyPeriod: "2026-06", validUntil: null, creditsUntil: null, needsPayment: false, ...o });
 
 // credit decision
 ok("credit: uses a strippenkaart credit", creditDecision(W({ credits: 3 }), "2026-06-22").type === "credit");
@@ -47,6 +47,19 @@ const rm = purchaseWalletUpdate({ name: "4/maand", type: "strippenkaart", unlimi
 ok("resetMonthly strippenkaart → monthlyLimit set, geen opstapeling", rm.monthlyLimit === 4 && rm.monthlyRemaining === 4 && rm.membership === "4/maand");
 const rmReset = applyMonthlyReset(W({ membership: "4/maand", monthlyLimit: 4, monthlyRemaining: 1, monthlyPeriod: "2026-05" }), "2026-06");
 ok("resetMonthly: ongebruikt tegoed vervalt op nieuwe maand", rmReset.changed === true && rmReset.monthlyRemaining === 4);
+
+// strippenkaart credit-expiry (geldigheidsperiode)
+const pkExp = purchaseWalletUpdate({ name: "10-rit", type: "strippenkaart", unlimited: false, credits: 10 }, 0, "2026-09-27", "2026-06");
+ok("strippenkaart zet creditsUntil = geldigheidsdatum", pkExp.creditsUntil === "2026-09-27" && pkExp.credits === 10);
+ok("credit nog geldig → boekbaar", creditDecision(W({ credits: 5, creditsUntil: "2026-09-27" }), "2026-06-22").type === "credit");
+ok("credit verlopen → niet boekbaar", creditDecision(W({ credits: 5, creditsUntil: "2026-05-01" }), "2026-06-22").ok === false);
+ok("credit zonder einddatum → nooit verlopen", creditDecision(W({ credits: 5, creditsUntil: null }), "2099-01-01").type === "credit");
+const ce = applyCreditExpiry(W({ credits: 5, creditsUntil: "2026-05-01" }), "2026-06-22");
+ok("applyCreditExpiry: verlopen credits → 0", ce.changed === true && ce.credits === 0 && ce.creditsUntil === null);
+const ce2 = applyCreditExpiry(W({ credits: 5, creditsUntil: "2026-12-31" }), "2026-06-22");
+ok("applyCreditExpiry: geldige credits ongewijzigd", ce2.changed === false && ce2.credits === 5);
+const aboKeepsCredits = purchaseWalletUpdate({ name: "Onbeperkt", type: "abonnement", unlimited: true, credits: null }, 3, "2026-07-22", "2026-06", "2026-08-01");
+ok("abonnement laat bestaande creditsUntil ongemoeid", aboKeepsCredits.creditsUntil === "2026-08-01");
 
 // addMonths: vaste looptijd-berekening
 ok("addMonths +6", addMonths("2026-06-29", 6) === "2026-12-29");

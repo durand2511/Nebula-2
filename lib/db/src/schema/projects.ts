@@ -395,7 +395,8 @@ export const studioWallets = pgTable("studio_wallets", {
   monthlyLimit: integer("monthly_limit"),
   monthlyRemaining: integer("monthly_remaining"),
   monthlyPeriod: text("monthly_period").notNull().default(""), // YYYY-MM
-  validUntil: text("valid_until"),                   // yyyy-mm-dd
+  validUntil: text("valid_until"),                   // yyyy-mm-dd (abonnement-geldigheid)
+  creditsUntil: text("credits_until"),               // yyyy-mm-dd: strippenkaart-credits vervallen hierna (null = nooit)
   commitUntil: text("commit_until"),                 // yyyy-mm-dd: vaste looptijd — klant kan niet eerder opzeggen
   needsPayment: text("needs_payment").notNull().default("false"),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),

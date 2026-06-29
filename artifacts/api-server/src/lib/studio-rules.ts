@@ -10,7 +10,8 @@ export type Wallet = {
   monthlyLimit: number | null;
   monthlyRemaining: number | null;
   monthlyPeriod: string;       // YYYY-MM
-  validUntil: string | null;   // yyyy-mm-dd
+  validUntil: string | null;   // yyyy-mm-dd (abonnement)
+  creditsUntil: string | null; // yyyy-mm-dd: strippenkaart-credits vervallen hierna (null = nooit)
   needsPayment: boolean;
 };
 
@@ -32,9 +33,16 @@ export function applyMonthlyReset(w: Wallet, nowMonth: string): { monthlyRemaini
 
 export type CreditDecision = { ok: boolean; type?: "credit" | "monthly" | "unlimited"; reason?: string };
 
-/** What can this wallet use to book? Assumes the monthly period has already been reset for today. */
+/** Returns the credits after expiry: a strippenkaart whose creditsUntil has passed drops to 0. */
+export function applyCreditExpiry(w: Wallet, todayYmd: string): { credits: number; creditsUntil: string | null; changed: boolean } {
+  if ((w.credits || 0) > 0 && w.creditsUntil && w.creditsUntil < todayYmd) return { credits: 0, creditsUntil: null, changed: true };
+  return { credits: w.credits, creditsUntil: w.creditsUntil, changed: false };
+}
+
+/** What can this wallet use to book? Assumes the monthly period + credit expiry are reset for today. */
 export function creditDecision(w: Wallet, todayYmd: string): CreditDecision {
-  if ((w.credits || 0) > 0) return { ok: true, type: "credit" };
+  // Strippenkaart-credits gelden alleen binnen hun geldigheidsperiode; verlopen credits tellen niet mee.
+  if ((w.credits || 0) > 0 && !(w.creditsUntil && w.creditsUntil < todayYmd)) return { ok: true, type: "credit" };
   if (w.membership) {
     if (membershipExpired(w.validUntil, todayYmd)) return { ok: false, reason: "Je abonnement is verlopen. Verleng het of betaal met Stripe." };
     if (w.needsPayment) return { ok: false, reason: "Je abonnement heeft nog geen betaalmethode. Neem contact op met de studio om je betaling te koppelen." };
@@ -52,18 +60,20 @@ export function creditDecision(w: Wallet, todayYmd: string): CreditDecision {
 // resetMonthly, the credits become a monthly allotment too (leftovers expire each month via
 // applyMonthlyReset → no pile-up if the customer doesn't show). Pure → unit-tested.
 export type PurchaseMember = { name: string; type: string; unlimited: boolean; credits: number | null; resetMonthly?: boolean };
-export function purchaseWalletUpdate(m: PurchaseMember, existingCredits: number, validUntil: string, nowMonth: string): { credits: number; membership: string | null; unlimited: boolean; monthlyLimit: number | null; monthlyRemaining: number | null; monthlyPeriod: string; validUntil: string; needsPayment: boolean } {
+export type WalletUpdate = { credits: number; membership: string | null; unlimited: boolean; monthlyLimit: number | null; monthlyRemaining: number | null; monthlyPeriod: string; validUntil: string; creditsUntil: string | null; needsPayment: boolean };
+export function purchaseWalletUpdate(m: PurchaseMember, existingCredits: number, validUntil: string, nowMonth: string, existingCreditsUntil: string | null = null): WalletUpdate {
   if (m.type === "abonnement") {
-    if (m.unlimited) return { credits: existingCredits, membership: m.name, unlimited: true, monthlyLimit: null, monthlyRemaining: null, monthlyPeriod: nowMonth, validUntil, needsPayment: false };
+    if (m.unlimited) return { credits: existingCredits, membership: m.name, unlimited: true, monthlyLimit: null, monthlyRemaining: null, monthlyPeriod: nowMonth, validUntil, creditsUntil: existingCreditsUntil, needsPayment: false };
     const lim = m.credits || 0;
-    return { credits: existingCredits, membership: m.name, unlimited: false, monthlyLimit: lim, monthlyRemaining: lim, monthlyPeriod: nowMonth, validUntil, needsPayment: false };
+    return { credits: existingCredits, membership: m.name, unlimited: false, monthlyLimit: lim, monthlyRemaining: lim, monthlyPeriod: nowMonth, validUntil, creditsUntil: existingCreditsUntil, needsPayment: false };
   }
   // Strippenkaart met "tegoed vervalt elke maand" → maandbundel i.p.v. opstapelende credits.
   if (m.resetMonthly && (m.credits || 0) > 0) {
     const lim = m.credits || 0;
-    return { credits: existingCredits, membership: m.name, unlimited: false, monthlyLimit: lim, monthlyRemaining: lim, monthlyPeriod: nowMonth, validUntil, needsPayment: false };
+    return { credits: existingCredits, membership: m.name, unlimited: false, monthlyLimit: lim, monthlyRemaining: lim, monthlyPeriod: nowMonth, validUntil, creditsUntil: existingCreditsUntil, needsPayment: false };
   }
-  return { credits: existingCredits + (m.credits || 0), membership: null, unlimited: false, monthlyLimit: null, monthlyRemaining: null, monthlyPeriod: nowMonth, validUntil, needsPayment: false };
+  // Gewone strippenkaart: credits stapelen op; ze vervallen op de gekozen geldigheidsdatum (validUntil).
+  return { credits: existingCredits + (m.credits || 0), membership: null, unlimited: false, monthlyLimit: null, monthlyRemaining: null, monthlyPeriod: nowMonth, validUntil, creditsUntil: validUntil, needsPayment: false };
 }
 
 /** Add whole months to a yyyy-mm-dd date (clamps day to month length). Used for fixed-term contracts. */

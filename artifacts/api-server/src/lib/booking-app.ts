@@ -500,7 +500,9 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
   if(!S.wallets)S.wallets={};
   if(!S.pay)S.pay={tegoed:true,stripe:true};
   if(!S.sell)S.sell={strippenkaart:true,abonnement:true};
-  function walletFor(email){if(!S.wallets[email])S.wallets[email]={credits:0,membership:null,validUntil:null};return S.wallets[email];}
+  function walletFor(email){if(!S.wallets[email])S.wallets[email]={credits:0,membership:null,validUntil:null,creditsUntil:null};return S.wallets[email];}
+  // Strippenkaart-credits zijn verlopen als hun geldigheidsdatum (creditsUntil) gepasseerd is.
+  function creditsExpired(W){return !!(W&&W.creditsUntil&&W.creditsUntil<ymd(new Date()));}
   // A membership is "unlimited" when explicitly flagged, or (legacy) an abonnement without a lesson count.
   function isUnlimited(m){return m.unlimited!=null?m.unlimited:(m.type==='abonnement'&&!m.credits);}
   // ── booking-credit rules (strippenkaart credits / unlimited / X-per-maand membership) ──
@@ -511,7 +513,7 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
     if(W.monthly.period!==nowM){W.monthly.period=nowM;W.monthly.remaining=W.monthly.limit;}}
   // What can THIS wallet use to book right now? Returns {ok, reason, type}. type: credit|unlimited|monthly.
   function bookingCredit(W){
-    if(W.credits>0)return {ok:true,type:'credit'};
+    if(W.credits>0&&!creditsExpired(W))return {ok:true,type:'credit'};
     if(W.membership){
       if(membershipExpired(W))return {ok:false,reason:'Je abonnement is verlopen. Verleng het of betaal met Stripe.'};
       // No card was imported with a Mindbody membership → a payment method must be linked first.
@@ -525,7 +527,8 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
   }
   // Human label for the current tegoed (credits / abonnement name / X per maand).
   function walletLabel(W){
-    if(W.credits>0)return W.credits+' credits';
+    if(W.credits>0&&creditsExpired(W))return 'strippenkaart verlopen';
+    if(W.credits>0)return W.credits+' credits'+(W.creditsUntil?(' · geldig t/m '+fmtDate(W.creditsUntil)):'');
     if(W.membership){if(membershipExpired(W))return 'abonnement verlopen';
       if(W.monthly){ensureMonthlyReset(W);return esc(W.membership)+' ('+W.monthly.remaining+'/'+W.monthly.limit+' deze maand)';}
       return esc(W.membership);}
@@ -916,7 +919,7 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
         '<div class="ba-2"><div><label class="ba-f">Vaste looptijd (alleen abonnement)</label><select id="ba-mcommit"><option value="0">Vrij opzegbaar (maandelijks)</option><option value="6">6 maanden vast</option><option value="12">1 jaar vast</option><option value="24">2 jaar vast</option></select></div>'+
         '<div><label class="ba-f" style="display:block">&nbsp;</label><label class="ba-f" style="font-weight:400"><input id="ba-mreset" type="checkbox" style="width:auto;margin-right:6px">Tegoed vervalt elke maand (stapelt niet op)</label></div></div>'+
         '<div style="margin-top:12px"><button class="ba-btn" data-act="addmember">Toevoegen</button></div>'+
-        '<p class="ba-note">Strippenkaart = vast aantal lessen (eenmalig). Abonnement = maandelijks, onbeperkt óf een aantal lessen per maand. <b>Vaste looptijd</b>: de klant betaalt maandelijks maar kan niet eerder opzeggen dan de gekozen termijn. <b>Tegoed vervalt elke maand</b>: ongebruikte lessen gaan niet mee naar de volgende maand. Echte betaling/recurring billing loopt via Stripe — zie Integraties.</p></div>';
+        '<p class="ba-note">Strippenkaart = vast aantal lessen (eenmalig). Abonnement = maandelijks, onbeperkt óf een aantal lessen per maand. <b>Geldig (dagen)</b>: bij een strippenkaart bepaalt dit hoelang de gekochte credits geldig blijven — daarna vervallen ze. <b>Vaste looptijd</b>: de klant betaalt maandelijks maar kan niet eerder opzeggen dan de gekozen termijn. <b>Tegoed vervalt elke maand</b>: ongebruikte lessen gaan niet mee naar de volgende maand. Echte betaling/recurring billing loopt via Stripe — zie Integraties.</p></div>';
       // Manage existing membership types: the admin can delete any of them.
       h+='<div class="ba-card" style="margin-top:16px"><h4>Bestaande lidmaatschappen — '+S.members.length+'</h4><div class="ba-list ba-scroll" style="margin-top:10px">';
       if(!S.members.length)h+='<p class="ba-meta">Nog geen lidmaatschappen.</p>';
@@ -1246,7 +1249,7 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
     S.subscribers=d.subscribers||[];
     S.accounts=d.users?d.users.map(function(u){return {role:u.role,name:u.name,email:u.email,phone:u.phone};}):(d.user?[{role:d.user.role,name:d.user.name,email:d.user.email,phone:d.user.phone}]:[]);
     S.wallets={};
-    if(d.user&&d.wallet){var nowM=ymd(new Date()).slice(0,7);S.wallets[d.user.email]={credits:d.wallet.credits||0,membership:d.wallet.membership||null,unlimited:!!d.wallet.unlimited,monthly:(d.wallet.monthlyLimit!=null?{limit:d.wallet.monthlyLimit,remaining:d.wallet.monthlyRemaining,period:nowM}:null),validUntil:d.wallet.validUntil||null,needsPayment:!!d.wallet.needsPayment};}
+    if(d.user&&d.wallet){var nowM=ymd(new Date()).slice(0,7);S.wallets[d.user.email]={credits:d.wallet.credits||0,membership:d.wallet.membership||null,unlimited:!!d.wallet.unlimited,monthly:(d.wallet.monthlyLimit!=null?{limit:d.wallet.monthlyLimit,remaining:d.wallet.monthlyRemaining,period:nowM}:null),validUntil:d.wallet.validUntil||null,creditsUntil:d.wallet.creditsUntil||null,needsPayment:!!d.wallet.needsPayment};}
   }
   // After a server mutation: re-fetch the snapshot and re-render. 401 → session expired → back to login.
   function refreshAndRender(){return sget('state').then(function(r){if(r.status===401){S.session=null;setSrvToken('');}else if(r.ok)applyServerState(r.d);render();});}

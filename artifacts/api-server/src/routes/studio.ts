@@ -10,7 +10,7 @@ import { logger } from "../lib/logger";
 import { hashPassword, verifyPassword } from "../lib/password.js";
 import { createSession, getSessionUser, deleteSession, tokenFrom, publicUser, seedStaffAccounts } from "../lib/studio-auth.js";
 import { sendBookingEmail, sendPaymentEmail } from "../lib/email.js";
-import { type Wallet, ymd, applyMonthlyReset, creditDecision, isPast, bookTooEarly, bookOpensOn, cancelClosed, purchaseWalletUpdate, addMonths } from "../lib/studio-rules.js";
+import { type Wallet, ymd, applyMonthlyReset, applyCreditExpiry, creditDecision, isPast, bookTooEarly, bookOpensOn, cancelClosed, purchaseWalletUpdate, addMonths } from "../lib/studio-rules.js";
 import { verifyStripeSession, stripeRefund, cancelStripeSubscription } from "./stripe.js";
 import { getInvoiceSettings, createInvoice, renderInvoiceHtml, renderInvoicePdf } from "../lib/invoice.js";
 
@@ -34,13 +34,20 @@ type Exec = typeof db;
 // DB wallet row → in-memory Wallet (applying a monthly reset, persisted, if the month rolled over).
 async function loadWallet(projectId: number, email: string, exec: Exec = db): Promise<Wallet> {
   const nowMonth = ymd(new Date()).slice(0, 7);
+  const today = ymd(new Date());
   const [r] = await exec.select().from(studioWallets).where(and(eq(studioWallets.projectId, projectId), eq(studioWallets.email, email)));
-  if (!r) return { credits: 0, membership: null, unlimited: false, monthlyLimit: null, monthlyRemaining: null, monthlyPeriod: nowMonth, validUntil: null, needsPayment: false };
-  const w: Wallet = { credits: r.credits, membership: r.membership, unlimited: r.unlimited === "true", monthlyLimit: r.monthlyLimit, monthlyRemaining: r.monthlyRemaining, monthlyPeriod: r.monthlyPeriod, validUntil: r.validUntil, needsPayment: r.needsPayment === "true" };
+  if (!r) return { credits: 0, membership: null, unlimited: false, monthlyLimit: null, monthlyRemaining: null, monthlyPeriod: nowMonth, validUntil: null, creditsUntil: null, needsPayment: false };
+  const w: Wallet = { credits: r.credits, membership: r.membership, unlimited: r.unlimited === "true", monthlyLimit: r.monthlyLimit, monthlyRemaining: r.monthlyRemaining, monthlyPeriod: r.monthlyPeriod, validUntil: r.validUntil, creditsUntil: r.creditsUntil, needsPayment: r.needsPayment === "true" };
   const reset = applyMonthlyReset(w, nowMonth);
   if (reset.changed) {
     await exec.update(studioWallets).set({ monthlyRemaining: reset.monthlyRemaining, monthlyPeriod: reset.monthlyPeriod, updatedAt: new Date() }).where(and(eq(studioWallets.projectId, projectId), eq(studioWallets.email, email)));
     w.monthlyRemaining = reset.monthlyRemaining; w.monthlyPeriod = reset.monthlyPeriod;
+  }
+  // Strippenkaart-credits die hun geldigheidsdatum voorbij zijn → vervallen (op 0).
+  const exp = applyCreditExpiry(w, today);
+  if (exp.changed) {
+    await exec.update(studioWallets).set({ credits: exp.credits, creditsUntil: exp.creditsUntil, updatedAt: new Date() }).where(and(eq(studioWallets.projectId, projectId), eq(studioWallets.email, email)));
+    w.credits = exp.credits; w.creditsUntil = exp.creditsUntil;
   }
   return w;
 }
@@ -96,7 +103,7 @@ async function issueCreditNote(projectId: number, name: string, email: string, d
     await sendPaymentEmail(projectId, email, html, inv.number, pdf);
   } catch (err) { logger.warn({ err, projectId }, "[studio] credit note failed"); }
 }
-const walletOut = (w: Wallet) => ({ credits: w.credits, membership: w.membership, unlimited: w.unlimited, monthlyLimit: w.monthlyLimit, monthlyRemaining: w.monthlyRemaining, validUntil: w.validUntil, needsPayment: w.needsPayment });
+const walletOut = (w: Wallet) => ({ credits: w.credits, membership: w.membership, unlimited: w.unlimited, monthlyLimit: w.monthlyLimit, monthlyRemaining: w.monthlyRemaining, validUntil: w.validUntil, creditsUntil: w.creditsUntil, needsPayment: w.needsPayment });
 
 // Self-service registration (client accounts). Admin/teacher accounts are seeded separately.
 router.post("/projects/:id/studio/register", body, async (req, res) => {
@@ -459,8 +466,8 @@ router.post("/projects/:id/studio/stripe/finalize", body, async (req, res) => {
       // Vaste looptijd (maandelijks vast contract): klant kan pas opzeggen na commitMonths maanden.
       const commitUntil = m.commitMonths > 0 ? addMonths(today, m.commitMonths) : "";
       const [w] = await db.select().from(studioWallets).where(and(eq(studioWallets.projectId, projectId), eq(studioWallets.email, u.email)));
-      const upd = purchaseWalletUpdate({ name: m.name, type: m.type, unlimited: m.unlimited === "true", credits: m.credits, resetMonthly: m.resetMonthly === "true" }, w?.credits || 0, validUntil, nowMonth);
-      const set = { credits: upd.credits, membership: upd.membership, unlimited: upd.unlimited ? "true" : "false", monthlyLimit: upd.monthlyLimit, monthlyRemaining: upd.monthlyRemaining, monthlyPeriod: upd.monthlyPeriod, validUntil: upd.validUntil, commitUntil: commitUntil || null, needsPayment: "false", updatedAt: new Date() };
+      const upd = purchaseWalletUpdate({ name: m.name, type: m.type, unlimited: m.unlimited === "true", credits: m.credits, resetMonthly: m.resetMonthly === "true" }, w?.credits || 0, validUntil, nowMonth, w?.creditsUntil || null);
+      const set = { credits: upd.credits, membership: upd.membership, unlimited: upd.unlimited ? "true" : "false", monthlyLimit: upd.monthlyLimit, monthlyRemaining: upd.monthlyRemaining, monthlyPeriod: upd.monthlyPeriod, validUntil: upd.validUntil, creditsUntil: upd.creditsUntil, commitUntil: commitUntil || null, needsPayment: "false", updatedAt: new Date() };
       if (w) await db.update(studioWallets).set(set).where(and(eq(studioWallets.projectId, projectId), eq(studioWallets.email, u.email)));
       else await db.insert(studioWallets).values({ projectId, email: u.email, ...set });
       await db.insert(studioPurchases).values({ projectId, email: u.email, type: m.type, name: m.name, amount, paymentIntent: v.paymentIntent || "", subscription: v.subscription || "", commitUntil, date: ymd(new Date()) });
