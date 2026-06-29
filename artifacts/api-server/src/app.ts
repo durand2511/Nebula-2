@@ -61,12 +61,15 @@ function passwordOk(authHeader: string): boolean {
     return false;
   }
 }
+// Legal pages must be publicly reachable (Stripe/AVG), so they stay outside the password lock.
+const PUBLIC_PATHS = /^\/(privacy|voorwaarden)(\/|$)/;
 app.use((req, res, next) => {
   if (!SITE_PASSWORD) return next();                 // lock disabled when no password configured
   // Only gate the human-facing console HTML. /api must stay open so the in-app PREVIEW iframe
   // (/api/projects/:id/preview-page) and the booking app's own /api calls work without a separate
   // Basic-Auth prompt — browsers don't reliably send stored Basic creds to (sandboxed) iframes.
   if (req.path.startsWith("/api/") || req.path === "/api") return next();
+  if (PUBLIC_PATHS.test(req.path)) return next();    // public privacy/terms pages
   if (!isReserved(req.headers.host || "")) return next(); // customer booking sites stay public
   if (passwordOk(String(req.headers.authorization || ""))) return next();
   res.setHeader("WWW-Authenticate", 'Basic realm="Nebula", charset="UTF-8"');
