@@ -305,6 +305,7 @@ function BillingDialog({ open, onClose }: { open: boolean; onClose: () => void }
                 <li className="flex gap-2"><Check className="h-4 w-4 text-primary shrink-0" /> Geen Nebula-logo op je site</li>
               </ul>
               <Button className="mt-4 w-full h-11 font-bold" disabled={busy} onClick={subscribe} data-testid="button-subscribe">{busy ? <Loader2 className="h-5 w-5 animate-spin" /> : "Abonneren"}</Button>
+              <button className="mt-3 text-xs text-muted-foreground underline hover:text-destructive" disabled={busy} onClick={cancel} data-testid="button-cancel-inline">Al een abonnement? Opzeggen</button>
             </div>
           )}
           {/* AI credit */}
