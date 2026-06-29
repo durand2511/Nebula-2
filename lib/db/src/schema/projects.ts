@@ -321,6 +321,8 @@ export const studioClasses = pgTable("studio_classes", {
   cap: integer("cap").notNull().default(12),
   price: real("price").notNull().default(0),
   mode: text("mode").notNull().default("fysiek"),    // fysiek | online | hybride
+  level: text("level").notNull().default(""),         // bv. beginner | gevorderd | alle niveaus
+  description: text("description").notNull().default(""), // vrije omschrijving (getoond bij "meer info")
   onlineLink: text("online_link").notNull().default(""),
   onlineInfo: text("online_info").notNull().default(""),
   bookDays: integer("book_days").notNull().default(0),     // 0 = no limit

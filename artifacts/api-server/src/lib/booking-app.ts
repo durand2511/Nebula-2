@@ -442,6 +442,7 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
   // A teacher/admin clicks a lesson and gets a focused pop-up with that lesson's booked students
   // and present / no-show toggles. attKey = "<classId>|<date>". Re-renders on every state change.
   var attKey=null;
+  var infoKey=null;  // class-detail popup ("meer info") — key = classId|date
   function attBookings(){if(!attKey)return [];var cid=attKey.split('|')[0],dt=attKey.split('|')[1];
     return S.bookings.filter(function(b){return b.status==='booked'&&String(b.classId)===String(cid)&&b.date===dt;});}
   function renderAttModal(){var ov=root.querySelector('#ba-att-ov');if(!ov||!attKey)return;
@@ -472,6 +473,42 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
     renderAttModal();
   }
   function closeAttModal(){attKey=null;var ov=root.querySelector('#ba-att-ov');if(ov&&ov.parentNode)ov.parentNode.removeChild(ov);}
+  // Duur in minuten/uur, afgeleid uit begin- en eindtijd.
+  function durationLabel(c){if(!c.time||!c.endTime)return '';var a=c.time.split(':'),b=c.endTime.split(':');var mins=(parseInt(b[0],10)*60+parseInt(b[1],10))-(parseInt(a[0],10)*60+parseInt(a[1],10));if(!(mins>0))return '';var h=Math.floor(mins/60),m=mins%60;return (h?h+' uur':'')+(h&&m?' ':'')+(m?m+' min':'');}
+  // "Meer info"-popup voor een les: niveau, duur, locatie, docent, prijs, omschrijving.
+  function renderInfoModal(){var ov=root.querySelector('#ba-info-ov');if(!ov||!infoKey)return;
+    var cid=infoKey.split('|')[0],dt=infoKey.split('|')[1];
+    var c=S.classes.filter(function(x){return String(x.id)===String(cid);})[0];
+    if(!c){closeInfoModal();return;}
+    var dur=durationLabel(c);var modeTxt=c.mode==='online'?'Online':c.mode==='hybride'?'Hybride (fysiek + online)':'Fysiek';
+    var rows='';
+    function row(label,val){if(!val)return;rows+='<div class="ba-row" style="gap:10px;align-items:baseline;margin:6px 0"><span class="ba-meta" style="min-width:96px;margin:0">'+label+'</span><span style="font-weight:500">'+val+'</span></div>';}
+    row('Wanneer',fmtDate(dt)+' · '+tRange(c));
+    row('Duur',dur);
+    row('Niveau',c.level?esc(c.level):'');
+    row('Docent',c.teacher?esc(c.teacher):'');
+    row('Locatie',locName(c.locationId)?('📍 '+esc(locName(c.locationId))):'');
+    row('Type les',modeTxt);
+    row('Prijs',c.price?('€'+c.price):'');
+    var desc=c.description?('<div style="margin-top:12px"><div class="ba-meta" style="margin:0 0 4px">Omschrijving</div><div style="white-space:pre-wrap;line-height:1.5">'+esc(c.description)+'</div></div>'):'';
+    var onl=(S.session)?onlineLine(c):'';
+    var h='<div style="background:#fff;border-radius:14px;max-width:480px;width:100%;max-height:85vh;overflow:auto;padding:22px;font-family:inherit;color:#1f2937" onclick="event.stopPropagation()">'+
+      '<div class="ba-row" style="align-items:flex-start"><div><h3 style="margin:0 0 4px;font-size:19px">'+esc(c.title||'Les')+'</h3>'+
+      (c.level?('<span class="ba-badge">'+esc(c.level)+'</span>'):'')+'</div>'+
+      '<button id="ba-info-x" class="ba-btn ghost sm">Sluiten</button></div>'+
+      '<div style="margin-top:14px">'+(rows||'<p class="ba-meta">Geen extra details.</p>')+'</div>'+desc+onl+'</div>';
+    ov.innerHTML=h;
+    var x=ov.querySelector('#ba-info-x');if(x)x.onclick=closeInfoModal;
+    translateDOM(ov);
+  }
+  function openInfoModal(key){infoKey=key;var ov=root.querySelector('#ba-info-ov');
+    if(!ov){ov=document.createElement('div');ov.id='ba-info-ov';
+      ov.style.cssText='position:fixed;inset:0;z-index:2147483646;background:rgba(15,23,42,.55);display:flex;align-items:center;justify-content:center;padding:20px';
+      ov.addEventListener('click',function(e){if(e.target===ov)closeInfoModal();});
+      root.appendChild(ov);}
+    renderInfoModal();
+  }
+  function closeInfoModal(){infoKey=null;var ov=root.querySelector('#ba-info-ov');if(ov&&ov.parentNode)ov.parentNode.removeChild(ov);}
 
   function teacherAccounts(){return S.accounts.filter(function(a){return a.role==='teacher';});}
   function teacherOptions(sel){return teacherAccounts().map(function(a){return '<option value="'+esc(a.email)+'"'+(a.email===sel?' selected':'')+'>'+esc(a.name)+'</option>';}).join('');}
@@ -579,8 +616,13 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
     if(S.pay.stripe)payOpts+='<option value="stripe">Stripe</option>';
     var paySel=(!mineBooked&&!(me&&me.status==='waitlist')&&!o.past&&!tooEarly&&!full&&S.pay.tegoed&&S.pay.stripe)?('<select class="ba-pay" data-c="'+o.cls.id+'" data-d="'+o.date+'" style="width:auto">'+payOpts+'</select>'):'';
     var cls='ba-appt-card'+(mineBooked?' is-mine':(full?' is-full':''));
+    var lvl=o.cls.level?(' <span class="ba-badge">'+esc(o.cls.level)+'</span>'):'';
+    var dur=durationLabel(o.cls);
+    // Titel + ⓘ openen het detail-popup (niveau, duur, locatie, omschrijving…).
     return '<div class="ba-appt"><div class="ba-appt-time">'+tRange(o.cls)+'</div>'+
-      '<div class="'+cls+'"><div class="ba-appt-main"><b>'+esc(o.cls.title)+'</b> '+status+'<div class="ba-meta" style="margin:2px 0 0">'+esc(o.cls.teacher||'')+(o.cls.price?(' · €'+o.cls.price):'')+locLabel(o.cls)+'</div>'+onlineLine(o.cls)+'</div>'+
+      '<div class="'+cls+'"><div class="ba-appt-main"><b class="ba-clinfo" data-act="classinfo" data-c="'+o.cls.id+'" data-d="'+o.date+'" style="cursor:pointer">'+esc(o.cls.title)+'</b>'+lvl+' '+status+
+      ' <a href="#" class="ba-clinfo" data-act="classinfo" data-c="'+o.cls.id+'" data-d="'+o.date+'" style="color:var(--ba);font-weight:600;font-size:12px;text-decoration:none;white-space:nowrap">ⓘ info</a>'+
+      '<div class="ba-meta" style="margin:2px 0 0">'+esc(o.cls.teacher||'')+(dur?(' · '+dur):'')+(o.cls.price?(' · €'+o.cls.price):'')+locLabel(o.cls)+'</div>'+onlineLine(o.cls)+'</div>'+
       '<div class="ba-row" style="gap:6px;justify-content:flex-end">'+paySel+btn+'</div></div></div>';
   }
   // Booking view = a WEEK agenda: all 7 days (empty days too), navigate week by week.
@@ -667,6 +709,8 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
       '<div><label class="ba-f">Annuleren kan tot … uur voor de les</label><input id="ba-ccancel" type="number" min="0" value="12"><span class="ba-note" style="margin:0">0 = altijd mogelijk</span></div></div>'+
       '<label class="ba-f">Herhaal wekelijks — aantal weken (1 = eenmalig)</label><input id="ba-cweeks" type="number" min="1" value="1"><span class="ba-note" style="margin:0">Maakt dezelfde les elke week op deze dag/tijd.</span>'+
       ((S.locations&&S.locations.length)?('<label class="ba-f">Locatie</label><select id="ba-cloc"><option value="0">— Geen specifieke locatie —</option>'+locationOptions('')+'</select>'):'')+
+      '<label class="ba-f">Niveau</label><select id="ba-clevel"><option value="">— Geen / alle niveaus —</option><option value="Beginner">Beginner</option><option value="Gevorderd">Gevorderd</option><option value="Alle niveaus">Alle niveaus</option></select>'+
+      '<label class="ba-f">Omschrijving (zien klanten bij "meer info")</label><textarea id="ba-cdesc" rows="3" placeholder="Waar gaat de les over, wat moet je meenemen, voor wie is het geschikt…" style="width:100%;box-sizing:border-box;resize:vertical;font:inherit;padding:10px 12px;border:1px solid #d1d5db;border-radius:11px"></textarea>'+
       '<label class="ba-f">Type les</label>'+
       '<div class="ba-row" style="justify-content:flex-start;gap:16px;margin:2px 0 4px">'+
         '<label class="ba-f" style="margin:0;font-weight:500"><input type="radio" name="ba-cmode" value="fysiek" checked style="width:auto;margin-right:6px">Fysiek</label>'+
@@ -1177,6 +1221,11 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
     h+='<div class="ba-list">';
     subs.forEach(function(s){
       if(s.kind==='video')h+='<div class="ba-item"><div class="ba-row"><div><b>Videos: '+esc(catLabel(s.category))+'</b><div class="ba-meta" style="margin:0">Maandelijks abonnement'+(s.validUntil?(' \\u00b7 geldig t/m '+esc(s.validUntil)):'')+'</div></div><button class="ba-btn warn sm" data-act="cancelvideo" data-c="'+esc(s.category)+'">Opzeggen</button></div></div>';
+      else if(s.kind==='membership'){
+        var mlocked=s.commitUntil&&s.commitUntil>ymd(new Date());
+        var mbtn=mlocked?'<button class="ba-btn ghost sm" disabled title="Je zit nog vast aan je contract">Vast t/m '+esc(fmtDate(s.commitUntil))+'</button>':'<button class="ba-btn warn sm" data-act="endmembership">Opzeggen</button>';
+        h+='<div class="ba-item"><div class="ba-row"><div><b>Lessen: '+esc(s.name||'Abonnement')+'</b><div class="ba-meta" style="margin:0">Lopend abonnement'+(s.validUntil?(' \\u00b7 geldig t/m '+esc(fmtDate(s.validUntil))):'')+(mlocked?(' \\u00b7 vast contract t/m '+esc(fmtDate(s.commitUntil))):'')+'</div></div>'+mbtn+'</div></div>';
+      }
       else{
         var locked=s.commitUntil&&s.commitUntil>ymd(new Date());
         var lockTxt=locked?(' \\u00b7 vast contract t/m '+esc(fmtDate(s.commitUntil))):'';
@@ -1241,7 +1290,7 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
   function applyServerState(d){
     if(!d)return;
     S.session=d.user?{email:d.user.email,role:d.user.role,name:d.user.name}:null;
-    S.classes=(d.classes||[]).map(function(c){return {id:c.id,title:c.title,teacherEmail:c.teacherEmail,teacher:c.teacher,date:c.date,time:c.time,endTime:c.endTime||'',cap:c.cap,price:c.price,mode:c.mode,onlineLink:c.onlineLink,onlineInfo:c.onlineInfo,bookDays:c.bookDays,cancelHours:c.cancelHours,locationId:c.locationId||0,recurring:false};});
+    S.classes=(d.classes||[]).map(function(c){return {id:c.id,title:c.title,teacherEmail:c.teacherEmail,teacher:c.teacher,date:c.date,time:c.time,endTime:c.endTime||'',cap:c.cap,price:c.price,mode:c.mode,level:c.level||'',description:c.description||'',onlineLink:c.onlineLink,onlineInfo:c.onlineInfo,bookDays:c.bookDays,cancelHours:c.cancelHours,locationId:c.locationId||0,recurring:false};});
     S.members=(d.members||[]).map(function(m){return {id:m.id,name:m.name,type:m.type,unlimited:m.unlimited,credits:m.credits,price:m.price,validDays:m.validDays,recurring:m.recurring,commitMonths:m.commitMonths||0,resetMonthly:!!m.resetMonthly};});
     S.counts=d.counts||{};
     S.myBookings=(d.myBookings||[]).map(srvBk);
@@ -1265,7 +1314,7 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
   function loadPublic(){if(!projId())return;
     fetch(api('studio/public')).then(function(r){return r.json();}).then(function(d){
       if(!d||d.error)return;
-      S.classes=(d.classes||[]).map(function(c){return {id:c.id,title:c.title,teacherEmail:c.teacherEmail,teacher:c.teacher,date:c.date,time:c.time,endTime:c.endTime||'',cap:c.cap,price:c.price,mode:c.mode,onlineLink:'',onlineInfo:'',bookDays:c.bookDays,cancelHours:c.cancelHours,locationId:c.locationId||0,recurring:false};});
+      S.classes=(d.classes||[]).map(function(c){return {id:c.id,title:c.title,teacherEmail:c.teacherEmail,teacher:c.teacher,date:c.date,time:c.time,endTime:c.endTime||'',cap:c.cap,price:c.price,mode:c.mode,level:c.level||'',description:c.description||'',onlineLink:'',onlineInfo:'',bookDays:c.bookDays,cancelHours:c.cancelHours,locationId:c.locationId||0,recurring:false};});
       S.counts=d.counts||{};S.locations=d.locations||[];
       if(!S.session&&authView==='browse')render();
     }).catch(function(){});
@@ -1368,7 +1417,7 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
     return '<div class="ba-row" style="margin-bottom:14px"><div><div class="ba-h" style="font-size:22px">Boekingen</div><div class="ba-meta" style="margin:0">Ingelogd als '+esc(u.name)+'</div></div><div class="ba-row" style="gap:8px">'+langSelect()+'<button class="ba-btn ghost sm" data-act="logout">Uitloggen</button></div></div>'+
       '<div class="ba-tabs">'+tb+'</div><div class="ba-host"></div>';
   }
-  function renderHost(){var host=root.querySelector('.ba-host');if(host){host.innerHTML=(PANELS[activeTab]||pBoeken)();if(activeTab==='koppel'){refreshStripeStatus();refreshGcalStatus();refreshInvoiceSettings();refreshImportStatus();}if(activeTab==='comm')refreshEmailStatus();if(activeTab==='studio')refreshInvoices();translateDOM(host);}renderAttModal();}
+  function renderHost(){var host=root.querySelector('.ba-host');if(host){host.innerHTML=(PANELS[activeTab]||pBoeken)();if(activeTab==='koppel'){refreshStripeStatus();refreshGcalStatus();refreshInvoiceSettings();refreshImportStatus();}if(activeTab==='comm')refreshEmailStatus();if(activeTab==='studio')refreshInvoices();translateDOM(host);}renderAttModal();renderInfoModal();}
   function render(){
     initI18n();
     var sc=!S.session?'login':'app';
@@ -1415,6 +1464,9 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
     var t=e.target.closest('[data-tab]');
     if(t){activeTab=t.getAttribute('data-tab');render();return;}
     var a=e.target.closest('[data-act]'); if(!a)return; var act=a.getAttribute('data-act');
+
+    // Les-detail ("meer info") — mag altijd, ook uitgelogd in de publieke agenda.
+    if(act==='classinfo'){if(e.preventDefault)e.preventDefault();openInfoModal(a.getAttribute('data-c')+'|'+a.getAttribute('data-d'));return;}
 
     // Publieke agenda: rooster bekijken mag zonder account, maar boeken/kopen/acties vereisen inloggen.
     if(!S.session&&(act==='book'||act==='wait'||act==='cancel'||act==='buy'||act==='subvideo')){authView='login';render();return;}
@@ -1549,9 +1601,10 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
       if(cend&&cend<=ctime){alert('De eindtijd moet ná de begintijd liggen.');return;}
       var cweeks=Math.min(52,Math.max(1,parseInt(q('ba-cweeks')?q('ba-cweeks').value:'1',10)||1));
       var cloc=Math.max(0,parseInt(q('ba-cloc')?q('ba-cloc').value:'0',10)||0);
-      if(SRV){spost('classes',{title:title,teacherEmail:temail,date:cdate,time:ctime,endTime:cend,cap:ccap,price:cprice,mode:cmode,onlineLink:clink,onlineInfo:cinfo,bookDays:cbook,cancelHours:ccancel,repeatWeeks:cweeks,locationId:cloc}).then(function(r){
+      var clevel=(q('ba-clevel')?q('ba-clevel').value:'')||'',cdesc=(q('ba-cdesc')?q('ba-cdesc').value:'').trim();
+      if(SRV){spost('classes',{title:title,teacherEmail:temail,date:cdate,time:ctime,endTime:cend,cap:ccap,price:cprice,mode:cmode,level:clevel,description:cdesc,onlineLink:clink,onlineInfo:cinfo,bookDays:cbook,cancelHours:ccancel,repeatWeeks:cweeks,locationId:cloc}).then(function(r){
         if(!r.ok){alert((r.d&&r.d.error)||'Les toevoegen mislukt.');return;}refreshAndRender().then(syncCalendar);});return;}
-      for(var wi=0;wi<cweeks;wi++){var wd=new Date(cdate+'T00:00:00');wd.setDate(wd.getDate()+wi*7);S.classes.push({id:uid(),title:title,teacherEmail:temail,teacher:accName(temail),date:ymd(wd),time:ctime,endTime:cend,cap:ccap,price:cprice,mode:cmode,onlineLink:clink,onlineInfo:cinfo,bookDays:cbook,cancelHours:ccancel,locationId:cloc,recurring:false});}
+      for(var wi=0;wi<cweeks;wi++){var wd=new Date(cdate+'T00:00:00');wd.setDate(wd.getDate()+wi*7);S.classes.push({id:uid(),title:title,teacherEmail:temail,teacher:accName(temail),date:ymd(wd),time:ctime,endTime:cend,cap:ccap,price:cprice,mode:cmode,level:clevel,description:cdesc,onlineLink:clink,onlineInfo:cinfo,bookDays:cbook,cancelHours:ccancel,locationId:cloc,recurring:false});}
       save();renderHost();syncCalendar();return;}
     if(act==='delclass'){var id=a.getAttribute('data-c');
       if(SRV){sdel('classes/'+id).then(function(r){if(!r.ok){alert((r.d&&r.d.error)||'Verwijderen mislukt.');return;}refreshAndRender().then(syncCalendar);});return;}
@@ -1662,6 +1715,8 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
       spost('video-cancel',{category:a.getAttribute('data-c')||videoCat}).then(function(r){if(!r.ok){alert((r.d&&r.d.error)||'Opzeggen mislukt.');return;}alert('Opgezegd. Je houdt toegang tot het einde van de periode.');refreshAndRender();});return;}
     if(act==='cancelmembership'){if(!confirm('Je lessen-abonnement opzeggen? Je houdt toegang tot het einde van de betaalde periode.'))return;
       spost('cancel-membership',{subscription:a.getAttribute('data-s')}).then(function(r){if(!r.ok){alert((r.d&&r.d.error)||'Opzeggen mislukt.');return;}alert('Opgezegd. Je houdt toegang tot het einde van de periode.');refreshAndRender();});return;}
+    if(act==='endmembership'){if(!confirm('Je abonnement nu beëindigen? Je stopt hiermee per direct met dit abonnement.'))return;
+      spost('end-membership',{}).then(function(r){if(!r.ok){alert((r.d&&r.d.error)||'Beëindigen mislukt.');return;}alert('Je abonnement is beëindigd.');refreshAndRender();});return;}
     if(act==='delcancel'){var cbid=a.getAttribute('data-b');S.bookings=S.bookings.filter(function(b){return !(b.id===cbid&&b.status==='cancelled');});save();renderHost();return;}
     if(act==='clearcancels'){S.bookings=S.bookings.filter(function(b){return b.status!=='cancelled';});save();renderHost();return;}
     if(act==='stripe-onboard'){var ex=root.querySelector('#ba-stripe-extra');if(ex)ex.textContent='Bezig…';

@@ -92,7 +92,7 @@ async function bumpWallet(projectId: number, email: string, field: "credits" | "
   await exec.update(studioWallets).set({ [field]: next, updatedAt: new Date() } as any).where(and(eq(studioWallets.projectId, projectId), eq(studioWallets.email, email)));
 }
 
-const clsOut = (c: typeof studioClasses.$inferSelect) => ({ id: c.id, title: c.title, teacherEmail: c.teacherEmail, teacher: c.teacher, date: c.date, time: c.time, endTime: c.endTime, cap: c.cap, price: c.price, mode: c.mode, onlineLink: c.onlineLink, onlineInfo: c.onlineInfo, bookDays: c.bookDays, cancelHours: c.cancelHours, locationId: c.locationId });
+const clsOut = (c: typeof studioClasses.$inferSelect) => ({ id: c.id, title: c.title, teacherEmail: c.teacherEmail, teacher: c.teacher, date: c.date, time: c.time, endTime: c.endTime, cap: c.cap, price: c.price, mode: c.mode, level: c.level, description: c.description, onlineLink: c.onlineLink, onlineInfo: c.onlineInfo, bookDays: c.bookDays, cancelHours: c.cancelHours, locationId: c.locationId });
 const memOut = (m: typeof studioMembers.$inferSelect) => ({ id: m.id, name: m.name, type: m.type, unlimited: m.unlimited === "true", credits: m.credits, price: m.price, validDays: m.validDays, recurring: m.recurring === "true", commitMonths: m.commitMonths, resetMonthly: m.resetMonthly === "true" });
 const bkOut = (b: typeof studioBookings.$inferSelect) => ({ id: b.id, classId: b.classId, date: b.date, bookerEmail: b.bookerEmail, name: b.name, status: b.status, payment: b.payment, usedCredit: b.usedCredit === "true", usedMonthly: b.usedMonthly === "true", present: b.present === "true", noShow: b.noShow === "true", amount: b.amount, paymentIntent: b.paymentIntent, refunded: b.refunded === "true", refundedAmount: b.refundedAmount });
 
@@ -233,11 +233,17 @@ router.get("/projects/:id/studio/state", async (req, res) => {
     const videoPlans = await db.select().from(studioVideoPlans).where(eq(studioVideoPlans.projectId, projectId));
     const today = ymd(new Date());
     const access = await db.select().from(studioVideoAccess).where(and(eq(studioVideoAccess.projectId, projectId), eq(studioVideoAccess.email, u.email)));
-    // The current user's running (recurring, cancellable) subscriptions — for the client "Abonnementen" tab.
+    // The current user's running subscriptions/memberships — for the client "Abonnementen" tab.
     const myPurch = await db.select().from(studioPurchases).where(and(eq(studioPurchases.projectId, projectId), eq(studioPurchases.email, u.email)));
+    const classSubs = myPurch.filter((p) => p.type === "abonnement" && p.subscription && p.refunded !== "true").map((p) => ({ kind: "class", name: p.name, subscription: p.subscription, commitUntil: p.commitUntil || "" }));
+    // A still-active membership without a (recurring) Stripe subscription — still cancellable in-app.
+    const [wRow] = await db.select().from(studioWallets).where(and(eq(studioWallets.projectId, projectId), eq(studioWallets.email, u.email)));
+    const membershipInfo = (!classSubs.length && wRow && wRow.membership && (!wRow.validUntil || wRow.validUntil >= today))
+      ? [{ kind: "membership", name: wRow.membership, validUntil: wRow.validUntil || "", commitUntil: wRow.commitUntil || "" }] : [];
     const mySubs = [
       ...access.filter((a) => a.subscription && (!a.validUntil || a.validUntil >= today)).map((a) => ({ kind: "video", category: a.category, validUntil: a.validUntil })),
-      ...myPurch.filter((p) => p.type === "abonnement" && p.subscription && p.refunded !== "true").map((p) => ({ kind: "class", name: p.name, subscription: p.subscription, commitUntil: p.commitUntil || "" })),
+      ...classSubs,
+      ...membershipInfo,
     ];
     const locations = await db.select().from(studioLocations).where(and(eq(studioLocations.projectId, projectId), eq(studioLocations.active, "true")));
     const out: Record<string, unknown> = {
@@ -307,7 +313,7 @@ router.post("/projects/:id/studio/classes", body, async (req, res) => {
     const common = {
       projectId, title: String(b.title || "").trim() || "Les", teacherEmail, teacher: teacherName,
       time: String(b.time || "09:00"), endTime: String(b.endTime || ""), cap: Math.max(1, parseInt(b.cap, 10) || 12), price: Math.max(0, Number(b.price) || 0),
-      mode, onlineLink: String(b.onlineLink || ""), onlineInfo: String(b.onlineInfo || ""),
+      mode, level: String(b.level || "").slice(0, 40), description: String(b.description || "").slice(0, 600), onlineLink: String(b.onlineLink || ""), onlineInfo: String(b.onlineInfo || ""),
       bookDays: Math.max(0, parseInt(b.bookDays, 10) || 0), cancelHours: Math.max(0, parseInt(b.cancelHours, 10) || 0),
       locationId: Math.max(0, parseInt(b.locationId, 10) || 0),
     };
@@ -639,6 +645,23 @@ router.post("/projects/:id/studio/cancel-membership", body, async (req, res) => 
     await db.update(studioPurchases).set({ subscription: "" }).where(eq(studioPurchases.id, p.id));
     res.json({ ok: true });
   } catch (err) { logger.error({ err, projectId }, "[studio] cancel-membership failed"); res.status(500).json({ error: "Opzeggen mislukt." }); }
+});
+
+// End a (non-recurring) membership the client holds — there's no Stripe sub to cancel, so we simply
+// stop the membership now. Respects a fixed-term contract (commitUntil) just like cancel-membership.
+router.post("/projects/:id/studio/end-membership", body, async (req, res) => {
+  const u = await authed(req, res); if (!u) return;
+  const projectId = pid(req as any);
+  try {
+    const [w] = await db.select().from(studioWallets).where(and(eq(studioWallets.projectId, projectId), eq(studioWallets.email, u.email)));
+    if (!w || !w.membership) { res.status(400).json({ error: "Je hebt geen lopend abonnement." }); return; }
+    if (w.commitUntil && w.commitUntil > ymd(new Date())) {
+      const d = w.commitUntil.split("-"); const nl = d.length === 3 ? d[2] + "-" + d[1] + "-" + d[0] : w.commitUntil;
+      res.status(400).json({ error: "Je zit nog vast aan je contract tot " + nl + "." }); return;
+    }
+    await db.update(studioWallets).set({ membership: null, unlimited: "false", monthlyLimit: null, monthlyRemaining: null, validUntil: ymd(new Date()), commitUntil: null, updatedAt: new Date() }).where(and(eq(studioWallets.projectId, projectId), eq(studioWallets.email, u.email)));
+    res.json({ ok: true });
+  } catch (err) { logger.error({ err, projectId }, "[studio] end-membership failed"); res.status(500).json({ error: "Beëindigen mislukt." }); }
 });
 
 // Cancel a recurring video subscription (the customer themselves, or admin). Stops at period end.
