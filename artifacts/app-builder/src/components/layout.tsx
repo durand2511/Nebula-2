@@ -30,6 +30,18 @@ export function Layout({ children }: { children: React.ReactNode }) {
         </header>
       )}
       <main className="flex-1 flex flex-col">{children}</main>
+      {!isWorkspace && (
+        <footer className="w-full mt-auto py-6 px-4">
+          <div className="mx-auto max-w-3xl flex flex-col items-center gap-2 text-xs text-foreground/60">
+            <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1">
+              <Link href="/privacy" className="hover:text-foreground hover:underline">Privacybeleid</Link>
+              <Link href="/voorwaarden" className="hover:text-foreground hover:underline">Algemene voorwaarden</Link>
+              <a href="mailto:durand2511@gmail.com" className="hover:text-foreground hover:underline">Contact</a>
+            </div>
+            <p>© {new Date().getFullYear()} Nebula — Durand van Konijnenburg · KVK 70776857</p>
+          </div>
+        </footer>
+      )}
     </div>
   );
 }
