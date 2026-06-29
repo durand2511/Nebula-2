@@ -311,7 +311,7 @@ function BillingDialog({ open, onClose }: { open: boolean; onClose: () => void }
           <div className="rounded-xl border p-4 mb-4">
             <div className="flex items-center justify-between"><span className="font-medium text-sm">AI-tegoed</span><span className="font-bold">€{credit.toFixed(2)}</span></div>
             <div className="h-2 w-full rounded-full bg-muted mt-2 overflow-hidden"><div className="h-full bg-primary" style={{ width: `${pct}%` }} /></div>
-            <p className="text-xs text-muted-foreground mt-1">Elke AI-wijziging kost z'n werkelijke kostprijs ×2. €{data.monthlyCredit} per maand inbegrepen; bijkopen blijft staan.</p>
+            <p className="text-xs text-muted-foreground mt-1">€{data.monthlyCredit} per maand inbegrepen; bijkopen blijft staan.</p>
             <div className="flex items-end gap-2 mt-3">
               <div className="flex-1"><label className="text-xs text-muted-foreground">Bijkopen (€, zelf invullen)</label><Input type="number" min="5" step="5" value={topup} onChange={(e) => setTopup(e.target.value)} /></div>
               <Button size="sm" className="h-10" disabled={busy || !(parseFloat(topup) >= 5)} onClick={doTopup} data-testid="button-topup">Bijkopen</Button>
