@@ -10,7 +10,7 @@ import { logger } from "../lib/logger";
 import { hashPassword, verifyPassword } from "../lib/password.js";
 import { createSession, getSessionUser, deleteSession, tokenFrom, publicUser, seedStaffAccounts } from "../lib/studio-auth.js";
 import { sendBookingEmail, sendPaymentEmail } from "../lib/email.js";
-import { type Wallet, ymd, applyMonthlyReset, creditDecision, isPast, bookTooEarly, bookOpensOn, cancelClosed, purchaseWalletUpdate } from "../lib/studio-rules.js";
+import { type Wallet, ymd, applyMonthlyReset, creditDecision, isPast, bookTooEarly, bookOpensOn, cancelClosed, purchaseWalletUpdate, addMonths } from "../lib/studio-rules.js";
 import { verifyStripeSession, stripeRefund, cancelStripeSubscription } from "./stripe.js";
 import { getInvoiceSettings, createInvoice, renderInvoiceHtml, renderInvoicePdf } from "../lib/invoice.js";
 
@@ -57,7 +57,7 @@ async function bumpWallet(projectId: number, email: string, field: "credits" | "
 }
 
 const clsOut = (c: typeof studioClasses.$inferSelect) => ({ id: c.id, title: c.title, teacherEmail: c.teacherEmail, teacher: c.teacher, date: c.date, time: c.time, endTime: c.endTime, cap: c.cap, price: c.price, mode: c.mode, onlineLink: c.onlineLink, onlineInfo: c.onlineInfo, bookDays: c.bookDays, cancelHours: c.cancelHours, locationId: c.locationId });
-const memOut = (m: typeof studioMembers.$inferSelect) => ({ id: m.id, name: m.name, type: m.type, unlimited: m.unlimited === "true", credits: m.credits, price: m.price, validDays: m.validDays, recurring: m.recurring === "true" });
+const memOut = (m: typeof studioMembers.$inferSelect) => ({ id: m.id, name: m.name, type: m.type, unlimited: m.unlimited === "true", credits: m.credits, price: m.price, validDays: m.validDays, recurring: m.recurring === "true", commitMonths: m.commitMonths, resetMonthly: m.resetMonthly === "true" });
 const bkOut = (b: typeof studioBookings.$inferSelect) => ({ id: b.id, classId: b.classId, date: b.date, bookerEmail: b.bookerEmail, name: b.name, status: b.status, payment: b.payment, usedCredit: b.usedCredit === "true", usedMonthly: b.usedMonthly === "true", present: b.present === "true", noShow: b.noShow === "true", amount: b.amount, paymentIntent: b.paymentIntent, refunded: b.refunded === "true", refundedAmount: b.refundedAmount });
 
 // Promote the first waitlister for a freed spot, e-mail them, and return their e-mail (or null).
@@ -199,7 +199,7 @@ router.get("/projects/:id/studio/state", async (req, res) => {
     const myPurch = await db.select().from(studioPurchases).where(and(eq(studioPurchases.projectId, projectId), eq(studioPurchases.email, u.email)));
     const mySubs = [
       ...access.filter((a) => a.subscription && (!a.validUntil || a.validUntil >= today)).map((a) => ({ kind: "video", category: a.category, validUntil: a.validUntil })),
-      ...myPurch.filter((p) => p.type === "abonnement" && p.subscription && p.refunded !== "true").map((p) => ({ kind: "class", name: p.name, subscription: p.subscription })),
+      ...myPurch.filter((p) => p.type === "abonnement" && p.subscription && p.refunded !== "true").map((p) => ({ kind: "class", name: p.name, subscription: p.subscription, commitUntil: p.commitUntil || "" })),
     ];
     const locations = await db.select().from(studioLocations).where(and(eq(studioLocations.projectId, projectId), eq(studioLocations.active, "true")));
     const out: Record<string, unknown> = {
@@ -215,7 +215,7 @@ router.get("/projects/:id/studio/state", async (req, res) => {
       const users = await db.select().from(studioUsers).where(eq(studioUsers.projectId, projectId));
       out.users = users.map(publicUser);
       const purchases = await db.select().from(studioPurchases).where(eq(studioPurchases.projectId, projectId));
-      out.purchases = purchases.map((p) => ({ id: p.id, email: p.email, type: p.type, name: p.name, amount: p.amount, paymentIntent: p.paymentIntent, subscription: p.subscription, refunded: p.refunded === "true", refundedAmount: p.refundedAmount, date: p.date }));
+      out.purchases = purchases.map((p) => ({ id: p.id, email: p.email, type: p.type, name: p.name, amount: p.amount, paymentIntent: p.paymentIntent, subscription: p.subscription, refunded: p.refunded === "true", refundedAmount: p.refundedAmount, commitUntil: p.commitUntil || "", date: p.date }));
       const codes = await db.select().from(studioCodes).where(eq(studioCodes.projectId, projectId));
       out.codes = codes.map((c) => ({ id: c.id, code: c.code, kind: c.kind, value: c.value, balance: c.balance, expiresAt: c.expiresAt, maxUses: c.maxUses, uses: c.uses }));
       const [st] = await db.select().from(studioSettings).where(eq(studioSettings.projectId, projectId));
@@ -231,6 +231,25 @@ router.get("/projects/:id/studio/state", async (req, res) => {
     }
     res.json(out);
   } catch (err) { logger.error({ err, projectId }, "[studio] state failed"); res.status(500).json({ error: "Laden mislukt." }); }
+});
+
+// PUBLIC (no login): the read-only week agenda a visitor sees before logging in. Only the schedule
+// + free/full counts + locations — no personal data. Booking itself still requires a login.
+router.get("/projects/:id/studio/public", async (req, res) => {
+  const projectId = pid(req as any); if (isNaN(projectId)) { res.status(400).json({ error: "Invalid project ID" }); return; }
+  try {
+    const classes = await db.select().from(studioClasses).where(eq(studioClasses.projectId, projectId));
+    const allBookings = await db.select().from(studioBookings).where(eq(studioBookings.projectId, projectId));
+    const counts: Record<string, { booked: number; waitlist: number }> = {};
+    for (const b of allBookings) {
+      if (b.status !== "booked" && b.status !== "waitlist") continue;
+      const k = b.classId + "|" + b.date; (counts[k] ||= { booked: 0, waitlist: 0 });
+      if (b.status === "booked") counts[k].booked++; else counts[k].waitlist++;
+    }
+    const locations = await db.select().from(studioLocations).where(and(eq(studioLocations.projectId, projectId), eq(studioLocations.active, "true")));
+    // Hide online join links from the public agenda (only logged-in, booked customers should see them).
+    res.json({ classes: classes.map((c) => ({ ...clsOut(c), onlineLink: "", onlineInfo: "" })), counts, locations: locations.map((l) => ({ id: l.id, name: l.name, address: l.address })) });
+  } catch (err) { logger.error({ err, projectId }, "[studio] public state failed"); res.status(500).json({ error: "Laden mislukt." }); }
 });
 
 // Create a lesson (admin picks the teacher; a teacher always creates for themselves).
@@ -285,11 +304,15 @@ router.post("/projects/:id/studio/members", body, async (req, res) => {
   try {
     const type = b.type === "abonnement" ? "abonnement" : "strippenkaart";
     const unlimited = type === "abonnement" && (b.unlimited === true || b.lim === "onbeperkt");
+    // Vaste looptijd alleen voor abonnementen (maandelijks vast contract): 0 (vrij), 6, 12 of 24 maanden.
+    const commitMonths = type === "abonnement" ? ([6, 12, 24].includes(parseInt(b.commitMonths, 10)) ? parseInt(b.commitMonths, 10) : 0) : 0;
+    const resetMonthly = b.resetMonthly === true || b.resetMonthly === "true";
     const [m] = await db.insert(studioMembers).values({
       projectId, name: String(b.name || "").trim() || "Lidmaatschap", type, unlimited: unlimited ? "true" : "false",
       credits: unlimited ? null : (parseInt(b.credits, 10) || (type === "strippenkaart" ? 10 : 8)),
       price: Math.max(0, Number(b.price) || 0), validDays: parseInt(b.validDays, 10) || (type === "abonnement" ? 30 : 180),
       recurring: type === "abonnement" ? "true" : "false",
+      commitMonths, resetMonthly: resetMonthly ? "true" : "false",
     }).returning();
     res.json({ ok: true, member: memOut(m) });
   } catch (err) { logger.error({ err, projectId }, "[studio] create member failed"); res.status(500).json({ error: "Toevoegen mislukt." }); }
@@ -431,13 +454,16 @@ router.post("/projects/:id/studio/stripe/finalize", body, async (req, res) => {
       if (!m) { res.status(404).json({ error: "Lidmaatschap niet gevonden." }); return; }
       if (v.paymentIntent) { const dup = await db.select().from(studioPurchases).where(and(eq(studioPurchases.projectId, projectId), eq(studioPurchases.paymentIntent, v.paymentIntent))); if (dup.length) { res.json({ ok: true, already: true }); return; } }
       const nowMonth = ymd(new Date()).slice(0, 7);
+      const today = ymd(new Date());
       const validUntil = ymd(new Date(Date.now() + (m.validDays || 30) * 86400000));
+      // Vaste looptijd (maandelijks vast contract): klant kan pas opzeggen na commitMonths maanden.
+      const commitUntil = m.commitMonths > 0 ? addMonths(today, m.commitMonths) : "";
       const [w] = await db.select().from(studioWallets).where(and(eq(studioWallets.projectId, projectId), eq(studioWallets.email, u.email)));
-      const upd = purchaseWalletUpdate({ name: m.name, type: m.type, unlimited: m.unlimited === "true", credits: m.credits }, w?.credits || 0, validUntil, nowMonth);
-      const set = { credits: upd.credits, membership: upd.membership, unlimited: upd.unlimited ? "true" : "false", monthlyLimit: upd.monthlyLimit, monthlyRemaining: upd.monthlyRemaining, monthlyPeriod: upd.monthlyPeriod, validUntil: upd.validUntil, needsPayment: "false", updatedAt: new Date() };
+      const upd = purchaseWalletUpdate({ name: m.name, type: m.type, unlimited: m.unlimited === "true", credits: m.credits, resetMonthly: m.resetMonthly === "true" }, w?.credits || 0, validUntil, nowMonth);
+      const set = { credits: upd.credits, membership: upd.membership, unlimited: upd.unlimited ? "true" : "false", monthlyLimit: upd.monthlyLimit, monthlyRemaining: upd.monthlyRemaining, monthlyPeriod: upd.monthlyPeriod, validUntil: upd.validUntil, commitUntil: commitUntil || null, needsPayment: "false", updatedAt: new Date() };
       if (w) await db.update(studioWallets).set(set).where(and(eq(studioWallets.projectId, projectId), eq(studioWallets.email, u.email)));
       else await db.insert(studioWallets).values({ projectId, email: u.email, ...set });
-      await db.insert(studioPurchases).values({ projectId, email: u.email, type: m.type, name: m.name, amount, paymentIntent: v.paymentIntent || "", subscription: v.subscription || "", date: ymd(new Date()) });
+      await db.insert(studioPurchases).values({ projectId, email: u.email, type: m.type, name: m.name, amount, paymentIntent: v.paymentIntent || "", subscription: v.subscription || "", commitUntil, date: ymd(new Date()) });
       await issueInvoice(projectId, u.name, u.email, (m.type === "abonnement" ? "Abonnement" : "Strippenkaart") + " — " + m.name, amount);
       await redeemCode(projectId, upperCode(b.code), Number(b.discount) || 0);
       res.json({ ok: true }); return;
@@ -559,6 +585,11 @@ router.post("/projects/:id/studio/cancel-membership", body, async (req, res) => 
   try {
     const [p] = await db.select().from(studioPurchases).where(and(eq(studioPurchases.projectId, projectId), eq(studioPurchases.email, u.email), eq(studioPurchases.subscription, subscription)));
     if (!p || !p.subscription) { res.status(400).json({ error: "Geen lopend abonnement gevonden." }); return; }
+    // Vaste looptijd: klant mag niet eerder opzeggen dan het einde van het contract (admin wél, via terugbetalen).
+    if (p.commitUntil && p.commitUntil > ymd(new Date())) {
+      const d = p.commitUntil.split("-"); const nl = d.length === 3 ? d[2] + "-" + d[1] + "-" + d[0] : p.commitUntil;
+      res.status(400).json({ error: "Je zit nog vast aan je contract tot " + nl + ". Opzeggen kan daarna. Neem contact op met de studio voor vragen." }); return;
+    }
     await cancelStripeSubscription(projectId, p.subscription);
     await db.update(studioPurchases).set({ subscription: "" }).where(eq(studioPurchases.id, p.id));
     res.json({ ok: true });

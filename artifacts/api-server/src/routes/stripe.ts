@@ -20,6 +20,19 @@ import { reqBaseUrl } from "../lib/req-url.js";
 
 const router: IRouter = Router();
 
+// Payment methods the studio should be able to accept. Capabilities must be requested on the
+// connected account; iDEAL/Klarna/PayPal only work for one-off payments (Stripe does not support
+// them for subscriptions — there only card works).
+const CONNECT_CAPABILITIES = {
+  card_payments: { requested: true },
+  transfers: { requested: true },
+  ideal_payments: { requested: true },
+  klarna_payments: { requested: true },
+  paypal_payments: { requested: true },
+} as const;
+const ONE_OFF_METHODS = ["card", "ideal", "klarna", "paypal"];
+const SUBSCRIPTION_METHODS = ["card"];
+
 // Nebula platform subscription (€69,99/mo) price id (not secret) — overridable via env.
 const NEBULA_PRICE = process.env.STRIPE_NEBULA_PRICE || "price_1TnJ4EH6IP6GE07dMkhROecB";
 // Get-or-create the Stripe customer for a platform user (on the PLATFORM account, no Connect header).
@@ -138,9 +151,17 @@ router.post("/projects/:id/stripe/onboard", json({ limit: "16kb" }), async (req,
     if (!row) {
       const acct = await stripeReq("POST", "accounts", {
         type: "express", country: "NL",
-        capabilities: { card_payments: { requested: true }, transfers: { requested: true } },
+        capabilities: CONNECT_CAPABILITIES,
       });
       [row] = await db.insert(projectStripe).values({ projectId, accountId: acct.id, chargesEnabled: "false" }).returning();
+    } else {
+      // Existing account: request any newly-added capabilities (iDEAL/Klarna/PayPal) so studios that
+      // onboarded before these were enabled get them. Best-effort — never block onboarding on it.
+      try {
+        await stripeReq("POST", `accounts/${row.accountId}`, { capabilities: CONNECT_CAPABILITIES });
+      } catch (err) {
+        logger.warn({ err, projectId }, "[stripe] capability upgrade failed");
+      }
     }
     const link = await stripeReq("POST", "account_links", {
       account: row.accountId,
@@ -199,6 +220,7 @@ router.post("/projects/:id/stripe/checkout", async (req, res) => {
     if (recurring) priceData.recurring = { interval: "month" };
     const session = await stripeReq("POST", "checkout/sessions", {
       mode: recurring ? "subscription" : "payment",
+      payment_method_types: recurring ? SUBSCRIPTION_METHODS : ONE_OFF_METHODS,
       line_items: [{ price_data: priceData, quantity: 1 }],
       success_url: (typeof b.successUrl === "string" && b.successUrl) || `${baseUrl(req)}/projects/${projectId}?betaald=1`,
       cancel_url: (typeof b.cancelUrl === "string" && b.cancelUrl) || `${baseUrl(req)}/projects/${projectId}?geannuleerd=1`,

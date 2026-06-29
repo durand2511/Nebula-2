@@ -1,5 +1,5 @@
 /** Unit test for the pure server-side booking rules (no DB). */
-import { ymd, membershipExpired, applyMonthlyReset, creditDecision, isPast, bookTooEarly, bookOpensOn, cancelClosed, purchaseWalletUpdate, type Wallet } from "./lib/studio-rules.js";
+import { ymd, membershipExpired, applyMonthlyReset, creditDecision, isPast, bookTooEarly, bookOpensOn, cancelClosed, purchaseWalletUpdate, addMonths, type Wallet } from "./lib/studio-rules.js";
 
 let pass = 0, fail = 0;
 const ok = (n: string, c: boolean) => c ? (pass++, console.log("  ✓", n)) : (fail++, console.log("  ✗ FAIL:", n));
@@ -41,6 +41,19 @@ const un = purchaseWalletUpdate({ name: "Onbeperkt", type: "abonnement", unlimit
 ok("unlimited abonnement → membership, no monthly", un.unlimited === true && un.membership === "Onbeperkt" && un.monthlyLimit === null && un.needsPayment === false);
 const mo = purchaseWalletUpdate({ name: "8/maand", type: "abonnement", unlimited: false, credits: 8 }, 0, "2026-07-22", "2026-06");
 ok("monthly abonnement → monthlyLimit/Remaining set", mo.monthlyLimit === 8 && mo.monthlyRemaining === 8 && mo.monthlyPeriod === "2026-06" && mo.membership === "8/maand");
+
+// resetMonthly strippenkaart → maandbundel (vervalt elke maand i.p.v. opstapelen)
+const rm = purchaseWalletUpdate({ name: "4/maand", type: "strippenkaart", unlimited: false, credits: 4, resetMonthly: true }, 3, "2026-12-19", "2026-06");
+ok("resetMonthly strippenkaart → monthlyLimit set, geen opstapeling", rm.monthlyLimit === 4 && rm.monthlyRemaining === 4 && rm.membership === "4/maand");
+const rmReset = applyMonthlyReset(W({ membership: "4/maand", monthlyLimit: 4, monthlyRemaining: 1, monthlyPeriod: "2026-05" }), "2026-06");
+ok("resetMonthly: ongebruikt tegoed vervalt op nieuwe maand", rmReset.changed === true && rmReset.monthlyRemaining === 4);
+
+// addMonths: vaste looptijd-berekening
+ok("addMonths +6", addMonths("2026-06-29", 6) === "2026-12-29");
+ok("addMonths +12 (jaar)", addMonths("2026-06-29", 12) === "2027-06-29");
+ok("addMonths +24 (2 jaar)", addMonths("2026-06-29", 24) === "2028-06-29");
+ok("addMonths clamps 31→eind feb", addMonths("2026-01-31", 1) === "2026-02-28");
+ok("addMonths 0 = ongewijzigd", addMonths("2026-06-29", 0) === "2026-06-29");
 
 console.log(`\n=== ${pass} passed, ${fail} failed ===`);
 process.exit(fail ? 1 : 0);

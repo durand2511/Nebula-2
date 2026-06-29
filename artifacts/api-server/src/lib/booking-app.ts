@@ -582,8 +582,9 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
   }
   // Booking view = a WEEK agenda: all 7 days (empty days too), navigate week by week.
   function pBoeken(){
-    var W=walletFor(myEmail());
-    var wallet=walletBadge(W);
+    var pub=!S.session;                                   // publieke (uitgelogde) agenda → geen tegoed-balk
+    var W=pub?null:walletFor(myEmail());
+    var wallet=pub?'':walletBadge(W);
     var today=new Date();today.setHours(0,0,0,0);
     var monOff=(today.getDay()+6)%7;                       // dagen sinds maandag
     var start=new Date(today);start.setDate(today.getDate()-monOff+agendaWeek*7);
@@ -591,7 +592,7 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
     var range=start.getDate()+' '+MON[start.getMonth()]+' – '+end.getDate()+' '+MON[end.getMonth()]+' '+end.getFullYear();
     var locs=S.locations||[];
     var locFilter=locs.length?('<select data-act="setbookloc" style="width:auto"><option value="all"'+(bookLoc==='all'?' selected':'')+'>Alle locaties</option>'+(S.locations||[]).map(function(l){return '<option value="'+l.id+'"'+(String(l.id)===String(bookLoc)?' selected':'')+'>'+esc(l.name)+'</option>';}).join('')+'</select>'):'';
-    var h='<div class="ba-row" style="margin-bottom:12px"><div class="ba-meta" style="margin:0">Jouw tegoed: '+wallet+'</div>'+locFilter+'</div>';
+    var h=pub?('<div class="ba-row" style="margin-bottom:12px">'+locFilter+'</div>'):('<div class="ba-row" style="margin-bottom:12px"><div class="ba-meta" style="margin:0">Jouw tegoed: '+wallet+'</div>'+locFilter+'</div>');
     h+='<div class="ba-weeknav"><button class="ba-btn ghost sm" data-act="weekprev"'+(agendaWeek<=0?' disabled':'')+'>← Vorige week</button><b>'+range+'</b><button class="ba-btn ghost sm" data-act="weeknext">Volgende week →</button></div>';
     h+='<div class="ba-agenda">';
     for(var i=0;i<7;i++){
@@ -895,8 +896,10 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
     if(!S.members.length)h+='<p class="ba-meta">Er zijn op dit moment geen lidmaatschappen te koop.</p>';
     S.members.forEach(function(m){
       var inhoud=isUnlimited(m)?'onbeperkt lessen':((m.credits||0)+' lessen'+(m.type==='abonnement'?' per maand':''));
+      var commitTxt=m.commitMonths?(' · '+(m.commitMonths===12?'1 jaar':m.commitMonths===24?'2 jaar':m.commitMonths+' maanden')+' vast'):'';
+      var resetTxt=m.resetMonthly?' · tegoed vervalt maandelijks':'';
       h+='<div class="ba-card"><div class="ba-row"><h4>'+esc(m.name)+'</h4><span class="ba-badge">'+(m.type==='strippenkaart'?'strippenkaart':'abonnement')+'</span></div>'+
-         '<p class="ba-meta">'+inhoud+' · geldig '+m.validDays+' dagen'+(m.recurring?' · automatisch verlengd':'')+'</p>'+
+         '<p class="ba-meta">'+inhoud+' · geldig '+m.validDays+' dagen'+(m.recurring?' · automatisch verlengd':'')+commitTxt+resetTxt+'</p>'+
          '<div class="ba-row"><b style="font-size:20px">€'+m.price+(m.recurring?'<span class="ba-meta" style="font-size:12px"> /maand</span>':'')+'</b>'+
          '<button class="ba-btn sm" data-act="buy" data-m="'+m.id+'">Kopen</button></div></div>';
     });
@@ -910,8 +913,10 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
         '<div><label class="ba-f">Aantal lessen</label><input id="ba-mc" type="number" value="8"></div></div>'+
         '<div class="ba-2"><div><label class="ba-f">Prijs (€)</label><input id="ba-mp" type="number" value="55"></div>'+
         '<div><label class="ba-f">Geldig (dagen)</label><input id="ba-mv" type="number" value="30"></div></div>'+
+        '<div class="ba-2"><div><label class="ba-f">Vaste looptijd (alleen abonnement)</label><select id="ba-mcommit"><option value="0">Vrij opzegbaar (maandelijks)</option><option value="6">6 maanden vast</option><option value="12">1 jaar vast</option><option value="24">2 jaar vast</option></select></div>'+
+        '<div><label class="ba-f" style="display:block">&nbsp;</label><label class="ba-f" style="font-weight:400"><input id="ba-mreset" type="checkbox" style="width:auto;margin-right:6px">Tegoed vervalt elke maand (stapelt niet op)</label></div></div>'+
         '<div style="margin-top:12px"><button class="ba-btn" data-act="addmember">Toevoegen</button></div>'+
-        '<p class="ba-note">Strippenkaart = vast aantal lessen (eenmalig). Abonnement = maandelijks, onbeperkt óf een aantal lessen per maand. Echte betaling/recurring billing loopt via Stripe — zie Integraties.</p></div>';
+        '<p class="ba-note">Strippenkaart = vast aantal lessen (eenmalig). Abonnement = maandelijks, onbeperkt óf een aantal lessen per maand. <b>Vaste looptijd</b>: de klant betaalt maandelijks maar kan niet eerder opzeggen dan de gekozen termijn. <b>Tegoed vervalt elke maand</b>: ongebruikte lessen gaan niet mee naar de volgende maand. Echte betaling/recurring billing loopt via Stripe — zie Integraties.</p></div>';
       // Manage existing membership types: the admin can delete any of them.
       h+='<div class="ba-card" style="margin-top:16px"><h4>Bestaande lidmaatschappen — '+S.members.length+'</h4><div class="ba-list ba-scroll" style="margin-top:10px">';
       if(!S.members.length)h+='<p class="ba-meta">Nog geen lidmaatschappen.</p>';
@@ -1161,7 +1166,12 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
     h+='<div class="ba-list">';
     subs.forEach(function(s){
       if(s.kind==='video')h+='<div class="ba-item"><div class="ba-row"><div><b>Videos: '+esc(catLabel(s.category))+'</b><div class="ba-meta" style="margin:0">Maandelijks abonnement'+(s.validUntil?(' \\u00b7 geldig t/m '+esc(s.validUntil)):'')+'</div></div><button class="ba-btn warn sm" data-act="cancelvideo" data-c="'+esc(s.category)+'">Opzeggen</button></div></div>';
-      else h+='<div class="ba-item"><div class="ba-row"><div><b>Lessen: '+esc(s.name||'Abonnement')+'</b><div class="ba-meta" style="margin:0">Maandelijks abonnement</div></div><button class="ba-btn warn sm" data-act="cancelmembership" data-s="'+esc(s.subscription)+'">Opzeggen</button></div></div>';
+      else{
+        var locked=s.commitUntil&&s.commitUntil>ymd(new Date());
+        var lockTxt=locked?(' \\u00b7 vast contract t/m '+esc(fmtDate(s.commitUntil))):'';
+        var btn=locked?'<button class="ba-btn ghost sm" disabled title="Je zit nog vast aan je contract">Vast t/m '+esc(fmtDate(s.commitUntil))+'</button>':'<button class="ba-btn warn sm" data-act="cancelmembership" data-s="'+esc(s.subscription)+'">Opzeggen</button>';
+        h+='<div class="ba-item"><div class="ba-row"><div><b>Lessen: '+esc(s.name||'Abonnement')+'</b><div class="ba-meta" style="margin:0">Maandelijks abonnement'+lockTxt+'</div></div>'+btn+'</div></div>';
+      }
     });
     return h+'</div>';
   }
@@ -1221,7 +1231,7 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
     if(!d)return;
     S.session=d.user?{email:d.user.email,role:d.user.role,name:d.user.name}:null;
     S.classes=(d.classes||[]).map(function(c){return {id:c.id,title:c.title,teacherEmail:c.teacherEmail,teacher:c.teacher,date:c.date,time:c.time,endTime:c.endTime||'',cap:c.cap,price:c.price,mode:c.mode,onlineLink:c.onlineLink,onlineInfo:c.onlineInfo,bookDays:c.bookDays,cancelHours:c.cancelHours,locationId:c.locationId||0,recurring:false};});
-    S.members=(d.members||[]).map(function(m){return {id:m.id,name:m.name,type:m.type,unlimited:m.unlimited,credits:m.credits,price:m.price,validDays:m.validDays,recurring:m.recurring};});
+    S.members=(d.members||[]).map(function(m){return {id:m.id,name:m.name,type:m.type,unlimited:m.unlimited,credits:m.credits,price:m.price,validDays:m.validDays,recurring:m.recurring,commitMonths:m.commitMonths||0,resetMonthly:!!m.resetMonthly};});
     S.counts=d.counts||{};
     S.myBookings=(d.myBookings||[]).map(srvBk);
     S.bookings=(d.bookings||[]).map(srvBk);   // admin/teacher: alle; klant: leeg (privacy → counts gebruikt)
@@ -1240,6 +1250,17 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
   }
   // After a server mutation: re-fetch the snapshot and re-render. 401 → session expired → back to login.
   function refreshAndRender(){return sget('state').then(function(r){if(r.status===401){S.session=null;setSrvToken('');}else if(r.ok)applyServerState(r.d);render();});}
+  // Public (no-login) week agenda: load just the schedule + counts + locations, then render the browse view.
+  function loadPublic(){if(!projId())return;
+    fetch(api('studio/public')).then(function(r){return r.json();}).then(function(d){
+      if(!d||d.error)return;
+      S.classes=(d.classes||[]).map(function(c){return {id:c.id,title:c.title,teacherEmail:c.teacherEmail,teacher:c.teacher,date:c.date,time:c.time,endTime:c.endTime||'',cap:c.cap,price:c.price,mode:c.mode,onlineLink:'',onlineInfo:'',bookDays:c.bookDays,cancelHours:c.cancelHours,locationId:c.locationId||0,recurring:false};});
+      S.counts=d.counts||{};S.locations=d.locations||[];
+      if(!S.session&&authView==='browse')render();
+    }).catch(function(){});
+  }
+  // Re-render the right surface: the app host when logged in, the whole screen in public browse mode.
+  function rerender(){if(S.session)renderHost();else render();}
   // Fire-and-forget transactional e-mail (booking/cancel/welcome). Server schedules the 24h
   // reminder for bookings and cancels it on cancel. No-op server-side if SMTP isn't configured.
   function notify(type,to,d){try{if(!to||!projId())return;d=d||{};
@@ -1285,10 +1306,20 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
       '<p style="font-size:22px;margin:0 0 34px;opacity:.95;'+sh+'">Easily book your classes at '+studio+'.</p>'+
       '<button class="ba-btn" data-act="begin" style="padding:17px 46px;font-size:19px;border-radius:14px">Get started</button></div>';
   }
+  // Public, read-only week agenda — a visitor sees the schedule before logging in. Booking any class
+  // (or other actions) prompts login/registration. Data comes from the public (no-auth) endpoint.
+  function vBrowse(){
+    var studio=(BAKED&&BAKED.studio)?esc(BAKED.studio):'onze studio';
+    return '<div class="ba-row" style="margin-bottom:14px"><div><div class="ba-h" style="font-size:22px">Lessen boeken</div><div class="ba-meta" style="margin:0">'+studio+'</div></div>'+
+      '<div class="ba-row" style="gap:8px">'+langSelect()+'<button class="ba-btn ghost sm" data-act="gologin">Inloggen</button><button class="ba-btn sm" data-act="goregister">Account aanmaken</button></div></div>'+
+      '<div class="ba-note" style="background:#eff6ff;border:1px solid #bfdbfe;color:#1e40af;padding:10px 12px;border-radius:8px;margin-bottom:12px">Bekijk hieronder het rooster. Om een les te boeken log je in of maak je een account aan.</div>'+
+      pBoeken();
+  }
   // Plain login — what everyone (incl. customers) sees. No role labels are shown here.
   // Customers can self-register a (client) account right here.
   function vAuth(){
     if(authView==='home')return vHome();
+    if(authView==='browse')return vBrowse();
     if(authView==='register'){
       var act=getAct();
       var banner=act?'<div class="ba-note" style="background:#ecfdf5;border:1px solid #a7f3d0;color:#065f46;padding:10px 12px;border-radius:8px;margin-bottom:12px">Je gegevens zijn gevonden. Maak een wachtwoord aan om je strippenkaart/abonnement te activeren.</div>':'';
@@ -1351,7 +1382,7 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
     var a=tg.closest&&tg.closest('[data-act]');if(!a)return;
     var act=a.getAttribute('data-act');
     if(act==='setlang'){lang=a.value;setLangPref(lang);applyDateLang();render();return;}
-    if(act==='setbookloc'){bookLoc=a.value;renderHost();return;}
+    if(act==='setbookloc'){bookLoc=a.value;rerender();return;}
     if(act==='invperiod'){updateInvPeriod();return;}
     if(act==='payparam'){var pm=q('ba-pay-period'),rt=q('ba-pay-rate');var pmM=pm?(parseInt(pm.value,10)||12):12;var pmR=rt?Math.max(0,parseFloat(rt.value)||0):0;var pdl=q('ba-pay-dl');if(pdl)pdl.setAttribute('href',api('teacher-payout?months='+pmM+'&rate='+pmR));return;}
     if(act==='setownerreport'){if(!S.settings)S.settings={};S.settings.ownerReport=a.value;spost('settings',{ownerReport:a.value}).then(function(r){if(!r.ok)alert((r.d&&r.d.error)||'Opslaan mislukt.');});return;}
@@ -1374,8 +1405,11 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
     if(t){activeTab=t.getAttribute('data-tab');render();return;}
     var a=e.target.closest('[data-act]'); if(!a)return; var act=a.getAttribute('data-act');
 
+    // Publieke agenda: rooster bekijken mag zonder account, maar boeken/kopen/acties vereisen inloggen.
+    if(!S.session&&(act==='book'||act==='wait'||act==='cancel'||act==='buy'||act==='subvideo')){authView='login';render();return;}
+
     // auth
-    if(act==='begin'){authView='login';render();return;}
+    if(act==='begin'){authView='browse';loadPublic();render();return;}
     if(act==='gohome'){if(e.preventDefault)e.preventDefault();authView='home';render();return;}
     if(act==='goregister'){if(e.preventDefault)e.preventDefault();authView='register';render();return;}
     if(act==='gologin'){if(e.preventDefault)e.preventDefault();authView='login';render();return;}
@@ -1432,8 +1466,8 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
       S.accounts=S.accounts.filter(function(x){return x.email!==dem;});save();renderHost();return;}
 
     // agenda week navigation
-    if(act==='weekprev'){if(agendaWeek>0)agendaWeek--;renderHost();return;}
-    if(act==='weeknext'){agendaWeek++;renderHost();return;}
+    if(act==='weekprev'){if(agendaWeek>0)agendaWeek--;rerender();return;}
+    if(act==='weeknext'){agendaWeek++;rerender();return;}
 
     // booking
     if(act==='book'||act==='wait'){
@@ -1525,7 +1559,9 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
     if(act==='addmember'){var nm=q('ba-mn').value.trim();if(!nm){alert('Geef een naam op.');return;}
       var type=q('ba-mt').value;var lim=q('ba-ml')?q('ba-ml').value:'aantal';var lessons=parseInt(q('ba-mc').value,10)||0;
       var unlimited=(type==='abonnement'&&lim==='onbeperkt');
-      if(SRV){spost('members',{name:nm,type:type,unlimited:unlimited,lim:lim,credits:lessons,price:parseInt(q('ba-mp').value,10)||0,validDays:parseInt(q('ba-mv').value,10)||0}).then(function(r){
+      var commitMonths=type==='abonnement'&&q('ba-mcommit')?(parseInt(q('ba-mcommit').value,10)||0):0;
+      var resetMonthly=q('ba-mreset')?!!q('ba-mreset').checked:false;
+      if(SRV){spost('members',{name:nm,type:type,unlimited:unlimited,lim:lim,credits:lessons,price:parseInt(q('ba-mp').value,10)||0,validDays:parseInt(q('ba-mv').value,10)||0,commitMonths:commitMonths,resetMonthly:resetMonthly}).then(function(r){
         if(!r.ok){alert((r.d&&r.d.error)||'Toevoegen mislukt.');return;}refreshAndRender();});return;}
       S.members.push({id:uid(),name:nm,type:type,unlimited:unlimited,credits:unlimited?null:(lessons||(type==='strippenkaart'?10:8)),price:parseInt(q('ba-mp').value,10)||0,validDays:parseInt(q('ba-mv').value,10)||(type==='abonnement'?30:180),recurring:type==='abonnement'});
       save();renderHost();return;}

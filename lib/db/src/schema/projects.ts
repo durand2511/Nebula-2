@@ -380,6 +380,8 @@ export const studioMembers = pgTable("studio_members", {
   price: real("price").notNull().default(0),
   validDays: integer("valid_days").notNull().default(30),
   recurring: text("recurring").notNull().default("false"),
+  commitMonths: integer("commit_months").notNull().default(0), // 0 = vrij opzegbaar; 6/12/24 = vaste looptijd
+  resetMonthly: text("reset_monthly").notNull().default("false"), // tegoed vervalt elke maand (stapelt niet op)
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 }, (t) => ({ byProj: index("studio_members_proj").on(t.projectId) }));
 
@@ -394,6 +396,7 @@ export const studioWallets = pgTable("studio_wallets", {
   monthlyRemaining: integer("monthly_remaining"),
   monthlyPeriod: text("monthly_period").notNull().default(""), // YYYY-MM
   validUntil: text("valid_until"),                   // yyyy-mm-dd
+  commitUntil: text("commit_until"),                 // yyyy-mm-dd: vaste looptijd — klant kan niet eerder opzeggen
   needsPayment: text("needs_payment").notNull().default("false"),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 }, (t) => ({ projEmail: uniqueIndex("studio_wallets_proj_email").on(t.projectId, t.email) }));
@@ -433,6 +436,7 @@ export const studioPurchases = pgTable("studio_purchases", {
   subscription: text("subscription").notNull().default(""),
   refunded: text("refunded").notNull().default("false"),
   refundedAmount: real("refunded_amount"),
+  commitUntil: text("commit_until").notNull().default(""), // vaste looptijd t/m (yyyy-mm-dd), leeg = vrij opzegbaar
   date: text("date").notNull().default(""),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 }, (t) => ({ byProj: index("studio_purchases_proj").on(t.projectId) }));

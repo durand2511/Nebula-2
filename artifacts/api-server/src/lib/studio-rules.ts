@@ -48,15 +48,33 @@ export function creditDecision(w: Wallet, todayYmd: string): CreditDecision {
 }
 
 // What a paid purchase does to the wallet. Strippenkaart adds credits; an unlimited abonnement sets
-// an unlimited membership; an "X per maand" abonnement sets a monthly allotment. Pure → unit-tested.
-export type PurchaseMember = { name: string; type: string; unlimited: boolean; credits: number | null };
+// an unlimited membership; an "X per maand" abonnement sets a monthly allotment. When the plan has
+// resetMonthly, the credits become a monthly allotment too (leftovers expire each month via
+// applyMonthlyReset → no pile-up if the customer doesn't show). Pure → unit-tested.
+export type PurchaseMember = { name: string; type: string; unlimited: boolean; credits: number | null; resetMonthly?: boolean };
 export function purchaseWalletUpdate(m: PurchaseMember, existingCredits: number, validUntil: string, nowMonth: string): { credits: number; membership: string | null; unlimited: boolean; monthlyLimit: number | null; monthlyRemaining: number | null; monthlyPeriod: string; validUntil: string; needsPayment: boolean } {
   if (m.type === "abonnement") {
     if (m.unlimited) return { credits: existingCredits, membership: m.name, unlimited: true, monthlyLimit: null, monthlyRemaining: null, monthlyPeriod: nowMonth, validUntil, needsPayment: false };
     const lim = m.credits || 0;
     return { credits: existingCredits, membership: m.name, unlimited: false, monthlyLimit: lim, monthlyRemaining: lim, monthlyPeriod: nowMonth, validUntil, needsPayment: false };
   }
+  // Strippenkaart met "tegoed vervalt elke maand" → maandbundel i.p.v. opstapelende credits.
+  if (m.resetMonthly && (m.credits || 0) > 0) {
+    const lim = m.credits || 0;
+    return { credits: existingCredits, membership: m.name, unlimited: false, monthlyLimit: lim, monthlyRemaining: lim, monthlyPeriod: nowMonth, validUntil, needsPayment: false };
+  }
   return { credits: existingCredits + (m.credits || 0), membership: null, unlimited: false, monthlyLimit: null, monthlyRemaining: null, monthlyPeriod: nowMonth, validUntil, needsPayment: false };
+}
+
+/** Add whole months to a yyyy-mm-dd date (clamps day to month length). Used for fixed-term contracts. */
+export function addMonths(ymdStr: string, months: number): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymdStr || "");
+  if (!m || !months) return ymdStr;
+  const y = +m[1], mo = +m[2] - 1, d = +m[3];
+  const target = new Date(Date.UTC(y, mo + months, 1));
+  const lastDay = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)).getUTCDate();
+  target.setUTCDate(Math.min(d, lastDay));
+  return ymd(target);
 }
 
 function lessonStartMs(date: string, time: string): number {
