@@ -4,7 +4,7 @@
  */
 import { db, studioUsers, studioSessions, type StudioUser } from "@workspace/db";
 import { and, eq } from "drizzle-orm";
-import { newSessionToken, hashPassword } from "./password.js";
+import { newSessionToken, hashPassword, verifyPassword } from "./password.js";
 
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -39,10 +39,12 @@ export function publicUser(u: StudioUser) {
 }
 
 /**
- * Idempotently create the chat-configured admin/teacher logins in studio_users (scrypt-hashed).
- * Called once when the booking app loads (it knows the baked accounts). Existing emails are skipped,
- * so it never overwrites a changed password. Returns how many new accounts were created.
- * (Transitional: once the front-end is fully server-backed we stop baking passwords into the page.)
+ * Sync the chat-configured admin/teacher logins in studio_users (scrypt-hashed) with the baked
+ * accounts the booking app sends on load. New accounts are created; for an EXISTING admin/teacher
+ * whose baked password no longer matches, the password (and name) are RE-SYNCED so the configured
+ * credentials are always authoritative — otherwise re-setting the admin login leaves the studio
+ * permanently locked out (the old password keeps applying). Self-registered clients are never
+ * touched (they're not in the baked list). Returns how many new accounts were created.
  */
 export async function seedStaffAccounts(projectId: number, accounts: { role?: string; name?: string; email?: string; password?: string }[]): Promise<number> {
   let created = 0;
@@ -51,9 +53,16 @@ export async function seedStaffAccounts(projectId: number, accounts: { role?: st
     const email = String(a.email || "").trim().toLowerCase();
     const password = String(a.password || "");
     if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) || !password) continue;
+    const name = String(a.name || "").trim() || email;
     const [exists] = await db.select().from(studioUsers).where(and(eq(studioUsers.projectId, projectId), eq(studioUsers.email, email)));
-    if (exists) continue;
-    await db.insert(studioUsers).values({ projectId, role, name: String(a.name || "").trim() || email, email, passwordHash: hashPassword(password) });
+    if (exists) {
+      // Only staff accounts are re-synced, and only when the configured password actually changed.
+      if ((exists.role === "admin" || exists.role === "teacher") && !verifyPassword(password, exists.passwordHash)) {
+        await db.update(studioUsers).set({ passwordHash: hashPassword(password), name, role }).where(eq(studioUsers.id, exists.id));
+      }
+      continue;
+    }
+    await db.insert(studioUsers).values({ projectId, role, name, email, passwordHash: hashPassword(password) });
     created++;
   }
   return created;
