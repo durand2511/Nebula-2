@@ -33,9 +33,11 @@ export function applyMonthlyReset(w: Wallet, nowMonth: string): { monthlyRemaini
 
 export type CreditDecision = { ok: boolean; type?: "credit" | "monthly" | "unlimited"; reason?: string };
 
-/** Returns the credits after expiry: a strippenkaart whose creditsUntil has passed drops to 0. */
+/** Returns the credits after expiry: a strippenkaart whose creditsUntil has passed drops to 0. We keep
+ * the (now past) creditsUntil as a tombstone so a later refund of a credit can't resurrect a perpetual
+ * one — it stays expired until a NEW strippenkaart purchase overwrites creditsUntil. */
 export function applyCreditExpiry(w: Wallet, todayYmd: string): { credits: number; creditsUntil: string | null; changed: boolean } {
-  if ((w.credits || 0) > 0 && w.creditsUntil && w.creditsUntil < todayYmd) return { credits: 0, creditsUntil: null, changed: true };
+  if ((w.credits || 0) > 0 && w.creditsUntil && w.creditsUntil < todayYmd) return { credits: 0, creditsUntil: w.creditsUntil, changed: true };
   return { credits: w.credits, creditsUntil: w.creditsUntil, changed: false };
 }
 

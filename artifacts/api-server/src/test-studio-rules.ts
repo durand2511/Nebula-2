@@ -55,7 +55,10 @@ ok("credit nog geldig → boekbaar", creditDecision(W({ credits: 5, creditsUntil
 ok("credit verlopen → niet boekbaar", creditDecision(W({ credits: 5, creditsUntil: "2026-05-01" }), "2026-06-22").ok === false);
 ok("credit zonder einddatum → nooit verlopen", creditDecision(W({ credits: 5, creditsUntil: null }), "2099-01-01").type === "credit");
 const ce = applyCreditExpiry(W({ credits: 5, creditsUntil: "2026-05-01" }), "2026-06-22");
-ok("applyCreditExpiry: verlopen credits → 0", ce.changed === true && ce.credits === 0 && ce.creditsUntil === null);
+ok("applyCreditExpiry: verlopen credits → 0, datum als tombstone behouden", ce.changed === true && ce.credits === 0 && ce.creditsUntil === "2026-05-01");
+// Tombstone-test: een later teruggestorte credit blijft verlopen (geen eeuwige gratis credit)
+const refundedAfterExpiry = applyCreditExpiry(W({ credits: 1, creditsUntil: "2026-05-01" }), "2026-06-22");
+ok("tombstone: teruggestorte credit na vervaldatum blijft verlopen", refundedAfterExpiry.credits === 0);
 const ce2 = applyCreditExpiry(W({ credits: 5, creditsUntil: "2026-12-31" }), "2026-06-22");
 ok("applyCreditExpiry: geldige credits ongewijzigd", ce2.changed === false && ce2.credits === 5);
 const aboKeepsCredits = purchaseWalletUpdate({ name: "Onbeperkt", type: "abonnement", unlimited: true, credits: null }, 3, "2026-07-22", "2026-06", "2026-08-01");
