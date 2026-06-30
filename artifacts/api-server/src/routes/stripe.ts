@@ -21,16 +21,16 @@ import { reqBaseUrl } from "../lib/req-url.js";
 const router: IRouter = Router();
 
 // Payment methods the studio should be able to accept. Capabilities must be requested on the
-// connected account; iDEAL/Klarna/PayPal only work for one-off payments (Stripe does not support
-// them for subscriptions — there only card works).
+// connected account; iDEAL/Klarna only work for one-off payments (Stripe does not support them for
+// subscriptions — there only card works). PayPal is intentionally NOT requested: Stripe rejects the
+// `paypal_payments` capability for NL Express accounts ("Unknown capability"), which blocks onboarding.
 const CONNECT_CAPABILITIES = {
   card_payments: { requested: true },
   transfers: { requested: true },
   ideal_payments: { requested: true },
   klarna_payments: { requested: true },
-  paypal_payments: { requested: true },
 } as const;
-const ONE_OFF_METHODS = ["card", "ideal", "klarna", "paypal"];
+const ONE_OFF_METHODS = ["card", "ideal", "klarna"];
 const SUBSCRIPTION_METHODS = ["card"];
 
 // Nebula platform subscription (€69,99/mo) price id (not secret) — overridable via env.
