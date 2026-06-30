@@ -45,11 +45,15 @@ router.get("/auth/me", async (req, res) => {
 });
 
 router.post("/auth/forgot", async (req, res) => {
+  const email = String(req.body?.email || "").trim().toLowerCase();
+  const guardKeys = [`forgot:${email}`, `forgot-ip:${clientIp(req as any)}`];
+  if (loginBlocked(guardKeys)) { res.status(429).json({ error: "Te veel verzoeken. Probeer het later opnieuw." }); return; }
+  loginFailure(guardKeys); // every reset request counts toward the limit (anti-spam / anti-lockout)
   try {
-    const r = await resetPassword(String(req.body?.email || ""));
-    if (!r.ok) { res.status(400).json({ error: r.error || "Reset mislukt." }); return; }
-    res.json({ ok: true, emailed: r.emailed, tempPassword: r.tempPassword });
-  } catch (err) { logger.error({ err }, "[auth] forgot failed"); res.status(500).json({ error: "Reset mislukt." }); }
+    const r = await resetPassword(email);
+    // Always generic: never reveal whether the account exists, never return a password.
+    res.json({ ok: true, emailed: r.emailed });
+  } catch (err) { logger.error({ err }, "[auth] forgot failed"); res.json({ ok: true, emailed: false }); }
 });
 
 router.post("/auth/profile", async (req, res) => {

@@ -101,26 +101,26 @@ function tempPassword(): string {
  * one of their booking apps. If no SMTP is configured, return the temp password so the UI can show
  * it on screen instead. Returns { emailed, tempPassword? } — tempPassword only when NOT e-mailed.
  */
-export async function resetPassword(email: string): Promise<{ ok: boolean; emailed: boolean; tempPassword?: string; error?: string }> {
+export async function resetPassword(email: string): Promise<{ ok: boolean; emailed: boolean }> {
+  // Always respond the same way (no account enumeration). Never return the temp password to the caller,
+  // and only rotate the password when we can actually e-mail it — otherwise an unauthenticated request
+  // could take over (SMTP-less) accounts or lock people out.
   const [u] = await db.select().from(platformUsers).where(eq(platformUsers.email, String(email || "").trim().toLowerCase()));
-  if (!u) return { ok: false, emailed: false, error: "Geen account met dit e-mailadres." };
+  if (!u) return { ok: true, emailed: false };
+  // Find a working SMTP config among the user's projects BEFORE touching the password.
+  const mine = await db.select().from(projects).where(eq(projects.ownerId, u.id));
+  let cfg: Awaited<ReturnType<typeof resolveSmtpConfig>> | null = null;
+  for (const proj of mine) { const c = await resolveSmtpConfig(proj.id); if (c) { cfg = c; break; } }
+  if (!cfg) return { ok: true, emailed: false }; // no way to deliver → do NOT rotate, do NOT expose
   const pw = tempPassword();
   await db.update(platformUsers).set({ passwordHash: hashPassword(pw) }).where(eq(platformUsers.id, u.id));
-  // Find an SMTP config among the user's projects (the e-mail set up in their booking app).
-  const mine = await db.select().from(projects).where(eq(projects.ownerId, u.id));
-  for (const proj of mine) {
-    const cfg = await resolveSmtpConfig(proj.id);
-    if (!cfg) continue;
-    try {
-      await sendMail(cfg, {
-        to: u.email, fromName: "Nebula",
-        subject: "Je nieuwe Nebula-wachtwoord",
-        html: `<p>Hoi ${u.name || ""},</p><p>Je hebt een wachtwoord-reset aangevraagd voor Nebula. Je tijdelijke wachtwoord is:</p><p style="font-size:22px;font-weight:800;letter-spacing:2px">${pw}</p><p>Log ermee in en stel daarna een nieuw wachtwoord in via je profiel.</p>`,
-        text: `Je tijdelijke Nebula-wachtwoord: ${pw}. Log ermee in en wijzig het via je profiel.`,
-      });
-      return { ok: true, emailed: true };
-    } catch (err) { logger.warn({ err, projectId: proj.id }, "[platform-auth] reset mail failed"); }
-  }
-  // No SMTP available → show the temp password on screen (fallback).
-  return { ok: true, emailed: false, tempPassword: pw };
+  try {
+    await sendMail(cfg, {
+      to: u.email, fromName: "Nebula",
+      subject: "Je nieuwe Nebula-wachtwoord",
+      html: `<p>Hoi ${u.name || ""},</p><p>Je hebt een wachtwoord-reset aangevraagd voor Nebula. Je tijdelijke wachtwoord is:</p><p style="font-size:22px;font-weight:800;letter-spacing:2px">${pw}</p><p>Log ermee in en stel daarna een nieuw wachtwoord in via je profiel.</p>`,
+      text: `Je tijdelijke Nebula-wachtwoord: ${pw}. Log ermee in en wijzig het via je profiel.`,
+    });
+    return { ok: true, emailed: true };
+  } catch (err) { logger.warn({ err }, "[platform-auth] reset mail failed"); return { ok: true, emailed: false }; }
 }

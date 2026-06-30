@@ -83,8 +83,9 @@ export function AiEditor() {
     const r = await authApi("forgot", { email: f.email });
     setAuthBusy(false);
     if (!r.ok) { setAuthErr(r.d.error || "Reset mislukt."); return; }
-    if (r.d.emailed) { setNotice("We hebben een nieuw wachtwoord naar je e-mail gestuurd."); setView("login"); }
-    else if (r.d.tempPassword) { setNotice(`Je tijdelijke wachtwoord is: ${r.d.tempPassword} — log ermee in en wijzig het bij je profiel.`); setView("login"); }
+    // Always generic — we never reveal whether the account exists or show a password on screen.
+    setNotice("Als er een account bij dit e-mailadres hoort, hebben we een nieuw wachtwoord gemaild. Geen mail? Controleer of je studio een e-mail (SMTP) heeft ingesteld onder Integraties.");
+    setView("login");
   };
   const doLogout = async () => { await authApi("logout", {}); clearToken(); setUser(null); setMenuOpen(false); setLocation("/ai-editor"); };
 
