@@ -195,27 +195,41 @@ async function fetchWebsiteHtml(rawUrl: string): Promise<{ html: string; finalUr
   let current = rawUrl;
   for (let hop = 0; hop <= IMPORT_MAX_REDIRECTS; hop++) {
     const safe = await assertSafeUrl(current);
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), IMPORT_FETCH_TIMEOUT_MS);
-    let res: Awaited<ReturnType<typeof safeFetch>>;
-    try {
-      res = await safeFetch(safe.toString(), {
-        redirect: "manual",
-        dispatcher: importDispatcher,
-        signal: controller.signal,
-        headers: {
-          // Present as a real browser — many sites return 403 to non-browser
-          // User-Agents / missing browser headers (e.g. Cloudflare bot checks).
-          "User-Agent":
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-          Accept:
-            "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-          "Accept-Language": "en-US,en;q=0.9,nl;q=0.8",
-          "Upgrade-Insecure-Requests": "1",
-        },
-      });
-    } finally {
-      clearTimeout(timer);
+    // Present as a real browser — many sites (and bot-checks) reject non-browser requests.
+    const headers = {
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+      Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+      "Accept-Language": "nl-NL,nl;q=0.9,en;q=0.8",
+      "Upgrade-Insecure-Requests": "1",
+      Referer: safe.origin + "/",
+      "sec-ch-ua": '"Chromium";v="124", "Google Chrome";v="124", "Not.A/Brand";v="99"',
+      "sec-ch-ua-mobile": "?0",
+      "sec-ch-ua-platform": '"Windows"',
+      "Sec-Fetch-Dest": "document",
+      "Sec-Fetch-Mode": "navigate",
+      "Sec-Fetch-Site": "none",
+      "Sec-Fetch-User": "?1",
+    };
+    // Retry once on a transient network failure (a flaky connection / temporary block).
+    let res: Awaited<ReturnType<typeof safeFetch>> | null = null;
+    let lastErr: unknown = null;
+    for (let attempt = 0; attempt < 2 && !res; attempt++) {
+      if (attempt > 0) await new Promise((r) => setTimeout(r, 700));
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), IMPORT_FETCH_TIMEOUT_MS);
+      try {
+        res = await safeFetch(safe.toString(), { redirect: "manual", dispatcher: importDispatcher, signal: controller.signal, headers });
+      } catch (err) {
+        lastErr = err;
+        if (err instanceof Error && err.name === "AbortError") break; // timeout → don't retry
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+    if (!res) {
+      if (lastErr instanceof Error && lastErr.name === "AbortError") throw lastErr;
+      const code = (lastErr as { cause?: { code?: string } } | undefined)?.cause?.code || (lastErr as Error | undefined)?.message || "onbekend";
+      throw new Error(`Kon de website niet bereiken (${code}). De site weigert mogelijk automatische verzoeken vanaf onze server, of is tijdelijk onbereikbaar. Probeer het later opnieuw of importeer een andere pagina.`);
     }
 
     if (res.status >= 300 && res.status < 400) {
