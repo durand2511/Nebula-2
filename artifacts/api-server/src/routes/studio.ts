@@ -8,6 +8,7 @@ import { db, studioUsers, studioClasses, studioMembers, studioWallets, studioCre
 import { and, eq, sql } from "drizzle-orm";
 import { logger } from "../lib/logger";
 import { hashPassword, verifyPassword } from "../lib/password.js";
+import { loginBlocked, loginFailure, loginSuccess, clientIp } from "../lib/login-guard.js";
 import { createSession, getSessionUser, deleteSession, tokenFrom, publicUser, seedStaffAccounts } from "../lib/studio-auth.js";
 import { sendBookingEmail, sendPaymentEmail } from "../lib/email.js";
 import { type Wallet, type CreditLot, ymd, applyMonthlyReset, sumActiveCredits, pickLotToConsume, soonestExpiry, lotActive, creditDecision, isPast, bookTooEarly, bookOpensOn, cancelClosed, purchaseWalletUpdate, addMonths } from "../lib/studio-rules.js";
@@ -157,9 +158,13 @@ router.post("/projects/:id/studio/login", body, async (req, res) => {
   const projectId = pid(req); if (isNaN(projectId)) { res.status(400).json({ error: "Invalid project ID" }); return; }
   const email = String(req.body?.email ?? "").trim().toLowerCase();
   const password = String(req.body?.password ?? "");
+  const guardKeys = [`studio:${projectId}:${email}`, `ip:${clientIp(req as any)}`];
+  const wait = loginBlocked(guardKeys);
+  if (wait) { res.status(429).json({ error: `Te veel inlogpogingen. Probeer over ${Math.ceil(wait / 60)} minuten opnieuw.` }); return; }
   try {
     const [u] = await db.select().from(studioUsers).where(and(eq(studioUsers.projectId, projectId), eq(studioUsers.email, email)));
-    if (!u || !verifyPassword(password, u.passwordHash)) { res.status(401).json({ error: "Onjuist e-mailadres of wachtwoord." }); return; }
+    if (!u || !verifyPassword(password, u.passwordHash)) { loginFailure(guardKeys); res.status(401).json({ error: "Onjuist e-mailadres of wachtwoord." }); return; }
+    loginSuccess(guardKeys);
     const token = await createSession(projectId, u.id);
     res.json({ ok: true, token, user: publicUser(u) });
   } catch (err) { logger.error({ err, projectId }, "[studio] login failed"); res.status(500).json({ error: "Inloggen mislukt." }); }

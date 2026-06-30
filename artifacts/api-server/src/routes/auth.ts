@@ -5,6 +5,7 @@ import {
   registerUser, loginUser, createSession, getSessionUser, deleteSession, tokenFrom,
   publicUser, resetPassword, updateProfile, changePassword, deleteAccount,
 } from "../lib/platform-auth.js";
+import { loginBlocked, loginFailure, loginSuccess, clientIp } from "../lib/login-guard.js";
 
 const router: IRouter = Router();
 
@@ -19,9 +20,14 @@ router.post("/auth/register", async (req, res) => {
 });
 
 router.post("/auth/login", async (req, res) => {
+  const email = String(req.body?.email || "").trim().toLowerCase();
+  const guardKeys = [`platform:${email}`, `ip:${clientIp(req as any)}`];
+  const wait = loginBlocked(guardKeys);
+  if (wait) { res.status(429).json({ error: `Te veel inlogpogingen. Probeer over ${Math.ceil(wait / 60)} minuten opnieuw.` }); return; }
   try {
-    const u = await loginUser(String(req.body?.email || ""), String(req.body?.password || ""));
-    if (!u) { res.status(401).json({ error: "Onjuist e-mailadres of wachtwoord." }); return; }
+    const u = await loginUser(email, String(req.body?.password || ""));
+    if (!u) { loginFailure(guardKeys); res.status(401).json({ error: "Onjuist e-mailadres of wachtwoord." }); return; }
+    loginSuccess(guardKeys);
     const token = await createSession(u.id);
     res.json({ ok: true, token, user: publicUser(u) });
   } catch (err) { logger.error({ err }, "[auth] login failed"); res.status(500).json({ error: "Inloggen mislukt." }); }
