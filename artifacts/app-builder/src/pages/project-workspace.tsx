@@ -2419,6 +2419,14 @@ export function ProjectWorkspace() {
                     <div className="mt-2 rounded-lg bg-muted/60 px-3 py-2 font-mono text-[12px] text-foreground/80">admin gebruikersnaam jouwmail@gmail.com wachtwoord</div>
                     <p className="text-muted-foreground mt-1 text-xs">Daarmee maak je de beheerder-login aan waarmee je op het boekingssysteem inlogt.</p>
                   </div>
+                  <div className="rounded-lg border border-amber-300/60 bg-amber-50 p-3">
+                    <div className="font-medium text-amber-900">Voordat je systeem werkt — 2 stappen</div>
+                    <p className="text-amber-900/80 mt-1">Doe deze in je boekingssysteem op het tabblad <span className="font-semibold">Integraties</span>:</p>
+                    <ul className="text-amber-900/80 mt-2 space-y-1.5 list-disc pl-4">
+                      <li><span className="font-semibold">Koppel Stripe</span> via de knop bij Integraties — anders kunnen klanten niet betalen.</li>
+                      <li><span className="font-semibold">Vul je bedrijfsgegevens in</span> (bedrijfsnaam, KvK, BTW, adres) bij Integraties — zonder dit worden er geen automatische facturen gemaakt of gemaild.</li>
+                    </ul>
+                  </div>
                 </div>
               ) : (
                 messages?.map((msg) => {
