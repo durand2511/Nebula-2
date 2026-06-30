@@ -88,6 +88,14 @@ export function AiEditor() {
     setView("login");
   };
   const doLogout = async () => { await authApi("logout", {}); clearToken(); setUser(null); setMenuOpen(false); setLocation("/ai-editor"); };
+  const doAdminUnlock = async () => {
+    setMenuOpen(false);
+    const code = window.prompt("Voer je admin-code in om alle features gratis te ontgrendelen:");
+    if (!code) return;
+    const r = await authApi("admin-unlock", { code });
+    if (r.ok && r.d.ok) { window.alert("Ontgrendeld! Alle features zijn nu gratis beschikbaar."); window.location.reload(); }
+    else window.alert(r.d.error || "Ontgrendelen mislukt.");
+  };
 
   const handleImport = () => {
     const trimmed = url.trim();
@@ -186,6 +194,7 @@ export function AiEditor() {
             </div>
             <button className="w-full text-left rounded-lg px-3 py-2 hover:bg-muted/50 flex items-center gap-2" onClick={() => { setProfileOpen(true); setMenuOpen(false); }}><UserIcon className="h-4 w-4" /> Profiel</button>
             <button className="w-full text-left rounded-lg px-3 py-2 hover:bg-muted/50 flex items-center gap-2" onClick={() => { setBillingOpen(true); setMenuOpen(false); }} data-testid="menu-billing"><CreditCard className="h-4 w-4" /> Abonnement</button>
+            <button className="w-full text-left rounded-lg px-3 py-2 hover:bg-muted/50 flex items-center gap-2" onClick={doAdminUnlock} data-testid="menu-admin-unlock"><Sparkles className="h-4 w-4" /> Admin code</button>
             <button className="w-full text-left rounded-lg px-3 py-2 hover:bg-muted/50 flex items-center gap-2 text-destructive" onClick={doLogout}><LogOut className="h-4 w-4" /> Uitloggen</button>
           </div>
         )}

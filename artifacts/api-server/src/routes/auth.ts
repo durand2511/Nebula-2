@@ -3,11 +3,29 @@ import { Router, type IRouter } from "express";
 import { logger } from "../lib/logger";
 import {
   registerUser, loginUser, createSession, getSessionUser, deleteSession, tokenFrom,
-  publicUser, resetPassword, updateProfile, changePassword, deleteAccount,
+  publicUser, resetPassword, updateProfile, changePassword, deleteAccount, grantLifetimeAccess,
 } from "../lib/platform-auth.js";
 import { loginBlocked, loginFailure, loginSuccess, clientIp } from "../lib/login-guard.js";
+import { timingSafeEqual } from "node:crypto";
 
 const router: IRouter = Router();
+
+// Owner admin-code → unlocks lifetime free full access. Set ADMIN_UNLOCK_CODE in Render to override
+// (the fallback below lives in the repo, so treat it as public and rotate via the env var).
+const ADMIN_UNLOCK_CODE = process.env.ADMIN_UNLOCK_CODE || "2511Durand8!";
+router.post("/auth/admin-unlock", async (req, res) => {
+  const u = await getSessionUser(tokenFrom(req as any));
+  if (!u) { res.status(401).json({ error: "Niet ingelogd." }); return; }
+  const guardKeys = [`adminunlock:${u.id}`, `adminunlock-ip:${clientIp(req as any)}`];
+  if (loginBlocked(guardKeys)) { res.status(429).json({ error: "Te veel pogingen. Probeer het later opnieuw." }); return; }
+  const code = String(req.body?.code || "");
+  const a = Buffer.from(code), b = Buffer.from(ADMIN_UNLOCK_CODE);
+  const ok = a.length === b.length && timingSafeEqual(a, b);
+  if (!ok) { loginFailure(guardKeys); res.status(403).json({ error: "Onjuiste code." }); return; }
+  loginSuccess(guardKeys);
+  await grantLifetimeAccess(u.id);
+  res.json({ ok: true });
+});
 
 router.post("/auth/register", async (req, res) => {
   try {

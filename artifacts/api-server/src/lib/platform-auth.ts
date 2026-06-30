@@ -124,3 +124,10 @@ export async function resetPassword(email: string): Promise<{ ok: boolean; email
     return { ok: true, emailed: true };
   } catch (err) { logger.warn({ err }, "[platform-auth] reset mail failed"); return { ok: true, emailed: false }; }
 }
+
+/** Grant lifetime (free) full access — used by the owner admin-code. Sets the subscription active with a
+ * far-future renewal so isSubscribed() is true and every paid feature (own domain, no Nebula badge,
+ * full AI) unlocks, without any Stripe charge. */
+export async function grantLifetimeAccess(userId: number): Promise<void> {
+  await db.update(platformUsers).set({ subscriptionStatus: "active", subscriptionId: "lifetime", currentPeriodEnd: "2099-12-31" }).where(eq(platformUsers.id, userId));
+}
