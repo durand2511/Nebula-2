@@ -18,6 +18,7 @@ import { anthropic } from "@workspace/integrations-openai-ai-server";
 import { logger } from "../lib/logger";
 import { checkWritePlanViolation, BOOKING_BLOCK_KEYWORDS, isNewPageOnImportedSite, detectExplicitNewPage, fitHistoryToContext, importedSiteHasEdits } from "../lib/write-plan.js";
 import { applyAction, rebuildBookingApp, ACTION_CATALOGUE, type BuilderAction } from "../lib/actions.js";
+import { seedStaffAccounts } from "../lib/studio-auth.js";
 import { sendBookingEmail, sendWithConfig, sendBroadcast, sendPaymentEmail, type EmailKind } from "../lib/email.js";
 import { getInvoiceSettings, saveInvoiceSettings, createInvoice, renderInvoiceHtml, renderInvoiceDocument, renderInvoicePdf, listInvoices, listInvoicesSince, renderInvoicesXls, renderVatReportXls, renderTeacherPayoutXls, getInvoice } from "../lib/invoice.js";
 import { ensureCalendar, saveLessons, getStatus as getCalendarStatus, buildIcs, getLessons, type Lesson } from "../lib/calendar.js";
@@ -5423,6 +5424,12 @@ router.post("/projects/:projectId/command", json({ limit: "1mb" }), async (req, 
     await db.insert(projectMessages).values({ projectId, role: "assistant", content: result.summary });
     await db.update(projects).set({ updatedAt: new Date() }).where(eq(projects.id, projectId));
 
+    // SECURITY: seed the studio's logins server-side (authoritative), so passwords never need to live
+    // in the served page. Trusted call → may update an existing password when the owner changes it.
+    if ((action.action === "add_booking_app" || action.action === "set_booking_logins") && "accounts" in action && Array.isArray(action.accounts) && action.accounts.length) {
+      try { await seedStaffAccounts(projectId, action.accounts, true); } catch (err) { logger.warn({ err, projectId }, "[command] staff seed failed"); }
+    }
+
     // First-time booking app → generate the e-mail branding once (logo + name + AI copy).
     if (action.action === "add_booking_app" && result.created.some((c) => c.path === "booking-app.html")) {
       const all = await db.select().from(projectFiles).where(eq(projectFiles.projectId, projectId));
@@ -5486,6 +5493,11 @@ router.post("/projects/:projectId/action", json({ limit: "1mb" }), async (req, r
     }
     await db.insert(projectMessages).values({ projectId, role: "assistant", content: result.summary });
     await db.update(projects).set({ updatedAt: new Date() }).where(eq(projects.id, projectId));
+
+    // SECURITY: seed logins server-side (authoritative) so passwords never live in the served page.
+    if ((action.action === "add_booking_app" || action.action === "set_booking_logins") && "accounts" in action && Array.isArray(action.accounts) && action.accounts.length) {
+      try { await seedStaffAccounts(projectId, action.accounts, true); } catch (err) { logger.warn({ err, projectId }, "[action] staff seed failed"); }
+    }
 
     // When the booking app is first created, generate the e-mail branding ONCE (logo + name +
     // AI-written copy). Reused by every later e-mail; skipped if it already exists.

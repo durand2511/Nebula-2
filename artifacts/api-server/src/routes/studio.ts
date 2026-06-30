@@ -175,8 +175,13 @@ router.post("/projects/:id/studio/login", body, async (req, res) => {
 router.post("/projects/:id/studio/seed-staff", body, async (req, res) => {
   const projectId = pid(req as any); if (isNaN(projectId)) { res.status(400).json({ error: "Invalid project ID" }); return; }
   try {
+    // SECURITY: this endpoint is unauthenticated (the booking app calls it on load), so it may ONLY
+    // bootstrap a project that has no admin yet, and may NEVER overwrite an existing staff password.
+    // Authoritative seeding happens server-side when the owner configures the logins.
+    const [hasAdmin] = await db.select().from(studioUsers).where(and(eq(studioUsers.projectId, projectId), eq(studioUsers.role, "admin")));
+    if (hasAdmin) { res.json({ ok: true, created: 0 }); return; }
     const accounts = Array.isArray(req.body?.accounts) ? req.body.accounts : [];
-    const created = await seedStaffAccounts(projectId, accounts);
+    const created = await seedStaffAccounts(projectId, accounts, false);
     res.json({ ok: true, created });
   } catch (err) { logger.error({ err, projectId }, "[studio] seed-staff failed"); res.status(500).json({ error: "Seeden mislukt." }); }
 });

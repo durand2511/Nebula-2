@@ -1884,7 +1884,10 @@ export function buildBookingAppPage(opts: BookingAppOpts = {}): string {
   const logo = (opts.logo && /^https?:\/\//i.test(opts.logo)) ? opts.logo : "";
   const bg = (opts.homeBg && /^(data:image\/|https?:\/\/)/i.test(opts.homeBg)) ? opts.homeBg : "";
   // Bake only a FLAG (not the data URI) so the image is inlined ONCE — in the CSS var below.
-  const baked = JSON.stringify({ studio: title, accounts, logo, bg: bg ? "1" : "" });
+  // SECURITY: never bake staff passwords into the served page (they'd be readable in page source).
+  // Auth runs against the studio_users table (seeded server-side); the page only needs role/name/email.
+  const safeAccounts = accounts.map((a) => ({ role: a.role, name: a.name, email: a.email }));
+  const baked = JSON.stringify({ studio: title, accounts: safeAccounts, logo, bg: bg ? "1" : "" });
   // When a background is set: put it on the whole app (fixed, softened with a light overlay so
   // text/cards stay readable), make the top bar transparent (no white bar), float the cards,
   // and define .ba-hero for the full-screen home. The image is inlined exactly once here.

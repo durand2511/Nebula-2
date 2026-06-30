@@ -46,7 +46,10 @@ export function publicUser(u: StudioUser) {
  * permanently locked out (the old password keeps applying). Self-registered clients are never
  * touched (they're not in the baked list). Returns how many new accounts were created.
  */
-export async function seedStaffAccounts(projectId: number, accounts: { role?: string; name?: string; email?: string; password?: string }[]): Promise<number> {
+// Seed/sync the studio's admin/teacher logins. `allowOverwrite` (true only for trusted server-side
+// calls — the owner configuring logins) permits updating an existing account's password; the open
+// booking-app endpoint passes false so it can NEVER reset an existing staff password.
+export async function seedStaffAccounts(projectId: number, accounts: { role?: string; name?: string; email?: string; password?: string }[], allowOverwrite = true): Promise<number> {
   let created = 0;
   for (const a of accounts || []) {
     const role = a.role === "admin" ? "admin" : "teacher";
@@ -56,8 +59,8 @@ export async function seedStaffAccounts(projectId: number, accounts: { role?: st
     const name = String(a.name || "").trim() || email;
     const [exists] = await db.select().from(studioUsers).where(and(eq(studioUsers.projectId, projectId), eq(studioUsers.email, email)));
     if (exists) {
-      // Only staff accounts are re-synced, and only when the configured password actually changed.
-      if ((exists.role === "admin" || exists.role === "teacher") && !verifyPassword(password, exists.passwordHash)) {
+      // Only re-sync when explicitly allowed (trusted caller) and the password actually changed.
+      if (allowOverwrite && (exists.role === "admin" || exists.role === "teacher") && !verifyPassword(password, exists.passwordHash)) {
         await db.update(studioUsers).set({ passwordHash: hashPassword(password), name, role }).where(eq(studioUsers.id, exists.id));
       }
       continue;

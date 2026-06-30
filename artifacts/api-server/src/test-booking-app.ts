@@ -237,7 +237,8 @@ function main() {
   ];
   const r1 = applyAction({ action: "set_booking_logins", accounts: [{ role: "admin", name: "Eva", email: "eva@saha.nl", password: "Geheim1" }] } as any, files);
   const after1 = r1.changed.find((c) => c.path === "booking-app.html")?.content ?? "";
-  ok("set admin login bakes it in", after1.includes("eva@saha.nl") && after1.includes("Geheim1"));
+  ok("set admin login bakes the e-mail (for display)", after1.includes("eva@saha.nl"));
+  ok("SECURITY: password is NOT baked into the page", !after1.includes("Geheim1"));
   ok("new admin replaces the old admin", !after1.includes("admin@studio.nl"));
   ok("existing teacher kept when only admin set", after1.includes("oud@studio.nl"));
   const files2 = [files[0], { path: "booking-app.html", content: after1 }];
