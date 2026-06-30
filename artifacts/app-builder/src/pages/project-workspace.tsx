@@ -2356,8 +2356,22 @@ export function ProjectWorkspace() {
 
             {/* 2. Own domain */}
             <div className="rounded-lg border p-4">
-              <div className="flex items-center gap-2 mb-1"><Globe className="h-4 w-4 text-muted-foreground" /><h4 className="font-medium text-sm">Eigen domein</h4></div>
-              <p className="text-xs text-muted-foreground mb-3">Koppel je eigen domein (bijv. jouwstudio.nl). Voeg bij je DNS-provider een CNAME toe naar <code className="bg-muted px-1 rounded">{pubData?.target || "customers.nebulabookings.com"}</code> en klik daarna op Verifiëren. SSL gaat automatisch.</p>
+              <div className="flex items-center gap-2 mb-1"><Globe className="h-4 w-4 text-muted-foreground" /><h4 className="font-medium text-sm">Eigen domein koppelen</h4></div>
+              <div className="text-xs text-muted-foreground mb-3 space-y-2">
+                <p>Koppel je eigen domein (bijv. <span className="font-medium">jouwstudio.nl</span>) aan Nebula:</p>
+                <ol className="list-decimal pl-4 space-y-1.5">
+                  <li>Log in bij je <span className="font-medium">DNS-provider</span> (waar je je domein registreerde — bijv. TransIP, Versio of Vimexx).</li>
+                  <li>Voeg een nieuw <span className="font-medium">DNS-record</span> toe:
+                    <ul className="list-disc pl-4 mt-1 space-y-1">
+                      <li><span className="font-medium">Voor www.jouwstudio.nl</span> (aanbevolen): Type <code className="bg-muted px-1 rounded">CNAME</code> · Naam/Host <code className="bg-muted px-1 rounded">www</code> · Waarde <code className="bg-muted px-1 rounded">{pubData?.target || "customers.nebulabookings.com"}</code> · TTL standaard.</li>
+                      <li><span className="font-medium">Voor het hoofddomein</span> (<code className="bg-muted px-1 rounded">@</code>, dus zonder www): een CNAME op <code className="bg-muted px-1 rounded">@</code> kan meestal niet — gebruik dan een <code className="bg-muted px-1 rounded">A-record</code> (of ALIAS/ANAME) naar hetzelfde adres als <code className="bg-muted px-1 rounded">{pubData?.target || "customers.nebulabookings.com"}</code>.</li>
+                    </ul>
+                  </li>
+                  <li>Sla de DNS-instellingen op. Wijzigingen kunnen tot een paar uur duren voordat ze actief zijn.</li>
+                  <li>Typ je domein hieronder, klik op <span className="font-medium">Koppelen</span> en daarna op <span className="font-medium">Verifiëren</span>.</li>
+                </ol>
+                <p>SSL (https) wordt <span className="font-medium">automatisch</span> geregeld zodra de verificatie is gelukt.</p>
+              </div>
               {(pubData?.domains || []).map((d: any) => (
                 <div key={d.id} className="flex items-center justify-between gap-2 border rounded-md px-3 py-2 mb-2">
                   <div className="min-w-0">
