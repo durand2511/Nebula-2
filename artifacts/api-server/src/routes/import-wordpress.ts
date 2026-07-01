@@ -153,6 +153,7 @@ router.post("/import/wordpress/files", bigJson, async (req, res) => {
 
   let written = 0;
   const skipped: string[] = [];
+  const failed: { path: string; reason: string }[] = [];
   try {
     for (const part of parts) {
       const path = safePath(part?.path);
@@ -160,40 +161,48 @@ router.post("/import/wordpress/files", bigJson, async (req, res) => {
       const append = part?.append === true;
       const content = String(part?.content ?? "");
 
-      // Binary parts → bytes on the persistent disk + a project_assets pointer. Text parts stay
-      // inline in project_files so the code is browsable/editable in the console.
-      if (part?.encoding === "base64") {
-        const bytes = Buffer.from(content, "base64");
-        const { storageKey, size } = await writeAsset(projectId, path, bytes, append);
-        await db.insert(projectAssets)
-          .values({ projectId, path, contentType: contentTypeFor(path), size, storageKey })
-          .onConflictDoUpdate({
-            target: [projectAssets.projectId, projectAssets.path],
-            set: { contentType: contentTypeFor(path), size, storageKey, updatedAt: new Date() },
-          });
+      // Per-file guard: one problematic file (e.g. a filesystem name limit) must not abort the whole
+      // import with a 500 — record it and keep going so the rest of the site still comes through.
+      try {
+        // Binary parts → bytes on the persistent disk + a project_assets pointer. Text parts stay
+        // inline in project_files so the code is browsable/editable in the console.
+        if (part?.encoding === "base64") {
+          const bytes = Buffer.from(content, "base64");
+          const { storageKey, size } = await writeAsset(projectId, path, bytes, append);
+          await db.insert(projectAssets)
+            .values({ projectId, path, contentType: contentTypeFor(path), size, storageKey })
+            .onConflictDoUpdate({
+              target: [projectAssets.projectId, projectAssets.path],
+              set: { contentType: contentTypeFor(path), size, storageKey, updatedAt: new Date() },
+            });
+          written++;
+          continue;
+        }
+
+        const language = inferLanguage(path);
+        const [existing] = await db.select({ id: projectFiles.id, content: projectFiles.content })
+          .from(projectFiles)
+          .where(and(eq(projectFiles.projectId, projectId), eq(projectFiles.path, path)));
+
+        if (existing && append) {
+          await db.update(projectFiles)
+            .set({ content: existing.content + content, language, updatedAt: new Date() })
+            .where(eq(projectFiles.id, existing.id));
+        } else if (existing) {
+          await db.update(projectFiles)
+            .set({ content, language, updatedAt: new Date() })
+            .where(eq(projectFiles.id, existing.id));
+        } else {
+          await db.insert(projectFiles).values({ projectId, path, content, language });
+        }
         written++;
-        continue;
+      } catch (fileErr) {
+        const reason = fileErr instanceof Error ? fileErr.message : String(fileErr);
+        logger.warn({ err: fileErr, projectId, path }, "[wp-import] file skipped");
+        failed.push({ path, reason });
       }
-
-      const language = inferLanguage(path);
-      const [existing] = await db.select({ id: projectFiles.id, content: projectFiles.content })
-        .from(projectFiles)
-        .where(and(eq(projectFiles.projectId, projectId), eq(projectFiles.path, path)));
-
-      if (existing && append) {
-        await db.update(projectFiles)
-          .set({ content: existing.content + content, language, updatedAt: new Date() })
-          .where(eq(projectFiles.id, existing.id));
-      } else if (existing) {
-        await db.update(projectFiles)
-          .set({ content, language, updatedAt: new Date() })
-          .where(eq(projectFiles.id, existing.id));
-      } else {
-        await db.insert(projectFiles).values({ projectId, path, content, language });
-      }
-      written++;
     }
-    res.json({ written, skipped });
+    res.json({ written, skipped, failed });
   } catch (err) {
     logger.error({ err, projectId }, "[wp-import] file batch failed");
     res.status(500).json({ error: "Opslaan van bestanden mislukt." });

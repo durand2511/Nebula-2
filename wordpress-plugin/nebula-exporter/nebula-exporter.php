@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Nebula Exporter
  * Description: Exporteert de volledige WordPress-site (alle wp-content bestanden: thema's, plugins, uploads) plus een volledige database-dump en pusht alles naar een Nebula-project, zodat de complete code in Nebula beschikbaar is.
- * Version: 1.0.1
+ * Version: 1.0.2
  * Author: Nebula
  * License: MIT
  *
@@ -230,6 +230,11 @@ class Nebula_Exporter {
                 return $res;
             }
             $sent += isset($res['written']) ? intval($res['written']) : count($batch);
+            if (!empty($res['failed']) && is_array($res['failed'])) {
+                foreach ($res['failed'] as $f) {
+                    $log[] = 'Overgeslagen (serverfout): ' . (isset($f['path']) ? $f['path'] : '?') . ' — ' . (isset($f['reason']) ? $f['reason'] : '');
+                }
+            }
             $batch = array();
             $batch_bytes = 0;
             return true;
