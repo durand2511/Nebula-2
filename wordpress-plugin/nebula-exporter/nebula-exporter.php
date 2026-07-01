@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Nebula Exporter
  * Description: Exporteert de volledige WordPress-site (alle wp-content bestanden + database + gerenderde preview) naar een Nebula-project. Browser-gestuurd met voortgangsbalk: honderden kleine stapjes i.p.v. één lange request, dus het kan niet meer time-outen.
- * Version: 2.0.0
+ * Version: 2.1.0
  * Author: Nebula
  * License: MIT
  *
@@ -21,8 +21,8 @@ class Nebula_Exporter {
     const JOB_KEY   = 'nebula_export_job';        // kleine voortgangsstaat (optie, autoload no)
     const MANIFEST  = 'nebula_export_manifest';    // de bestandenlijst (transient)
 
-    const FILES_PER_STEP = 25;        // bestanden per AJAX-stap
-    const STEP_BYTES     = 2000000;   // ~2 MB per AJAX-stap (base64 blaast binair ~33% op)
+    const FILES_PER_STEP = 150;       // bestanden per AJAX-stap (server doet bulk-inserts, dus mag groter)
+    const STEP_BYTES     = 5000000;   // ~5 MB per AJAX-stap (base64 blaast binair ~33% op)
     const CHUNK_BYTES    = 2500000;   // grote bestanden/DB in stukken van ~2,5 MB
     const MAX_FILE_BYTES = 50000000;  // bestanden > 50 MB overslaan (backups/video's)
 
@@ -146,29 +146,41 @@ class Nebula_Exporter {
                         });
                 }
 
+                function loop(d){
+                    setBar(d.percent||0);
+                    statusEl.textContent=d.message||d.phase;
+                    if(d.message){ log(d.message); }
+                    if(d.finished){
+                        setBar(100);
+                        statusEl.textContent='✅ Klaar! '+d.sent+' items verzonden'+(d.skipped?(' ('+d.skipped+' overgeslagen)'):'')+'.';
+                        log('Klaar. Ga terug naar Nebula en klik op "Verifieer de website".');
+                        btn.disabled=false; running=false; return;
+                    }
+                    return step({},8).then(loop); // 8 retries per stap → transiënte hikjes overleven
+                }
+                function fail(e){
+                    statusEl.textContent='❌ Gestopt: '+e.message;
+                    log('Gestopt: '+e.message+'. Klik opnieuw op Exporteren om te HERVATTEN (hij begint niet overnieuw).');
+                    btn.disabled=false; running=false;
+                }
                 function run(){
-                    if(running){ return; } running=true; btn.disabled=true; wrap.style.display='block'; logEl.textContent=''; setBar(0);
-                    statusEl.textContent='Starten…';
-                    var cfg={ start:1,
-                        project_name: document.getElementById('nebula_project_name').value,
-                        include_uploads: document.getElementById('nebula_inc_uploads').checked?1:0,
-                        include_db: document.getElementById('nebula_inc_db').checked?1:0 };
-                    step(cfg,3).then(function loop(d){
-                        setBar(d.percent||0);
-                        statusEl.textContent=d.message||d.phase;
-                        if(d.message){ log(d.message); }
-                        if(d.finished){
-                            setBar(100);
-                            statusEl.textContent='✅ Klaar! '+d.sent+' items verzonden'+(d.skipped?(' ('+d.skipped+' overgeslagen)'):'')+'.';
-                            log('Klaar. Ga terug naar Nebula en klik op "Verifieer de website".');
-                            btn.disabled=false; running=false; return;
+                    if(running){ return; } running=true; btn.disabled=true; wrap.style.display='block'; setBar(0);
+                    statusEl.textContent='Controleren…';
+                    // Eerst proben: staat er nog een export open? Zo ja → HERVATTEN i.p.v. overnieuw.
+                    step({probe:1},3).then(function(p){
+                        if(p && p.active){
+                            if(window.confirm('Er staat nog een onafgeronde export open ('+(Math.round(p.percent)||0)+'%).\n\nOK = HERVATTEN waar hij gebleven was.\nAnnuleren = helemaal OPNIEUW beginnen (nieuw project).')){
+                                log('▶ Hervatten op '+(Math.round(p.percent)||0)+'% …');
+                                return step({},8).then(loop);
+                            }
                         }
-                        return step({},6).then(loop);
-                    }).catch(function(e){
-                        statusEl.textContent='❌ Mislukt: '+e.message;
-                        log('Gestopt: '+e.message+'. Je kunt gewoon opnieuw op Exporteren klikken — hij vult aan.');
-                        btn.disabled=false; running=false;
-                    });
+                        logEl.textContent='';
+                        var cfg={ start:1,
+                            project_name: document.getElementById('nebula_project_name').value,
+                            include_uploads: document.getElementById('nebula_inc_uploads').checked?1:0,
+                            include_db: document.getElementById('nebula_inc_db').checked?1:0 };
+                        return step(cfg,3).then(loop);
+                    }).catch(fail);
                 }
                 btn.addEventListener('click', run);
             })();
@@ -190,6 +202,17 @@ class Nebula_Exporter {
         $api = rtrim($s['api_url'], '/'); $token = $s['token'];
         if (empty($api) || empty($token)) { wp_send_json_error(array('message' => 'API-URL of token ontbreekt.')); }
 
+        // Probe: staat er nog een onafgeronde export open? (om te kunnen hervatten i.p.v. overnieuw)
+        if (!empty($_POST['probe'])) {
+            $job = get_option(self::JOB_KEY);
+            if (is_array($job) && isset($job['phase']) && $job['phase'] !== 'done') {
+                $p = $this->progress($job, 'Openstaande export gevonden.');
+                $p['active'] = true;
+                wp_send_json_success($p);
+            }
+            wp_send_json_success(array('active' => false));
+        }
+
         // Start: nieuw project + bestandenlijst opbouwen.
         if (!empty($_POST['start'])) {
             $this->cleanup_job();
@@ -201,7 +224,7 @@ class Nebula_Exporter {
                 wp_send_json_error(array('message' => 'Aanmaken van project mislukt: ' . $this->err_text($init)));
             }
             $files = $this->build_file_list($include_uploads);
-            set_transient(self::MANIFEST, $files, 12 * HOUR_IN_SECONDS);
+            set_transient(self::MANIFEST, $files, 24 * HOUR_IN_SECONDS);
             $job = array(
                 'project_id' => intval($init['projectId']),
                 'phase' => 'files', 'cursor' => 0, 'total' => count($files), 'sent' => 0, 'skipped' => 0,

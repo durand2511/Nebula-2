@@ -22,7 +22,7 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { db, projects, projectFiles, projectAssets } from "@workspace/db";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { getSessionUser, tokenFrom } from "../lib/platform-auth.js";
 import { writeAsset, contentTypeFor } from "../lib/media-storage.js";
 import { makeZip } from "../lib/zip.js";
@@ -155,6 +155,13 @@ router.post("/import/wordpress/files", bigJson, async (req, res) => {
   const skipped: string[] = [];
   const failed: { path: string; reason: string }[] = [];
   try {
+    // One SELECT for the whole batch (not per file) so we can BULK-insert the new rows. Sites with
+    // tens of thousands of files were slow because each file did its own SELECT+INSERT round-trip.
+    const existingRows = await db.select({ path: projectFiles.path }).from(projectFiles).where(eq(projectFiles.projectId, projectId));
+    const existing = new Set(existingRows.map((r) => r.path));
+    const newText: { projectId: number; path: string; content: string; language: string }[] = [];
+    const assetRows: { projectId: number; path: string; contentType: string; size: number; storageKey: string }[] = [];
+
     for (const part of parts) {
       const path = safePath(part?.path);
       if (!path) { skipped.push(String(part?.path ?? "?")); continue; }
@@ -164,18 +171,11 @@ router.post("/import/wordpress/files", bigJson, async (req, res) => {
       // Per-file guard: one problematic file (e.g. a filesystem name limit) must not abort the whole
       // import with a 500 — record it and keep going so the rest of the site still comes through.
       try {
-        // Binary parts → bytes on the persistent disk + a project_assets pointer. Text parts stay
-        // inline in project_files so the code is browsable/editable in the console.
+        // Binary → bytes on the persistent disk (per file); its pointer row is bulk-upserted below.
         if (part?.encoding === "base64") {
           const bytes = Buffer.from(content, "base64");
           const { storageKey, size } = await writeAsset(projectId, path, bytes, append);
-          await db.insert(projectAssets)
-            .values({ projectId, path, contentType: contentTypeFor(path), size, storageKey })
-            .onConflictDoUpdate({
-              target: [projectAssets.projectId, projectAssets.path],
-              set: { contentType: contentTypeFor(path), size, storageKey, updatedAt: new Date() },
-            });
-          written++;
+          assetRows.push({ projectId, path, contentType: contentTypeFor(path), size, storageKey });
           continue;
         }
 
@@ -184,28 +184,59 @@ router.post("/import/wordpress/files", bigJson, async (req, res) => {
         // object-cache.php, …) carry binary tails after __halt_compiler(); strip NUL so the insert
         // never fails on them.
         const safe = content.replace(/\u0000/g, "");
-        const [existing] = await db.select({ id: projectFiles.id, content: projectFiles.content })
-          .from(projectFiles)
-          .where(and(eq(projectFiles.projectId, projectId), eq(projectFiles.path, path)));
-
-        if (existing && append) {
-          await db.update(projectFiles)
-            .set({ content: existing.content + safe, language, updatedAt: new Date() })
-            .where(eq(projectFiles.id, existing.id));
-        } else if (existing) {
-          await db.update(projectFiles)
-            .set({ content: safe, language, updatedAt: new Date() })
-            .where(eq(projectFiles.id, existing.id));
+        if (append && existing.has(path)) {
+          const [row] = await db.select({ id: projectFiles.id, content: projectFiles.content })
+            .from(projectFiles).where(and(eq(projectFiles.projectId, projectId), eq(projectFiles.path, path)));
+          if (row) await db.update(projectFiles).set({ content: row.content + safe, language, updatedAt: new Date() }).where(eq(projectFiles.id, row.id));
+          else { newText.push({ projectId, path, content: safe, language }); existing.add(path); }
+          written++;
+        } else if (existing.has(path)) {
+          await db.update(projectFiles).set({ content: safe, language, updatedAt: new Date() })
+            .where(and(eq(projectFiles.projectId, projectId), eq(projectFiles.path, path)));
+          written++;
         } else {
-          await db.insert(projectFiles).values({ projectId, path, content: safe, language });
+          newText.push({ projectId, path, content: safe, language });
+          existing.add(path);
         }
-        written++;
       } catch (fileErr) {
         const reason = fileErr instanceof Error ? fileErr.message : String(fileErr);
         logger.warn({ err: fileErr, projectId, path }, "[wp-import] file skipped");
         failed.push({ path, reason });
       }
     }
+
+    // Bulk-insert new text files in ONE statement; on failure fall back per-row so a single bad file
+    // doesn't drop the whole batch.
+    if (newText.length) {
+      try { await db.insert(projectFiles).values(newText); written += newText.length; }
+      catch {
+        for (const row of newText) {
+          try { await db.insert(projectFiles).values(row); written++; }
+          catch (e) { failed.push({ path: row.path, reason: e instanceof Error ? e.message : String(e) }); }
+        }
+      }
+    }
+    // Bulk-upsert asset pointers (unique on projectId+path); same per-row fallback.
+    if (assetRows.length) {
+      try {
+        await db.insert(projectAssets).values(assetRows).onConflictDoUpdate({
+          target: [projectAssets.projectId, projectAssets.path],
+          set: { contentType: sql`excluded.content_type`, size: sql`excluded.size`, storageKey: sql`excluded.storage_key`, updatedAt: new Date() },
+        });
+        written += assetRows.length;
+      } catch {
+        for (const row of assetRows) {
+          try {
+            await db.insert(projectAssets).values(row).onConflictDoUpdate({
+              target: [projectAssets.projectId, projectAssets.path],
+              set: { contentType: row.contentType, size: row.size, storageKey: row.storageKey, updatedAt: new Date() },
+            });
+            written++;
+          } catch (e) { failed.push({ path: row.path, reason: e instanceof Error ? e.message : String(e) }); }
+        }
+      }
+    }
+
     res.json({ written, skipped, failed });
   } catch (err) {
     logger.error({ err, projectId }, "[wp-import] file batch failed");
