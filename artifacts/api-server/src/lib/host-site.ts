@@ -3,10 +3,11 @@
  * project_files (/ → index.html, /booking-app.html → that file, /blog/x.html → that file) and
  * return it. Simple MVP renderer — serves the stored files as-is.
  */
-import { db, projectFiles, projects, platformUsers } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { db, projectFiles, projectAssets, projects, platformUsers } from "@workspace/db";
+import { and, eq } from "drizzle-orm";
 import type { Request, Response } from "express";
 import { getPublishedFiles } from "./site-publish.js";
+import { assetFilePath, streamAsset } from "./media-storage.js";
 
 // A large, non-removable Nebula branding badge (injected at serve time) for FREE (unsubscribed)
 // sites. Deliberately big and prominent in the corner so a free site can't be used commercially —
@@ -76,6 +77,20 @@ export async function serveProjectSite(projectId: number, req: Request, res: Res
   if (p === "" || p.endsWith("/")) p += "index.html";
   let file = rows.find((f) => f.path === p);
   if (!file && !/\.[a-z0-9]+$/i.test(p)) file = rows.find((f) => f.path === p + ".html"); // extensionless → .html
+  // Not a stored text file? It may be a binary asset (image/font/video) on the persistent disk.
+  if (!file) {
+    const [asset] = await db.select().from(projectAssets)
+      .where(and(eq(projectAssets.projectId, projectId), eq(projectAssets.path, p)));
+    if (asset) {
+      const abs = await assetFilePath(asset.storageKey);
+      if (abs) {
+        res.setHeader("Content-Type", asset.contentType || "application/octet-stream");
+        res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+        streamAsset(res, abs);
+        return;
+      }
+    }
+  }
   if (!file) file = rows.find((f) => f.path === "index.html");                            // fallback: homepage
   if (!file) { res.status(404).send("Pagina niet gevonden."); return; }
   const ext = (file.path.split(".").pop() || "html").toLowerCase();

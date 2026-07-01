@@ -69,6 +69,23 @@ export const projectFiles = pgTable("project_files", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
+// Binary media (images, fonts, video, …) that belongs to a project but is too heavy to keep inline
+// in project_files as base64. The bytes live on the Render persistent disk (MEDIA_DIR); this row is
+// the pointer: `path` is the site-relative path (e.g. wp-content/uploads/2024/foto.jpg) and
+// `storageKey` is where the bytes sit on disk. serveProjectSite streams these by (projectId, path).
+export const projectAssets = pgTable("project_assets", {
+  id: serial("id").primaryKey(),
+  projectId: integer("project_id")
+    .notNull()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  path: text("path").notNull(),
+  contentType: text("content_type").notNull().default("application/octet-stream"),
+  size: integer("size").notNull().default(0),
+  storageKey: text("storage_key").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => ({ projPath: uniqueIndex("project_assets_proj_path").on(t.projectId, t.path) }));
+
 // Undo history: a full snapshot of a project's files taken BEFORE a mutating action
 // (a /command edit or an AI build). "draai terug"/"maak ongedaan" restores the latest one.
 export const projectSnapshots = pgTable("project_snapshots", {
@@ -522,6 +539,8 @@ export const insertProjectFileSchema = createInsertSchema(projectFiles).omit({
   createdAt: true,
   updatedAt: true,
 });
+
+export type ProjectAsset = typeof projectAssets.$inferSelect;
 
 export type Project = typeof projects.$inferSelect;
 export type InsertProject = z.infer<typeof insertProjectSchema>;

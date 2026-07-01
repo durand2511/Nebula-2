@@ -12,7 +12,7 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { ArrowRight, Globe, Loader2, FileCode, MessageSquare, Clock, Trash2, Sparkles, CalendarCheck, Rocket, User as UserIcon, LogOut, X, CreditCard, Check } from "lucide-react";
+import { ArrowRight, Globe, Loader2, FileCode, MessageSquare, Clock, Trash2, Sparkles, CalendarCheck, Rocket, User as UserIcon, LogOut, X, CreditCard, Check, Copy, Eye, EyeOff, CheckCircle2, Plug } from "lucide-react";
 import logoUrl from "../assets/nebula-logo.png";
 import { getToken, setToken, clearToken, type PlatformUser } from "@/lib/session";
 
@@ -53,6 +53,9 @@ export function AiEditor() {
   const project = user && projects && projects.length > 0
     ? [...projects].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())[0]
     : null;
+  // A WordPress import arrives as its OWN project (source "wordpress"), so it never mixes with a
+  // URL-imported one. Newest first (GET /projects is already ordered by updatedAt desc).
+  const wpProject = user && projects ? projects.find((p) => String((p as { source?: string }).source) === "wordpress") ?? null : null;
 
   const refresh = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: getListProjectsQueryKey() });
@@ -202,7 +205,16 @@ export function AiEditor() {
 
       <img src={logoUrl} alt="Nebula" className="h-40 md:h-52 w-auto mb-8" />
 
-      {project ? (
+      {/* Nebula-token — altijd zichtbaar, zodat je 'm zonder DevTools kunt kopiëren voor de WordPress-plugin. */}
+      <TokenCard />
+
+      {wpProject ? (
+        // Een WordPress-import ging goed → toon direct het succes-paneel met "ga verder naar de editor",
+        // vóór de generieke projectkaart, zodat je de verificatie ziet en niet verdwaalt.
+        <div className="w-full max-w-2xl">
+          <WordPressImportPanel wpProject={wpProject} onContinue={(id) => setLocation(`/projects/${id}`)} refresh={refresh} />
+        </div>
+      ) : project ? (
         <div className="w-full max-w-2xl">
           <div className="relative rounded-2xl border border-border bg-card shadow-lg overflow-hidden">
             <Button variant="ghost" size="icon" className="absolute top-4 right-4 z-10 h-9 w-9 text-muted-foreground hover:text-destructive" onClick={() => setConfirmDel(true)} aria-label="Project verwijderen" data-testid="button-delete-project"><Trash2 className="h-5 w-5" /></Button>
@@ -233,6 +245,10 @@ export function AiEditor() {
             </Button>
           </div>
           {error && (<p className="mt-3 text-sm text-destructive text-center" data-testid="text-import-error">{error}</p>)}
+
+          {/* WordPress-import via de plugin: verifieer of de push is aangekomen en ga door naar de editor. */}
+          <WordPressImportPanel wpProject={wpProject} onContinue={(id) => setLocation(`/projects/${id}`)} refresh={refresh} />
+
           <div className="mt-8 rounded-2xl border border-border bg-card shadow-lg p-8 text-center">
             <h2 className="text-2xl font-bold tracking-tight">Begin je project</h2>
             <p className="mt-2 text-muted-foreground">Importeer je bestaande website hierboven — Nebula bouwt 'm om tot een slimme, bewerkbare site mét boekingssysteem.</p>
@@ -263,6 +279,72 @@ export function AiEditor() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+    </div>
+  );
+}
+
+// ── Nebula-token, zichtbaar in de app (geen DevTools nodig) ──
+function TokenCard() {
+  const [revealed, setRevealed] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const token = getToken() || "";
+  const copy = async () => {
+    try { await navigator.clipboard.writeText(token); setCopied(true); setTimeout(() => setCopied(false), 1800); }
+    catch { setRevealed(true); } // clipboard geblokkeerd → toon 'm zodat je handmatig kunt kopiëren
+  };
+  const masked = token ? token.slice(0, 6) + "•".repeat(Math.max(4, token.length - 10)) + token.slice(-4) : "";
+  return (
+    <div className="w-full max-w-2xl mb-6 rounded-2xl border border-primary/30 bg-primary/5 p-5">
+      <div className="flex items-center gap-2 mb-1"><Plug className="h-4 w-4 text-primary" /><h3 className="font-semibold text-sm">Jouw Nebula-token</h3></div>
+      <p className="text-xs text-muted-foreground mb-3">Plak dit in de <span className="font-medium">Nebula Exporter</span>-plugin in WordPress om je site te importeren. Behandel het als een wachtwoord — niet delen.</p>
+      <div className="flex items-center gap-2">
+        <code className="flex-1 min-w-0 truncate rounded-lg border border-border bg-background px-3 py-2 text-xs font-mono" data-testid="text-nebula-token">{token ? (revealed ? token : masked) : "—"}</code>
+        <Button variant="outline" size="icon" className="h-9 w-9 shrink-0" onClick={() => setRevealed((r) => !r)} aria-label={revealed ? "Verbergen" : "Tonen"}>{revealed ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</Button>
+        <Button size="sm" className="h-9 shrink-0 font-medium" onClick={copy} disabled={!token} data-testid="button-copy-token">{copied ? (<><CheckCircle2 className="mr-1.5 h-4 w-4" />Gekopieerd</>) : (<><Copy className="mr-1.5 h-4 w-4" />Kopieer</>)}</Button>
+      </div>
+    </div>
+  );
+}
+
+// ── WordPress-import: verifieer de push van de plugin en ga door naar de editor ──
+function WordPressImportPanel({ wpProject, onContinue, refresh }: {
+  wpProject: { id: number; name: string; fileCount: number } | null;
+  onContinue: (id: number) => void;
+  refresh: () => void;
+}) {
+  const [checking, setChecking] = useState(false);
+  const [checkedEmpty, setCheckedEmpty] = useState(false);
+  const apiBase = typeof window !== "undefined" ? window.location.origin : "";
+  const check = async () => {
+    setChecking(true); setCheckedEmpty(false);
+    refresh(); // invalideert de projectenlijst; komt de import binnen, dan verschijnt het succes-paneel
+    await new Promise((r) => setTimeout(r, 1200));
+    setChecking(false); setCheckedEmpty(true);
+  };
+
+  if (wpProject) {
+    return (
+      <div className="mt-4 rounded-2xl border border-emerald-300 bg-emerald-50 p-5 text-left" data-testid="panel-wp-success">
+        <div className="flex items-center gap-2 text-emerald-700 font-semibold"><CheckCircle2 className="h-5 w-5" /> WordPress-import geslaagd</div>
+        <p className="text-sm text-emerald-800/80 mt-1">Project <span className="font-semibold">{wpProject.name}</span> — {wpProject.fileCount} bestanden ontvangen. Dit is je eigen aparte project, dus het loopt niet door elkaar.</p>
+        <Button className="mt-4 w-full h-11 font-bold" onClick={() => onContinue(wpProject.id)} data-testid="button-wp-continue">Ga verder naar de editor <ArrowRight className="ml-2 h-5 w-5" /></Button>
+      </div>
+    );
+  }
+  return (
+    <div className="mt-4 rounded-2xl border border-border bg-card shadow-sm p-5 text-left">
+      <div className="flex items-center gap-2 mb-1"><Plug className="h-4 w-4 text-primary" /><h3 className="font-semibold text-sm">Importeren vanuit WordPress</h3></div>
+      <p className="text-xs text-muted-foreground mb-3">Heb je een WordPress-site? Installeer de <span className="font-medium">Nebula Exporter</span>-plugin en push je hele site (code + media) hierheen.</p>
+      <ol className="text-xs text-muted-foreground space-y-1 mb-3 list-decimal pl-4">
+        <li>Installeer &amp; activeer de plugin in WordPress (Plugins → Uploaden).</li>
+        <li>Ga naar <span className="font-medium">Extra → Nebula Export</span>.</li>
+        <li>Vul in: <span className="font-medium">API-URL</span> <code className="rounded bg-muted px-1 break-all">{apiBase}</code> en je <span className="font-medium">token</span> (hierboven).</li>
+        <li>Klik <span className="font-medium">Exporteren</span> en kom hier terug.</li>
+      </ol>
+      <Button variant="outline" size="sm" className="h-9" onClick={check} disabled={checking} data-testid="button-wp-verify">
+        {checking ? (<><Loader2 className="mr-2 h-4 w-4 animate-spin" />Controleren…</>) : "Controleer of de import is aangekomen"}
+      </Button>
+      {checkedEmpty && !checking && (<p className="mt-2 text-xs text-muted-foreground">Nog niks ontvangen. Heb je in WordPress op <span className="font-medium">Exporteren</span> geklikt? Een grote site kan enkele minuten duren.</p>)}
     </div>
   );
 }

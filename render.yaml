@@ -11,8 +11,16 @@ services:
     region: frankfurt
     healthCheckPath: /api/healthz
     autoDeploy: true
+    # Persistent disk for imported binary media (WP uploads, images, fonts, …). The bytes live here;
+    # project_assets rows in Postgres point at them. Grow sizeGB in the dashboard if a site is bigger.
+    disk:
+      name: media
+      mountPath: /data
+      sizeGB: 10
     envVars:
       # ── non-secret config (safe to commit) ──
+      - key: MEDIA_DIR
+        value: /data
       - key: NODE_ENV
         value: production
       - key: PLATFORM_HOST

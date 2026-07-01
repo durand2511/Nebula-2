@@ -55,3 +55,6 @@ Thumbs.db
 
 # test artifacts
 test-output
+
+# Local dev media storage (Render uses the persistent disk at /data)
+.media-data/
