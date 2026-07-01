@@ -13,7 +13,9 @@
 const API = "https://api.brightdata.com/request";
 
 const token = () => process.env.BRIGHTDATA_API_TOKEN || "";
-const zone = () => process.env.BRIGHTDATA_ZONE || "";
+// Default to the account's Web Unlocker zone so only the TOKEN needs to be set in the dashboard
+// (the blueprint env from render.yaml doesn't always auto-apply). Override via BRIGHTDATA_ZONE.
+const zone = () => process.env.BRIGHTDATA_ZONE || "web_unlocker2";
 
 export function brightDataEnabled(): boolean {
   return !!(token() && zone());
