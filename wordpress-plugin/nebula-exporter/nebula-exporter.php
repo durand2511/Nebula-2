@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Nebula Exporter
  * Description: Exporteert de volledige WordPress-site (alle wp-content bestanden + database + gerenderde preview) naar een Nebula-project. Browser-gestuurd met voortgangsbalk: honderden kleine stapjes i.p.v. één lange request, dus het kan niet meer time-outen.
- * Version: 2.2.0
+ * Version: 2.3.0
  * Author: Nebula
  * License: MIT
  *
@@ -526,18 +526,45 @@ class Nebula_Exporter {
         return $out;
     }
 
+    const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36';
+
     private function fetch_rendered($url) {
+        $body = $this->fetch_body($url, 15);
+        if ($body === null) { return null; }
+        return $this->inline_css($body); // CSS inbedden zodat de preview gestyled is zonder externe proxy
+    }
+
+    private function fetch_body($url, $timeout = 10) {
         $resp = wp_remote_get($url, array(
-            'timeout' => 15, 'redirection' => 2, 'sslverify' => false,
-            // Browser-UA zodat Wordfence/SiteGround de eigen render-fetch niet met 403 blokkeert.
-            'user-agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
-            'headers'    => array('Accept' => 'text/html,application/xhtml+xml'),
+            'timeout' => $timeout, 'redirection' => 2, 'sslverify' => false,
+            'user-agent' => self::UA, // browser-UA → Wordfence/SiteGround blokkeert de fetch niet met 403
+            'headers'    => array('Accept' => '*/*'),
         ));
         if (is_wp_error($resp)) { return null; }
         $code = wp_remote_retrieve_response_code($resp);
         if ($code < 200 || $code >= 300) { return null; }
-        $body = wp_remote_retrieve_body($resp);
-        return (is_string($body) && $body !== '') ? $body : null;
+        $b = wp_remote_retrieve_body($resp);
+        return (is_string($b) && $b !== '') ? $b : null;
+    }
+
+    // Vervang <link rel="stylesheet"> door <style>…</style> met de opgehaalde CSS. Nebula's server
+    // kan je (beschermde) site niet bereiken om de CSS te proxyen; door 'm hier in te bedden is de
+    // preview tóch gestyled. Budget-begrensd zodat de pagina niet gigantisch wordt.
+    private function inline_css($html) {
+        if (stripos($html, '<link') === false) { return $html; }
+        $budget = 900000; // ~900 KB max aan ingebedde CSS
+        return preg_replace_callback('#<link\b[^>]*>#i', function ($m) use (&$budget) {
+            $tag = $m[0];
+            if (!preg_match('#rel=["\']?stylesheet#i', $tag)) { return $tag; }
+            if ($budget <= 0 || !preg_match('#href=["\']([^"\']+)["\']#i', $tag, $h)) { return $tag; }
+            $url = html_entity_decode($h[1]);
+            if (strpos($url, '//') === 0) { $url = 'https:' . $url; }
+            elseif (strpos($url, 'http') !== 0) { $url = home_url('/') . ltrim($url, '/'); }
+            $css = $this->fetch_body($url, 10);
+            if ($css === null || strlen($css) > $budget) { return $tag; }
+            $budget -= strlen($css);
+            return '<style>' . $css . '</style>';
+        }, $html);
     }
 
     // ── HTTP-helper (volgt redirects zelf + retry op transiënte fouten) ────────

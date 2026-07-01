@@ -6088,7 +6088,7 @@ router.get("/projects/:projectId/files", async (req, res) => {
         language: projectFiles.language,
         createdAt: projectFiles.createdAt,
         updatedAt: projectFiles.updatedAt,
-        content: sql<string>`CASE WHEN length(${projectFiles.content}) <= 300000 AND ${projectFiles.path} ~* '\\.(html?|css|js|mjs|cjs|json|svg|txt|md|xml)$' THEN ${projectFiles.content} ELSE '' END`,
+        content: sql<string>`CASE WHEN length(${projectFiles.content}) <= 2000000 AND ${projectFiles.path} ~* '\\.(html?|css|js|mjs|cjs|json|svg|txt|md|xml)$' THEN ${projectFiles.content} ELSE '' END`,
       })
       .from(projectFiles)
       .where(eq(projectFiles.projectId, projectId))

@@ -77,6 +77,9 @@ async function handleSiteProxy(req: Request, res: Response): Promise<void> {
       headers: fwdHeaders,
       body,
       redirect: "follow",
+      // Fast-fail: some hosts (SiteGround/Wordfence) block datacenter IPs, so an asset can hang. Cap
+      // it so a blocked upstream doesn't freeze the whole preview — it just fails that one asset.
+      signal: AbortSignal.timeout(8000),
     });
 
     // Store Set-Cookie
