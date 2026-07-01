@@ -3876,6 +3876,56 @@ router.post("/projects/import-url", async (req, res) => {
   }
 });
 
+// Generate a browsable, PREVIEWABLE copy of a site into an EXISTING project by crawling the live
+// site (index.html + pages). The WordPress import ships raw PHP that can't render in the browser;
+// this reuses the exact URL-import crawl so the project previews correctly + gets the full toolbar,
+// without re-importing the tens-of-thousands of raw files. URL comes from the body or is derived
+// from the project description ("Geïmporteerd van <url>" / "Imported from <url>").
+router.post("/projects/:projectId/wordpress-preview", async (req, res) => {
+  const projectId = Number(req.params.projectId);
+  if (!Number.isInteger(projectId)) { res.status(400).json({ error: "Invalid project ID" }); return; }
+  const owner = await requireOwner(req, res, projectId);
+  if (!owner) return;
+  const [proj] = await db.select().from(projects).where(eq(projects.id, projectId));
+
+  let rawUrl = String(req.body?.url ?? "").trim();
+  if (!rawUrl && proj) {
+    const m = (proj.description || "").match(/(?:van|from)\s+(https?:\/\/\S+)/i);
+    if (m) rawUrl = m[1];
+  }
+  if (!rawUrl) { res.status(400).json({ error: "Geen site-URL bekend voor dit project. Geef de URL mee." }); return; }
+  if (!/^https?:\/\//i.test(rawUrl)) rawUrl = `https://${rawUrl}`;
+
+  let crawled: { pages: { key: string; url: string; html: string }[]; finalUrl: string };
+  try {
+    crawled = await crawlSite(rawUrl);
+  } catch (err) {
+    req.log.warn({ err, rawUrl, projectId }, "wordpress-preview crawl failed");
+    res.status(400).json({ error: err instanceof Error ? err.message : "Kon de website niet ophalen." });
+    return;
+  }
+  const homepage = crawled.pages.find((p) => p.key === "index.html") ?? crawled.pages[0];
+  if (!homepage) { res.status(422).json({ error: "Geen pagina's gevonden om te previewen." }); return; }
+
+  try {
+    let written = 0;
+    for (const p of crawled.pages) {
+      const content = prepareImportedHtml(p.html, p.url);
+      const [existing] = await db.select({ id: projectFiles.id }).from(projectFiles)
+        .where(and(eq(projectFiles.projectId, projectId), eq(projectFiles.path, p.key)));
+      if (existing) await db.update(projectFiles).set({ content, language: "html", updatedAt: new Date() }).where(eq(projectFiles.id, existing.id));
+      else await db.insert(projectFiles).values({ projectId, path: p.key, content, language: "html" });
+      written++;
+    }
+    await db.update(projects).set({ updatedAt: new Date() }).where(eq(projects.id, projectId));
+    req.log.info({ projectId, pages: written, finalUrl: crawled.finalUrl }, "wordpress-preview generated");
+    res.json({ ok: true, pages: written });
+  } catch (err) {
+    req.log.error({ err, projectId }, "wordpress-preview persist failed");
+    res.status(500).json({ error: "Preview genereren mislukt." });
+  }
+});
+
 router.get("/projects/:projectId", async (req, res) => {
   const parsed = GetProjectParams.safeParse({ projectId: Number(req.params.projectId) });
   if (!parsed.success) {

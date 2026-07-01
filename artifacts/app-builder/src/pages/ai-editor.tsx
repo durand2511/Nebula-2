@@ -342,6 +342,26 @@ function WordPressImportPanel({ wpProject, onContinue, onDelete, refresh }: {
     finally { setChecking(false); }
   };
 
+  // Genereer een echte preview: crawl de live site server-side (zoals de URL-import) en schrijf de
+  // gerenderde pagina's in dit project. Nodig omdat ruwe WordPress-PHP niet in de browser rendert.
+  const [previewBusy, setPreviewBusy] = useState(false);
+  const [previewMsg, setPreviewMsg] = useState<string | null>(null);
+  const genPreview = async () => {
+    if (!wpProject) return;
+    setPreviewBusy(true); setPreviewMsg(null);
+    try {
+      const r = await fetch(`/api/projects/${wpProject.id}/wordpress-preview`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: "{}",
+      });
+      const d = await r.json().catch(() => ({}));
+      if (r.ok) setPreviewMsg(`✅ Preview klaar (${d.pages} pagina's). Open de chat om 'm te zien.`);
+      else setPreviewMsg(d.error || "Preview genereren mislukt.");
+    } catch { setPreviewMsg("Preview genereren mislukt."); }
+    finally { setPreviewBusy(false); }
+  };
+
   if (wpProject) {
     return (
       <div className="mt-4 rounded-2xl border border-emerald-300 bg-emerald-50 p-5 text-left" data-testid="panel-wp-success">
@@ -357,8 +377,17 @@ function WordPressImportPanel({ wpProject, onContinue, onDelete, refresh }: {
             <div className="text-xs text-emerald-800/70">media (afbeeldingen)</div>
           </div>
         </div>
-        <p className="mt-2 text-xs text-emerald-800/70">Klopt het aantal ongeveer met je site? Zo niet, draai de export in WordPress nog eens (hij vult aan). Pas als het goed staat, ga je door.</p>
-        <Button className="mt-3 w-full h-11 font-bold" onClick={() => onContinue(wpProject.id)} data-testid="button-wp-continue">Alles staat er — ga naar de chat <ArrowRight className="ml-2 h-5 w-5" /></Button>
+        <p className="mt-2 text-xs text-emerald-800/70">Klopt het aantal ongeveer met je site? Zo niet, draai de export in WordPress nog eens (hij vult aan).</p>
+
+        <div className="mt-3 rounded-lg bg-white border border-emerald-200 p-3">
+          <p className="text-xs text-emerald-800/80 mb-2">Ruwe WordPress-code rendert niet vanzelf. Klik hieronder om een <span className="font-semibold">echte preview</span> van je site te genereren (haalt de opgemaakte pagina's op).</p>
+          <Button variant="outline" className="w-full h-10 font-semibold border-emerald-300 text-emerald-800 hover:bg-emerald-100" onClick={genPreview} disabled={previewBusy} data-testid="button-wp-preview">
+            {previewBusy ? (<><Loader2 className="mr-2 h-4 w-4 animate-spin" />Preview genereren…</>) : "Genereer preview van je site"}
+          </Button>
+          {previewMsg && <p className="mt-2 text-xs text-emerald-900">{previewMsg}</p>}
+        </div>
+
+        <Button className="mt-3 w-full h-11 font-bold" onClick={() => onContinue(wpProject.id)} data-testid="button-wp-continue">Ga naar de chat <ArrowRight className="ml-2 h-5 w-5" /></Button>
         {onDelete && (
           <button
             className="mt-3 w-full text-center text-xs text-red-600 hover:text-red-700 hover:underline inline-flex items-center justify-center gap-1"

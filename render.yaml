@@ -21,6 +21,10 @@ services:
       # ── non-secret config (safe to commit) ──
       - key: MEDIA_DIR
         value: /data
+      # Cap V8's heap so a memory-heavy import GCs instead of hard-aborting (Render status 134) and
+      # taking the whole service (booking apps!) down. Tune up if you move to a bigger instance.
+      - key: NODE_OPTIONS
+        value: "--max-old-space-size=400"
       - key: NODE_ENV
         value: production
       - key: PLATFORM_HOST

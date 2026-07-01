@@ -67,9 +67,9 @@ router.get("/import/wordpress/plugin.zip", (_req, res) => {
   }
 });
 
-// Big ceiling: the plugin batches files so each request stays well under this, but base64 inflates
-// binary payloads ~33%, so leave generous headroom.
-const bigJson = json({ limit: "60mb" });
+// The plugin batches files to ~5 MB per request. Keep the ceiling modest (not 60 MB) so a single
+// request can't balloon the server's heap and OOM-crash the whole instance (Render status 134).
+const bigJson = json({ limit: "12mb" });
 
 const MAX_PATH_LEN = 400;
 const MAX_FILES_PER_BATCH = 2000;
