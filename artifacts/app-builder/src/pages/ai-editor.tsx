@@ -205,9 +205,6 @@ export function AiEditor() {
 
       <img src={logoUrl} alt="Nebula" className="h-40 md:h-52 w-auto mb-8" />
 
-      {/* Nebula-token — altijd zichtbaar, zodat je 'm zonder DevTools kunt kopiëren voor de WordPress-plugin. */}
-      <TokenCard />
-
       {wpProject ? (
         // Een WordPress-import ging goed → toon direct het succes-paneel met "ga verder naar de editor",
         // vóór de generieke projectkaart, zodat je de verificatie ziet en niet verdwaalt.
@@ -304,18 +301,6 @@ function CopyField({ label, value, testId, mask = false }: { label: string; valu
         {mask && <Button variant="outline" size="icon" className="h-9 w-9 shrink-0" onClick={() => setRevealed((r) => !r)} aria-label={revealed ? "Verbergen" : "Tonen"}>{revealed ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</Button>}
         <Button size="sm" className="h-9 shrink-0 font-medium" onClick={copy} disabled={!value} data-testid={testId ? `${testId}-copy` : undefined}>{copied ? (<><CheckCircle2 className="mr-1.5 h-4 w-4" />Gekopieerd</>) : (<><Copy className="mr-1.5 h-4 w-4" />Kopieer</>)}</Button>
       </div>
-    </div>
-  );
-}
-
-// ── Nebula-token, zichtbaar in de app (geen DevTools nodig) ──
-function TokenCard() {
-  const token = getToken() || "";
-  return (
-    <div className="w-full max-w-2xl mb-6 rounded-2xl border border-primary/30 bg-primary/5 p-5">
-      <div className="flex items-center gap-2 mb-1"><Plug className="h-4 w-4 text-primary" /><h3 className="font-semibold text-sm">Jouw Nebula-token</h3></div>
-      <p className="text-xs text-muted-foreground mb-3">Plak dit in de <span className="font-medium">Nebula Exporter</span>-plugin in WordPress. Behandel het als een wachtwoord — niet delen.</p>
-      <CopyField label="Token" value={token} testId="text-nebula-token" mask />
     </div>
   );
 }
