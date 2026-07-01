@@ -694,8 +694,15 @@ router.get("/projects/:id/preview-page", async (req, res) => {
   const page = (req.query.page as string) || "index.html";
   const sid = (req.query.sid as string) || "";
 
-  const fileRows = await db.select().from(projectFiles).where(eq(projectFiles.projectId, projectId));
-  const file = fileRows.find((f) => f.path === page) ?? fileRows.find((f) => f.path === "index.html");
+  // Load ONLY what's needed. A WordPress import can have tens of thousands of files plus a multi-MB
+  // DB dump; selecting them all WITH content OOM-crashes the instance. We need the requested page's
+  // content, index.html (for the domain fallback), and the .html paths (nav routing) — nothing else.
+  const [pageRow] = await db.select().from(projectFiles)
+    .where(and(eq(projectFiles.projectId, projectId), eq(projectFiles.path, page)));
+  const [indexRow] = page === "index.html"
+    ? [pageRow]
+    : await db.select().from(projectFiles).where(and(eq(projectFiles.projectId, projectId), eq(projectFiles.path, "index.html")));
+  const file = pageRow ?? indexRow;
   if (!file) { res.status(404).send("Page not found"); return; }
 
   let html: string = file.content;
@@ -726,7 +733,7 @@ router.get("/projects/:id/preview-page", async (req, res) => {
   // so a <base href> is injected and those stylesheets resolve through the proxy.
   // Without this the new page renders UNSTYLED ("layout heel anders en niet mooi").
   if (!domain && page !== "index.html") {
-    const indexFile = fileRows.find((f) => f.path === "index.html");
+    const indexFile = indexRow;
     if (indexFile) {
       const ibase = indexFile.content.match(/<base\s[^>]*href=["']([^"']+)["']/i);
       if (ibase) { try { domain = new URL(ibase[1]).hostname.replace(/^www\./, "").toLowerCase(); } catch {} }
@@ -784,7 +791,9 @@ router.get("/projects/:id/preview-page", async (req, res) => {
 
   // Build list of stored page keys so the navigation router can route within
   // the imported pages instead of following live links
-  const storedKeys = fileRows.filter((f) => f.path.endsWith(".html")).map((f) => f.path);
+  const storedKeys = (await db.select({ path: projectFiles.path }).from(projectFiles)
+    .where(and(eq(projectFiles.projectId, projectId), sql`${projectFiles.path} LIKE '%.html'`)))
+    .map((f) => f.path);
 
   // Scripts injected into <head> (run before any site code)
   const sidJson = JSON.stringify(sid);
