@@ -314,20 +314,30 @@ function WordPressImportPanel({ wpProject, onContinue, onDelete, refresh }: {
 }) {
   const [checking, setChecking] = useState(false);
   const [checkedEmpty, setCheckedEmpty] = useState(false);
+  const [status, setStatus] = useState<{ textFiles: number; mediaAssets: number } | null>(null);
   const apiBase = typeof window !== "undefined" ? window.location.origin : "";
   const token = getToken() || "";
 
-  // Verifieer de website: haal de projecten vers op; is de WordPress-import binnen, ga dan meteen
-  // door naar de chat-interface. Zo niet, toon een hint.
+  // Toon wat er ÉCHT is binnengekomen (code-bestanden + media), zodat je kunt bevestigen dat de
+  // import compleet is voordat je doorgaat — niet blind doorspringen omdat er een project bestaat.
+  useEffect(() => {
+    if (!wpProject) { setStatus(null); return; }
+    fetch(`/api/import/wordpress/status?projectId=${wpProject.id}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+      .then((r) => r.json())
+      .then((d) => setStatus({ textFiles: Number(d.textFiles) || 0, mediaAssets: Number(d.mediaAssets) || 0 }))
+      .catch(() => setStatus(null));
+  }, [wpProject, token]);
+
+  // Verifieer: haal de projecten vers op. Vinden we de WordPress-import, dan verschijnt het
+  // resultaat-paneel (met tellingen). We springen NIET automatisch door — dat is een aparte klik.
   const verify = async () => {
     setChecking(true); setCheckedEmpty(false);
     try {
       const r = await fetch("/api/projects", { headers: token ? { Authorization: `Bearer ${token}` } : {} });
       const list = await r.json().catch(() => []);
       const wp = Array.isArray(list) ? list.find((p: { source?: string }) => String(p.source) === "wordpress") : null;
-      refresh(); // houd react-query in sync
-      if (wp) { onContinue(wp.id); return; }
-      setCheckedEmpty(true);
+      refresh(); // parent re-rendert → resultaat-paneel verschijnt als de import binnen is
+      if (!wp) setCheckedEmpty(true);
     } catch { setCheckedEmpty(true); }
     finally { setChecking(false); }
   };
@@ -335,9 +345,20 @@ function WordPressImportPanel({ wpProject, onContinue, onDelete, refresh }: {
   if (wpProject) {
     return (
       <div className="mt-4 rounded-2xl border border-emerald-300 bg-emerald-50 p-5 text-left" data-testid="panel-wp-success">
-        <div className="flex items-center gap-2 text-emerald-700 font-semibold"><CheckCircle2 className="h-5 w-5" /> WordPress-import geslaagd</div>
-        <p className="text-sm text-emerald-800/80 mt-1">Project <span className="font-semibold">{wpProject.name}</span> — {wpProject.fileCount} bestanden ontvangen. Dit is je eigen aparte project, dus het loopt niet door elkaar.</p>
-        <Button className="mt-4 w-full h-11 font-bold" onClick={() => onContinue(wpProject.id)} data-testid="button-wp-continue">Ga verder naar de chat <ArrowRight className="ml-2 h-5 w-5" /></Button>
+        <div className="flex items-center gap-2 text-emerald-700 font-semibold"><CheckCircle2 className="h-5 w-5" /> WordPress-import gevonden</div>
+        <p className="text-sm text-emerald-800/80 mt-1">Project <span className="font-semibold">{wpProject.name}</span> — controleer of alles binnen is:</p>
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <div className="rounded-lg bg-white border border-emerald-200 px-3 py-2 text-center">
+            <div className="text-xl font-bold text-emerald-700">{status ? status.textFiles : "…"}</div>
+            <div className="text-xs text-emerald-800/70">code-bestanden</div>
+          </div>
+          <div className="rounded-lg bg-white border border-emerald-200 px-3 py-2 text-center">
+            <div className="text-xl font-bold text-emerald-700">{status ? status.mediaAssets : "…"}</div>
+            <div className="text-xs text-emerald-800/70">media (afbeeldingen)</div>
+          </div>
+        </div>
+        <p className="mt-2 text-xs text-emerald-800/70">Klopt het aantal ongeveer met je site? Zo niet, draai de export in WordPress nog eens (hij vult aan). Pas als het goed staat, ga je door.</p>
+        <Button className="mt-3 w-full h-11 font-bold" onClick={() => onContinue(wpProject.id)} data-testid="button-wp-continue">Alles staat er — ga naar de chat <ArrowRight className="ml-2 h-5 w-5" /></Button>
         {onDelete && (
           <button
             className="mt-3 w-full text-center text-xs text-red-600 hover:text-red-700 hover:underline inline-flex items-center justify-center gap-1"

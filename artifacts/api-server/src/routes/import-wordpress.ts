@@ -213,6 +213,23 @@ router.post("/import/wordpress/files", bigJson, async (req, res) => {
   }
 });
 
+// Status of an import: how many code files + media assets actually landed. The Nebula UI uses this
+// to SHOW what arrived (so the user can confirm completeness) instead of blindly jumping to the chat.
+router.get("/import/wordpress/status", async (req, res) => {
+  const projectId = Number(req.query?.projectId);
+  if (!Number.isInteger(projectId)) { res.status(400).json({ error: "projectId ontbreekt." }); return; }
+  const owned = await ownedProject(req, projectId);
+  if (!owned.ok) { denied(res, owned.code); return; }
+  try {
+    const files = await db.select({ id: projectFiles.id }).from(projectFiles).where(eq(projectFiles.projectId, projectId));
+    const assets = await db.select({ id: projectAssets.id }).from(projectAssets).where(eq(projectAssets.projectId, projectId));
+    res.json({ textFiles: files.length, mediaAssets: assets.length, name: owned.project.name });
+  } catch (err) {
+    logger.error({ err, projectId }, "[wp-import] status failed");
+    res.status(500).json({ error: "Status ophalen mislukt." });
+  }
+});
+
 // 3) Mark the import done — just reports the total so the plugin can confirm.
 router.post("/import/wordpress/finalize", bigJson, async (req, res) => {
   const projectId = Number(req.body?.projectId);

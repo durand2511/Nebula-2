@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Nebula Exporter
  * Description: Exporteert de volledige WordPress-site (alle wp-content bestanden: thema's, plugins, uploads) plus een volledige database-dump en pusht alles naar een Nebula-project, zodat de complete code in Nebula beschikbaar is.
- * Version: 1.0.4
+ * Version: 1.0.5
  * Author: Nebula
  * License: MIT
  *
@@ -22,6 +22,7 @@ class Nebula_Exporter {
     const NONCE     = 'nebula_exporter_run';
     // Kleine requests: veilig onder de body-limiet én laag geheugengebruik op de server (voorkomt 502).
     const BATCH_BYTES = 2500000;      // ~2,5 MB ruwe inhoud per batch
+    const BATCH_FILES = 40;           // óók cappen op aantal: veel kleine files = veel DB-inserts = trage request (502)
     const CHUNK_BYTES = 2500000;      // bestanden groter dan dit worden in stukken van ~2,5 MB gestuurd
     const MAX_FILE_BYTES = 50000000;  // bestanden groter dan 50 MB worden overgeslagen (backups/video's)
 
@@ -338,7 +339,7 @@ class Nebula_Exporter {
                 );
                 $batch[] = $part;
                 $batch_bytes += strlen($part['content']);
-                if ($batch_bytes >= self::BATCH_BYTES) {
+                if ($batch_bytes >= self::BATCH_BYTES || count($batch) >= self::BATCH_FILES) {
                     $flushed = $flush();
                     if (is_wp_error($flushed)) return $flushed;
                 }
@@ -497,15 +498,11 @@ class Nebula_Exporter {
     // --- HTTP-helper ---------------------------------------------------------
 
     private function api_post($api, $path, $token, $body) {
-        $url  = $api . $path;
+        $url_orig = $api . $path;
         $json = wp_json_encode($body);
-        // We volgen redirects ZELF (redirection => 0). Cruciaal: bij een domein-redirect
-        // (bijv. nebulabookings.com → www.nebulabookings.com) gooien HTTP-clients standaard de
-        // POST-body en de Authorization-header weg. Door de POST expliciet opnieuw te sturen naar
-        // de Location behouden we methode + body + token, zodat de export niet stilletjes faalt.
         $args = array(
             'timeout'     => 120,
-            'redirection' => 0,
+            'redirection' => 0, // we volgen redirects zelf (behoud POST-body + Authorization)
             'headers'     => array(
                 'Content-Type'  => 'application/json',
                 'Authorization' => 'Bearer ' . $token,
@@ -513,37 +510,49 @@ class Nebula_Exporter {
             'body' => $json,
         );
 
-        $response = null;
-        for ($hop = 0; $hop < 5; $hop++) {
-            $response = wp_remote_post($url, $args);
-            if (is_wp_error($response)) {
-                return $response;
-            }
-            $code = wp_remote_retrieve_response_code($response);
-            if (in_array($code, array(301, 302, 303, 307, 308), true)) {
-                $loc = wp_remote_retrieve_header($response, 'location');
-                if (empty($loc)) {
-                    break;
-                }
-                // Relatieve Location → absoluut maken op basis van de huidige URL.
-                if (strpos($loc, 'http://') !== 0 && strpos($loc, 'https://') !== 0) {
-                    $p = wp_parse_url($url);
-                    $base = $p['scheme'] . '://' . $p['host'] . (isset($p['port']) ? ':' . $p['port'] : '');
-                    $loc = $base . '/' . ltrim($loc, '/');
-                }
-                $url = $loc;
-                continue; // stuur dezelfde POST (headers + body) opnieuw naar de nieuwe URL
-            }
-            break;
-        }
+        // Transiënte gateway/timeout-fouten (502/503/504/429/408) en netwerkfouten opnieuw proberen —
+        // een grote site kan de server even doen wachten; zo breekt één hik niet de hele export.
+        $transient = array(408, 425, 429, 500, 502, 503, 504);
+        $last_err  = 'onbekende fout';
 
-        $code = wp_remote_retrieve_response_code($response);
-        $data = json_decode(wp_remote_retrieve_body($response), true);
-        if ($code < 200 || $code >= 300) {
-            $msg = is_array($data) && isset($data['error']) ? $data['error'] : ('HTTP ' . $code . ' bij ' . $url);
-            return new WP_Error('nebula_http', $msg);
+        for ($attempt = 0; $attempt < 4; $attempt++) {
+            $url = $url_orig;
+            $response = null;
+            for ($hop = 0; $hop < 5; $hop++) {
+                $response = wp_remote_post($url, $args);
+                if (is_wp_error($response)) { break; }
+                $code = wp_remote_retrieve_response_code($response);
+                if (in_array($code, array(301, 302, 303, 307, 308), true)) {
+                    $loc = wp_remote_retrieve_header($response, 'location');
+                    if (empty($loc)) { break; }
+                    if (strpos($loc, 'http://') !== 0 && strpos($loc, 'https://') !== 0) {
+                        $p = wp_parse_url($url);
+                        $base = $p['scheme'] . '://' . $p['host'] . (isset($p['port']) ? ':' . $p['port'] : '');
+                        $loc = $base . '/' . ltrim($loc, '/');
+                    }
+                    $url = $loc;
+                    continue;
+                }
+                break;
+            }
+
+            if (is_wp_error($response)) {
+                $last_err = $response->get_error_message();
+            } else {
+                $code = wp_remote_retrieve_response_code($response);
+                if (!in_array($code, $transient, true)) {
+                    $data = json_decode(wp_remote_retrieve_body($response), true);
+                    if ($code < 200 || $code >= 300) {
+                        $msg = is_array($data) && isset($data['error']) ? $data['error'] : ('HTTP ' . $code . ' bij ' . $url);
+                        return new WP_Error('nebula_http', $msg);
+                    }
+                    return is_array($data) ? $data : array();
+                }
+                $last_err = 'HTTP ' . $code . ' bij ' . $url;
+            }
+            if ($attempt < 3) { sleep(2 * ($attempt + 1)); } // backoff 2s, 4s, 6s
         }
-        return is_array($data) ? $data : array();
+        return new WP_Error('nebula_http', $last_err . ' (na 4 pogingen)');
     }
 
     private function err_text($maybe_error) {
