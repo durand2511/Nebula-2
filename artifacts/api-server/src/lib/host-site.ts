@@ -4,7 +4,7 @@
  * return it. Simple MVP renderer — serves the stored files as-is.
  */
 import { db, projectFiles, projectAssets, projects, platformUsers } from "@workspace/db";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { Request, Response } from "express";
 import { getPublishedFiles } from "./site-publish.js";
 import { assetFilePath, streamAsset } from "./media-storage.js";
@@ -71,7 +71,13 @@ export async function serveProjectSite(projectId: number, req: Request, res: Res
   const published = await getPublishedFiles(projectId);
   const rows = published
     ? Object.entries(published).map(([path, f]) => ({ path, content: f.content, language: f.language }))
-    : await db.select().from(projectFiles).where(eq(projectFiles.projectId, projectId));
+    // Live fallback: only servable files. A WordPress import can carry tens of thousands of raw PHP
+    // files + a big DB dump; loading them all here would OOM-crash the instance.
+    : await db.select({ path: projectFiles.path, content: projectFiles.content, language: projectFiles.language })
+        .from(projectFiles).where(and(
+          eq(projectFiles.projectId, projectId),
+          sql`${projectFiles.path} ~* '\\.(html?|css|js|mjs|cjs|json|svg|xml|txt|md|ico|webmanifest)$'`,
+        ));
   if (!rows.length) { res.status(404).send("Site niet gevonden."); return; }
   let p = decodeURIComponent((req.path || "/").replace(/^\/+/, ""));
   if (p === "" || p.endsWith("/")) p += "index.html";

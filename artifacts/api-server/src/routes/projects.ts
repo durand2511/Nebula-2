@@ -3917,6 +3917,14 @@ router.post("/projects/:projectId/wordpress-preview", async (req, res) => {
   if (!homepage) { res.status(422).json({ error: "Geen pagina's gevonden om te previewen." }); return; }
 
   try {
+    // SLIM the project first: the tens of thousands of raw PHP files + the multi-MB DB dump make
+    // EVERY operation (open/preview/publish/serve) load them into memory and OOM-crash the instance.
+    // They can't render or run in the browser anyway. Keep only the rendered .html pages we're about
+    // to write; the media stays on the persistent disk (project_assets is untouched).
+    const removed = await db.delete(projectFiles)
+      .where(and(eq(projectFiles.projectId, projectId), sql`${projectFiles.path} NOT LIKE '%.html'`))
+      .returning({ id: projectFiles.id });
+
     let written = 0;
     for (const p of crawled.pages) {
       const content = prepareImportedHtml(p.html, p.url);
@@ -3927,8 +3935,8 @@ router.post("/projects/:projectId/wordpress-preview", async (req, res) => {
       written++;
     }
     await db.update(projects).set({ updatedAt: new Date() }).where(eq(projects.id, projectId));
-    req.log.info({ projectId, pages: written, finalUrl: crawled.finalUrl }, "wordpress-preview generated");
-    res.json({ ok: true, pages: written });
+    req.log.info({ projectId, pages: written, removed: removed.length, finalUrl: crawled.finalUrl }, "wordpress-preview generated + slimmed");
+    res.json({ ok: true, pages: written, removed: removed.length });
   } catch (err) {
     req.log.error({ err, projectId }, "wordpress-preview persist failed");
     res.status(500).json({ error: "Preview genereren mislukt." });

@@ -6,9 +6,19 @@
  * so an unrelated edit isn't pushed live unintentionally.
  */
 import { db, projectFiles, sitePublishes } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 
 export type PublishedFile = { content: string; language: string };
+
+// A published/served site only needs browser-servable files (html/css/js/…). A WordPress import can
+// leave tens of thousands of raw PHP files + a multi-MB DB dump in the project; loading them all here
+// OOM-crashes the instance (publish → "bad gateway"). Restrict every full-project load to servables.
+function servableFiles(projectId: number) {
+  return db.select().from(projectFiles).where(and(
+    eq(projectFiles.projectId, projectId),
+    sql`${projectFiles.path} ~* '\\.(html?|css|js|mjs|cjs|json|svg|xml|txt|md|ico|webmanifest)$'`,
+  ));
+}
 
 async function loadMap(projectId: number): Promise<Record<string, PublishedFile> | null> {
   const [row] = await db.select().from(sitePublishes).where(eq(sitePublishes.projectId, projectId));
@@ -25,7 +35,7 @@ async function saveMap(projectId: number, map: Record<string, PublishedFile>): P
 
 /** Snapshot ALL the project's current files as the published site (full publish). Returns file count. */
 export async function publishSite(projectId: number): Promise<number> {
-  const rows = await db.select().from(projectFiles).where(eq(projectFiles.projectId, projectId));
+  const rows = await servableFiles(projectId);
   const map: Record<string, PublishedFile> = {};
   for (const r of rows) map[r.path] = { content: r.content, language: r.language };
   await saveMap(projectId, map);
@@ -37,7 +47,7 @@ export async function publishSite(projectId: number): Promise<number> {
 export async function republishMatching(projectId: number, match: (path: string) => boolean): Promise<void> {
   const map = await loadMap(projectId);
   if (!map) return;
-  const rows = await db.select().from(projectFiles).where(eq(projectFiles.projectId, projectId));
+  const rows = await servableFiles(projectId);
   for (const r of rows) if (match(r.path)) map[r.path] = { content: r.content, language: r.language };
   await saveMap(projectId, map);
 }
@@ -56,7 +66,7 @@ export async function isPublished(projectId: number): Promise<boolean> {
 export async function hasUnpublishedChanges(projectId: number): Promise<boolean> {
   const map = await loadMap(projectId);
   if (!map) return true; // never published → there's something to publish
-  const rows = await db.select().from(projectFiles).where(eq(projectFiles.projectId, projectId));
+  const rows = await servableFiles(projectId);
   if (rows.some((r) => !map[r.path] || map[r.path].content !== r.content)) return true;
   const livePaths = new Set(rows.map((r) => r.path));
   return Object.keys(map).some((p) => !livePaths.has(p)); // a file was deleted since publish

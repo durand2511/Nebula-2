@@ -356,7 +356,7 @@ function WordPressImportPanel({ wpProject, onContinue, onDelete, refresh }: {
         body: "{}",
       });
       const d = await r.json().catch(() => ({}));
-      if (r.ok) setPreviewMsg(`✅ Preview klaar (${d.pages} pagina's). Open de chat om 'm te zien.`);
+      if (r.ok) setPreviewMsg(`✅ Klaar! ${d.pages} pagina's opgehaald, project opgeschoond. Ga naar de chat — je ziet nu de echte preview.`);
       else setPreviewMsg(d.error || "Preview genereren mislukt.");
     } catch { setPreviewMsg("Preview genereren mislukt."); }
     finally { setPreviewBusy(false); }
@@ -380,9 +380,9 @@ function WordPressImportPanel({ wpProject, onContinue, onDelete, refresh }: {
         <p className="mt-2 text-xs text-emerald-800/70">Klopt het aantal ongeveer met je site? Zo niet, draai de export in WordPress nog eens (hij vult aan).</p>
 
         <div className="mt-3 rounded-lg bg-white border border-emerald-200 p-3">
-          <p className="text-xs text-emerald-800/80 mb-2">Ruwe WordPress-code rendert niet vanzelf. Klik hieronder om een <span className="font-semibold">echte preview</span> van je site te genereren (haalt de opgemaakte pagina's op).</p>
+          <p className="text-xs text-emerald-800/80 mb-2">Ruwe WordPress-code rendert niet in de browser. Klik hieronder: Nebula haalt je <span className="font-semibold">opgemaakte pagina's</span> op (echte preview) en maakt het project licht &amp; bewerkbaar. Je media blijft bewaard.</p>
           <Button variant="outline" className="w-full h-10 font-semibold border-emerald-300 text-emerald-800 hover:bg-emerald-100" onClick={genPreview} disabled={previewBusy} data-testid="button-wp-preview">
-            {previewBusy ? (<><Loader2 className="mr-2 h-4 w-4 animate-spin" />Preview genereren…</>) : "Genereer preview van je site"}
+            {previewBusy ? (<><Loader2 className="mr-2 h-4 w-4 animate-spin" />Preview genereren…</>) : "Genereer preview & maak bewerkbaar"}
           </Button>
           {previewMsg && <p className="mt-2 text-xs text-emerald-900">{previewMsg}</p>}
         </div>
