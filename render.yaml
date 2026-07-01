@@ -31,7 +31,16 @@ services:
         value: durand2511@gmail.com
       - key: LOG_LEVEL
         value: info
+      # Bright Data Web Unlocker — website-import + preview-proxy via een unblocked netwerk, zodat
+      # sites die datacenter-IP's blokkeren tóch volledig laden. Zone-naam is niet geheim; de token
+      # zet je als secret in het dashboard.
+      - key: BRIGHTDATA_ZONE
+        value: web_unlocker2
       # ── secrets: you fill these in the Render dashboard (kept out of git) ──
+      - key: BRIGHTDATA_API_TOKEN
+        sync: false
+      - key: DATABASE_URL
+        sync: false
       - key: DATABASE_URL
         sync: false
       - key: EMAIL_SECRET_KEY
