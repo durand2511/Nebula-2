@@ -3,11 +3,10 @@
  * project_files (/ → index.html, /booking-app.html → that file, /blog/x.html → that file) and
  * return it. Simple MVP renderer — serves the stored files as-is.
  */
-import { db, projectFiles, projectAssets, projects, platformUsers } from "@workspace/db";
-import { and, eq, sql } from "drizzle-orm";
+import { db, projectFiles, projects, platformUsers } from "@workspace/db";
+import { eq } from "drizzle-orm";
 import type { Request, Response } from "express";
 import { getPublishedFiles } from "./site-publish.js";
-import { assetFilePath, streamAsset } from "./media-storage.js";
 
 // A large, non-removable Nebula branding badge (injected at serve time) for FREE (unsubscribed)
 // sites. Deliberately big and prominent in the corner so a free site can't be used commercially —
@@ -71,32 +70,12 @@ export async function serveProjectSite(projectId: number, req: Request, res: Res
   const published = await getPublishedFiles(projectId);
   const rows = published
     ? Object.entries(published).map(([path, f]) => ({ path, content: f.content, language: f.language }))
-    // Live fallback: only servable files. A WordPress import can carry tens of thousands of raw PHP
-    // files + a big DB dump; loading them all here would OOM-crash the instance.
-    : await db.select({ path: projectFiles.path, content: projectFiles.content, language: projectFiles.language })
-        .from(projectFiles).where(and(
-          eq(projectFiles.projectId, projectId),
-          sql`${projectFiles.path} ~* '\\.(html?|css|js|mjs|cjs|json|svg|xml|txt|md|ico|webmanifest)$'`,
-        ));
+    : await db.select().from(projectFiles).where(eq(projectFiles.projectId, projectId));
   if (!rows.length) { res.status(404).send("Site niet gevonden."); return; }
   let p = decodeURIComponent((req.path || "/").replace(/^\/+/, ""));
   if (p === "" || p.endsWith("/")) p += "index.html";
   let file = rows.find((f) => f.path === p);
   if (!file && !/\.[a-z0-9]+$/i.test(p)) file = rows.find((f) => f.path === p + ".html"); // extensionless → .html
-  // Not a stored text file? It may be a binary asset (image/font/video) on the persistent disk.
-  if (!file) {
-    const [asset] = await db.select().from(projectAssets)
-      .where(and(eq(projectAssets.projectId, projectId), eq(projectAssets.path, p)));
-    if (asset) {
-      const abs = await assetFilePath(asset.storageKey);
-      if (abs) {
-        res.setHeader("Content-Type", asset.contentType || "application/octet-stream");
-        res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
-        streamAsset(res, abs);
-        return;
-      }
-    }
-  }
   if (!file) file = rows.find((f) => f.path === "index.html");                            // fallback: homepage
   if (!file) { res.status(404).send("Pagina niet gevonden."); return; }
   const ext = (file.path.split(".").pop() || "html").toLowerCase();

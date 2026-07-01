@@ -8,7 +8,6 @@ import stripeRouter from "./stripe";
 import seoRouter from "./seo";
 import domainsRouter from "./domains";
 import importRouter from "./import";
-import importWordpressRouter from "./import-wordpress";
 import studioRouter from "./studio";
 import gcalRouter from "./gcal";
 
@@ -23,7 +22,6 @@ router.use(stripeRouter);
 router.use(seoRouter);
 router.use(domainsRouter);
 router.use(importRouter);
-router.use(importWordpressRouter);
 router.use(studioRouter);
 router.use(gcalRouter);
 

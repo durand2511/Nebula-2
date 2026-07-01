@@ -16,7 +16,6 @@ import {
 } from "@workspace/api-zod";
 import { anthropic } from "@workspace/integrations-openai-ai-server";
 import { logger } from "../lib/logger";
-import { deleteProjectMedia } from "../lib/media-storage.js";
 import { checkWritePlanViolation, BOOKING_BLOCK_KEYWORDS, isNewPageOnImportedSite, detectExplicitNewPage, fitHistoryToContext, importedSiteHasEdits } from "../lib/write-plan.js";
 import { applyAction, rebuildBookingApp, ACTION_CATALOGUE, type BuilderAction } from "../lib/actions.js";
 import { seedStaffAccounts } from "../lib/studio-auth.js";
@@ -694,15 +693,8 @@ router.get("/projects/:id/preview-page", async (req, res) => {
   const page = (req.query.page as string) || "index.html";
   const sid = (req.query.sid as string) || "";
 
-  // Load ONLY what's needed. A WordPress import can have tens of thousands of files plus a multi-MB
-  // DB dump; selecting them all WITH content OOM-crashes the instance. We need the requested page's
-  // content, index.html (for the domain fallback), and the .html paths (nav routing) — nothing else.
-  const [pageRow] = await db.select().from(projectFiles)
-    .where(and(eq(projectFiles.projectId, projectId), eq(projectFiles.path, page)));
-  const [indexRow] = page === "index.html"
-    ? [pageRow]
-    : await db.select().from(projectFiles).where(and(eq(projectFiles.projectId, projectId), eq(projectFiles.path, "index.html")));
-  const file = pageRow ?? indexRow;
+  const fileRows = await db.select().from(projectFiles).where(eq(projectFiles.projectId, projectId));
+  const file = fileRows.find((f) => f.path === page) ?? fileRows.find((f) => f.path === "index.html");
   if (!file) { res.status(404).send("Page not found"); return; }
 
   let html: string = file.content;
@@ -733,7 +725,7 @@ router.get("/projects/:id/preview-page", async (req, res) => {
   // so a <base href> is injected and those stylesheets resolve through the proxy.
   // Without this the new page renders UNSTYLED ("layout heel anders en niet mooi").
   if (!domain && page !== "index.html") {
-    const indexFile = indexRow;
+    const indexFile = fileRows.find((f) => f.path === "index.html");
     if (indexFile) {
       const ibase = indexFile.content.match(/<base\s[^>]*href=["']([^"']+)["']/i);
       if (ibase) { try { domain = new URL(ibase[1]).hostname.replace(/^www\./, "").toLowerCase(); } catch {} }
@@ -791,9 +783,7 @@ router.get("/projects/:id/preview-page", async (req, res) => {
 
   // Build list of stored page keys so the navigation router can route within
   // the imported pages instead of following live links
-  const storedKeys = (await db.select({ path: projectFiles.path }).from(projectFiles)
-    .where(and(eq(projectFiles.projectId, projectId), sql`${projectFiles.path} LIKE '%.html'`)))
-    .map((f) => f.path);
+  const storedKeys = fileRows.filter((f) => f.path.endsWith(".html")).map((f) => f.path);
 
   // Scripts injected into <head> (run before any site code)
   const sidJson = JSON.stringify(sid);
@@ -3885,72 +3875,6 @@ router.post("/projects/import-url", async (req, res) => {
   }
 });
 
-// Generate a browsable, PREVIEWABLE copy of a site into an EXISTING project by crawling the live
-// site (index.html + pages). The WordPress import ships raw PHP that can't render in the browser;
-// this reuses the exact URL-import crawl so the project previews correctly + gets the full toolbar,
-// without re-importing the tens-of-thousands of raw files. URL comes from the body or is derived
-// from the project description ("Geïmporteerd van <url>" / "Imported from <url>").
-router.post("/projects/:projectId/wordpress-preview", async (req, res) => {
-  const projectId = Number(req.params.projectId);
-  if (!Number.isInteger(projectId)) { res.status(400).json({ error: "Invalid project ID" }); return; }
-  const owner = await requireOwner(req, res, projectId);
-  if (!owner) return;
-  const [proj] = await db.select().from(projects).where(eq(projects.id, projectId));
-
-  let rawUrl = String(req.body?.url ?? "").trim();
-  if (!rawUrl && proj) {
-    const m = (proj.description || "").match(/(?:van|from)\s+(https?:\/\/\S+)/i);
-    if (m) rawUrl = m[1];
-  }
-  if (!rawUrl) { res.status(400).json({ error: "Geen site-URL bekend voor dit project. Geef de URL mee." }); return; }
-  if (!/^https?:\/\//i.test(rawUrl)) rawUrl = `https://${rawUrl}`;
-
-  // Best-effort crawl. Many hosts (SiteGround/Wordfence) block datacenter IPs, so the server-side
-  // crawl can time out even though the site is fine from a browser. That's OK — the WordPress plugin
-  // sends rendered pages from INSIDE the site (no external block), so we fall back to those.
-  let crawledPages: { key: string; url: string; html: string }[] = [];
-  try {
-    const crawled = await crawlSite(rawUrl);
-    crawledPages = crawled.pages;
-  } catch (err) {
-    req.log.warn({ err, rawUrl, projectId }, "wordpress-preview crawl failed — falling back to plugin pages");
-  }
-
-  try {
-    // SLIM the project: the tens of thousands of raw PHP files + the multi-MB DB dump make EVERY
-    // operation (open/preview/publish/serve) load them into memory and OOM-crash the instance, and
-    // they can't render in a browser anyway. Keep only the rendered .html pages (from the crawl OR the
-    // plugin); the media stays on the persistent disk (project_assets is untouched).
-    let written = 0;
-    for (const p of crawledPages) {
-      const content = prepareImportedHtml(p.html, p.url);
-      const [existing] = await db.select({ id: projectFiles.id }).from(projectFiles)
-        .where(and(eq(projectFiles.projectId, projectId), eq(projectFiles.path, p.key)));
-      if (existing) await db.update(projectFiles).set({ content, language: "html", updatedAt: new Date() }).where(eq(projectFiles.id, existing.id));
-      else await db.insert(projectFiles).values({ projectId, path: p.key, content, language: "html" });
-      written++;
-    }
-    const removed = await db.delete(projectFiles)
-      .where(and(eq(projectFiles.projectId, projectId), sql`${projectFiles.path} NOT LIKE '%.html'`))
-      .returning({ id: projectFiles.id });
-
-    const [{ n: htmlPages }] = await db.select({ n: sql<number>`count(*)::int` }).from(projectFiles)
-      .where(and(eq(projectFiles.projectId, projectId), sql`${projectFiles.path} LIKE '%.html'`));
-    await db.update(projects).set({ updatedAt: new Date() }).where(eq(projects.id, projectId));
-    req.log.info({ projectId, crawled: crawledPages.length, htmlPages, removed: removed.length }, "wordpress-preview slimmed");
-
-    if (htmlPages === 0) {
-      res.json({ ok: false, pages: 0, removed: removed.length,
-        message: "Je site blokkeert onze crawler (datacenter-IP), en er staan nog geen gerenderde pagina's klaar. Draai de WordPress-export opnieuw met de nieuwste plugin — die stuurt de preview nu als EERSTE (paar seconden), daarna werkt deze knop." });
-      return;
-    }
-    res.json({ ok: true, pages: htmlPages, removed: removed.length, crawled: crawledPages.length > 0 });
-  } catch (err) {
-    req.log.error({ err, projectId }, "wordpress-preview persist failed");
-    res.status(500).json({ error: "Preview genereren mislukt." });
-  }
-});
-
 router.get("/projects/:projectId", async (req, res) => {
   const parsed = GetProjectParams.safeParse({ projectId: Number(req.params.projectId) });
   if (!parsed.success) {
@@ -3992,9 +3916,6 @@ router.delete("/projects/:projectId", async (req, res) => {
   try {
     if (!(await requireOwner(req, res, parsed.data.projectId))) return;
     await db.delete(projects).where(eq(projects.id, parsed.data.projectId));
-    // DB rows cascade (files/assets/etc.); the imported binary media on the persistent disk does
-    // NOT, so remove that folder too — otherwise a re-import under a new id leaves orphaned bytes.
-    await deleteProjectMedia(parsed.data.projectId).catch((err) => req.log.warn({ err }, "media cleanup failed"));
     res.status(204).send();
   } catch (err) {
     req.log.error({ err }, "Failed to delete project");
@@ -6076,20 +5997,8 @@ router.get("/projects/:projectId/files", async (req, res) => {
     return;
   }
   try {
-    // Only ship CONTENT for small, preview-relevant files (html/css/js/…). A WordPress import can
-    // have tens of thousands of files plus a multi-MB DB dump; returning every content would load
-    // hundreds of MB into the heap and OOM-crash the instance. Other files come back as metadata
-    // (path only) — their content lazy-loads via GET /files/:filePath when opened.
     const files = await db
-      .select({
-        id: projectFiles.id,
-        projectId: projectFiles.projectId,
-        path: projectFiles.path,
-        language: projectFiles.language,
-        createdAt: projectFiles.createdAt,
-        updatedAt: projectFiles.updatedAt,
-        content: sql<string>`CASE WHEN length(${projectFiles.content}) <= 2000000 AND ${projectFiles.path} ~* '\\.(html?|css|js|mjs|cjs|json|svg|txt|md|xml)$' THEN ${projectFiles.content} ELSE '' END`,
-      })
+      .select()
       .from(projectFiles)
       .where(eq(projectFiles.projectId, projectId))
       .orderBy(projectFiles.path);

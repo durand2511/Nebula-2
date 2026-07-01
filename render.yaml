@@ -7,24 +7,12 @@ services:
     runtime: docker
     dockerfilePath: ./Dockerfile
     branch: main
-    plan: standard           # 2 GB RAM (imports van grote sites hebben headroom nodig).
+    plan: starter            # always-on. Use "free" to try it (sleeps when idle).
     region: frankfurt
     healthCheckPath: /api/healthz
     autoDeploy: true
-    # Persistent disk for imported binary media (WP uploads, images, fonts, …). The bytes live here;
-    # project_assets rows in Postgres point at them. Grow sizeGB in the dashboard if a site is bigger.
-    disk:
-      name: media
-      mountPath: /data
-      sizeGB: 10
     envVars:
       # ── non-secret config (safe to commit) ──
-      - key: MEDIA_DIR
-        value: /data
-      # Give V8 room on the 2 GB instance (default is too low / mis-detected in containers). ~1.5 GB
-      # heap leaves headroom for off-heap Buffers. Was 400 — that CAPPED the heap and caused OOM.
-      - key: NODE_OPTIONS
-        value: "--max-old-space-size=1536"
       - key: NODE_ENV
         value: production
       - key: PLATFORM_HOST
