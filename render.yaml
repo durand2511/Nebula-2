@@ -7,7 +7,7 @@ services:
     runtime: docker
     dockerfilePath: ./Dockerfile
     branch: main
-    plan: starter            # always-on. Use "free" to try it (sleeps when idle).
+    plan: standard           # 2 GB RAM (imports van grote sites hebben headroom nodig).
     region: frankfurt
     healthCheckPath: /api/healthz
     autoDeploy: true
@@ -21,10 +21,10 @@ services:
       # ── non-secret config (safe to commit) ──
       - key: MEDIA_DIR
         value: /data
-      # Cap V8's heap so a memory-heavy import GCs instead of hard-aborting (Render status 134) and
-      # taking the whole service (booking apps!) down. Tune up if you move to a bigger instance.
+      # Give V8 room on the 2 GB instance (default is too low / mis-detected in containers). ~1.5 GB
+      # heap leaves headroom for off-heap Buffers. Was 400 — that CAPPED the heap and caused OOM.
       - key: NODE_OPTIONS
-        value: "--max-old-space-size=400"
+        value: "--max-old-space-size=1536"
       - key: NODE_ENV
         value: production
       - key: PLATFORM_HOST

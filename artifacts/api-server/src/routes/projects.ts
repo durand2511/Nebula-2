@@ -6051,8 +6051,20 @@ router.get("/projects/:projectId/files", async (req, res) => {
     return;
   }
   try {
+    // Only ship CONTENT for small, preview-relevant files (html/css/js/…). A WordPress import can
+    // have tens of thousands of files plus a multi-MB DB dump; returning every content would load
+    // hundreds of MB into the heap and OOM-crash the instance. Other files come back as metadata
+    // (path only) — their content lazy-loads via GET /files/:filePath when opened.
     const files = await db
-      .select()
+      .select({
+        id: projectFiles.id,
+        projectId: projectFiles.projectId,
+        path: projectFiles.path,
+        language: projectFiles.language,
+        createdAt: projectFiles.createdAt,
+        updatedAt: projectFiles.updatedAt,
+        content: sql<string>`CASE WHEN length(${projectFiles.content}) <= 300000 AND ${projectFiles.path} ~* '\\.(html?|css|js|mjs|cjs|json|svg|txt|md|xml)$' THEN ${projectFiles.content} ELSE '' END`,
+      })
       .from(projectFiles)
       .where(eq(projectFiles.projectId, projectId))
       .orderBy(projectFiles.path);
