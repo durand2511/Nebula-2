@@ -18,13 +18,54 @@
  * request is streamed as several parts with append:true (concatenated onto the row / appended to disk).
  */
 import { Router, json } from "express";
+import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { db, projects, projectFiles, projectAssets } from "@workspace/db";
 import { and, eq } from "drizzle-orm";
 import { getSessionUser, tokenFrom } from "../lib/platform-auth.js";
 import { writeAsset, contentTypeFor } from "../lib/media-storage.js";
+import { makeZip } from "../lib/zip.js";
 import { logger } from "../lib/logger";
 
 const router = Router();
+
+// Locate the plugin PHP shipped in the repo (present in the Docker image; wordpress-plugin/ is not
+// dockerignored). Walk up from both cwd and this module so it resolves in dev (tsx/src) and prod
+// (bundled dist at /app/artifacts/api-server/dist).
+const PLUGIN_REL = "wordpress-plugin/nebula-exporter/nebula-exporter.php";
+function findPluginFile(): string | null {
+  const starts = [process.cwd(), path.dirname(fileURLToPath(import.meta.url))];
+  for (const start of starts) {
+    let dir = start;
+    for (let i = 0; i < 8; i++) {
+      const cand = path.join(dir, PLUGIN_REL);
+      if (existsSync(cand)) return cand;
+      const parent = path.dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+    }
+  }
+  return null;
+}
+
+// Public: download the WordPress plugin as a ready-to-upload .zip (contains no secrets — it's the
+// same generic code for everyone; the user's token is entered inside WordPress, not baked in).
+router.get("/import/wordpress/plugin.zip", (_req, res) => {
+  const file = findPluginFile();
+  if (!file) { logger.error("[wp-import] plugin file not found"); res.status(500).json({ error: "Plugin-bestand niet gevonden." }); return; }
+  try {
+    const php = readFileSync(file);
+    const zip = makeZip([{ name: "nebula-exporter/nebula-exporter.php", data: php }]);
+    res.setHeader("Content-Type", "application/zip");
+    res.setHeader("Content-Disposition", 'attachment; filename="nebula-exporter.zip"');
+    res.setHeader("Content-Length", String(zip.length));
+    res.send(zip);
+  } catch (err) {
+    logger.error({ err }, "[wp-import] plugin zip failed");
+    res.status(500).json({ error: "Plugin-download mislukt." });
+  }
+});
 
 // Big ceiling: the plugin batches files so each request stays well under this, but base64 inflates
 // binary payloads ~33%, so leave generous headroom.
