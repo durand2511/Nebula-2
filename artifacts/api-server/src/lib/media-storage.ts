@@ -65,9 +65,10 @@ export function streamAsset(res: import("express").Response, abs: string): void 
   createReadStream(abs).pipe(res);
 }
 
-/** Remove every stored byte for a project (call on project delete if you ever clean disk). */
+/** Remove every stored byte for a project (called on project delete). Builds the project dir key
+ *  directly — storageKeyFor() rejects "." segments, so we can't route through it here. */
 export async function deleteProjectMedia(projectId: number): Promise<void> {
-  const abs = absPathFor(storageKeyFor(projectId, "."));
+  const abs = absPathFor(path.posix.join("projects", String(projectId)));
   await fs.rm(abs, { recursive: true, force: true });
 }
 

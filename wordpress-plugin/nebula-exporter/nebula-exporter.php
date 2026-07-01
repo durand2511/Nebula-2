@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Nebula Exporter
  * Description: Exporteert de volledige WordPress-site (alle wp-content bestanden: thema's, plugins, uploads) plus een volledige database-dump en pusht alles naar een Nebula-project, zodat de complete code in Nebula beschikbaar is.
- * Version: 1.0.2
+ * Version: 1.0.3
  * Author: Nebula
  * License: MIT
  *
@@ -171,6 +171,12 @@ class Nebula_Exporter {
             $log[] = "Bestanden verzonden: {$result}.";
         }
 
+        // 2b) Gerenderde HTML voor een echte preview in Nebula. De ruwe export bevat alleen PHP —
+        //     dat rendert niet in de browser. We halen de homepage + gepubliceerde pagina's op als
+        //     kant-en-klare HTML (index.html + <slug>.html), zodat Nebula direct een preview toont.
+        $preview = $this->send_preview_pages($api, $token, $project_id, $log);
+        if (!is_wp_error($preview)) { $total_files += $preview; }
+
         // 3) Database-dump.
         if ($include_db) {
             $sql = $this->dump_database();
@@ -188,6 +194,51 @@ class Nebula_Exporter {
         $log[] = "Klaar. Totaal opgeslagen in Nebula: {$count} bestanden.";
 
         $this->die_with_message('Export voltooid! Open project ' . $project_id . ' in Nebula.', $log, true);
+    }
+
+    // --- Gerenderde HTML voor de preview -------------------------------------
+
+    // Haalt de homepage + gepubliceerde pagina's op als kant-en-klare HTML en stuurt ze als
+    // index.html / <slug>.html, zodat Nebula een echte preview kan tonen (PHP rendert niet zelf).
+    private function send_preview_pages($api, $token, $project_id, &$log) {
+        $pages = array();
+        $home = $this->fetch_rendered(home_url('/'));
+        if ($home !== null) {
+            $pages[] = array('path' => 'index.html', 'content' => $home, 'encoding' => 'utf8');
+        }
+        $posts = get_pages(array('post_status' => 'publish', 'number' => 30));
+        if (is_array($posts)) {
+            foreach ($posts as $p) {
+                $slug = $p->post_name ? $p->post_name : ('pagina-' . $p->ID);
+                $url  = get_permalink($p->ID);
+                if (!$url) { continue; }
+                $html = $this->fetch_rendered($url);
+                if ($html === null) { continue; }
+                $pages[] = array('path' => $slug . '.html', 'content' => $html, 'encoding' => 'utf8');
+            }
+        }
+        if (empty($pages)) { $log[] = 'Preview: geen gerenderde pagina\'s opgehaald.'; return 0; }
+
+        $sent = 0;
+        foreach (array_chunk($pages, 10) as $chunk) {
+            $res = $this->api_post($api, '/api/import/wordpress/files', $token, array(
+                'projectId' => $project_id,
+                'files'     => $chunk,
+            ));
+            if (is_wp_error($res)) { $log[] = 'Preview-pagina\'s verzenden mislukt: ' . $res->get_error_message(); return $res; }
+            $sent += isset($res['written']) ? intval($res['written']) : count($chunk);
+        }
+        $log[] = "Preview-pagina's verzonden: {$sent} (index.html + pagina's).";
+        return $sent;
+    }
+
+    private function fetch_rendered($url) {
+        $resp = wp_remote_get($url, array('timeout' => 30, 'redirection' => 3, 'sslverify' => false));
+        if (is_wp_error($resp)) { return null; }
+        $code = wp_remote_retrieve_response_code($resp);
+        if ($code < 200 || $code >= 300) { return null; }
+        $body = wp_remote_retrieve_body($resp);
+        return (is_string($body) && $body !== '') ? $body : null;
     }
 
     // --- Bestanden verzamelen & verzenden ------------------------------------

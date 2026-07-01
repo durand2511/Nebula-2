@@ -212,7 +212,11 @@ export function AiEditor() {
         // Een WordPress-import ging goed → toon direct het succes-paneel met "ga verder naar de editor",
         // vóór de generieke projectkaart, zodat je de verificatie ziet en niet verdwaalt.
         <div className="w-full max-w-2xl">
-          <WordPressImportPanel wpProject={wpProject} onContinue={(id) => setLocation(`/projects/${id}`)} refresh={refresh} />
+          <WordPressImportPanel
+            wpProject={wpProject}
+            onContinue={(id) => setLocation(`/projects/${id}`)}
+            onDelete={(id) => deleteProject.mutate({ projectId: id }, { onSuccess: () => refresh() })}
+            refresh={refresh} />
         </div>
       ) : project ? (
         <div className="w-full max-w-2xl">
@@ -317,9 +321,10 @@ function TokenCard() {
 }
 
 // ── WordPress-import: plugin downloaden, gegevens kopiëren, verifiëren en door naar de chat ──
-function WordPressImportPanel({ wpProject, onContinue, refresh }: {
+function WordPressImportPanel({ wpProject, onContinue, onDelete, refresh }: {
   wpProject: { id: number; name: string; fileCount: number } | null;
   onContinue: (id: number) => void;
+  onDelete?: (id: number) => void;
   refresh: () => void;
 }) {
   const [checking, setChecking] = useState(false);
@@ -348,6 +353,14 @@ function WordPressImportPanel({ wpProject, onContinue, refresh }: {
         <div className="flex items-center gap-2 text-emerald-700 font-semibold"><CheckCircle2 className="h-5 w-5" /> WordPress-import geslaagd</div>
         <p className="text-sm text-emerald-800/80 mt-1">Project <span className="font-semibold">{wpProject.name}</span> — {wpProject.fileCount} bestanden ontvangen. Dit is je eigen aparte project, dus het loopt niet door elkaar.</p>
         <Button className="mt-4 w-full h-11 font-bold" onClick={() => onContinue(wpProject.id)} data-testid="button-wp-continue">Ga verder naar de chat <ArrowRight className="ml-2 h-5 w-5" /></Button>
+        {onDelete && (
+          <button
+            className="mt-3 w-full text-center text-xs text-red-600 hover:text-red-700 hover:underline inline-flex items-center justify-center gap-1"
+            onClick={() => { if (window.confirm(`De WordPress-import "${wpProject.name}" verwijderen? Alle bestanden en media gaan definitief weg.`)) onDelete(wpProject.id); }}
+            data-testid="button-wp-delete">
+            <Trash2 className="h-3.5 w-3.5" /> Deze import verwijderen
+          </button>
+        )}
       </div>
     );
   }

@@ -16,6 +16,7 @@ import {
 } from "@workspace/api-zod";
 import { anthropic } from "@workspace/integrations-openai-ai-server";
 import { logger } from "../lib/logger";
+import { deleteProjectMedia } from "../lib/media-storage.js";
 import { checkWritePlanViolation, BOOKING_BLOCK_KEYWORDS, isNewPageOnImportedSite, detectExplicitNewPage, fitHistoryToContext, importedSiteHasEdits } from "../lib/write-plan.js";
 import { applyAction, rebuildBookingApp, ACTION_CATALOGUE, type BuilderAction } from "../lib/actions.js";
 import { seedStaffAccounts } from "../lib/studio-auth.js";
@@ -3916,6 +3917,9 @@ router.delete("/projects/:projectId", async (req, res) => {
   try {
     if (!(await requireOwner(req, res, parsed.data.projectId))) return;
     await db.delete(projects).where(eq(projects.id, parsed.data.projectId));
+    // DB rows cascade (files/assets/etc.); the imported binary media on the persistent disk does
+    // NOT, so remove that folder too — otherwise a re-import under a new id leaves orphaned bytes.
+    await deleteProjectMedia(parsed.data.projectId).catch((err) => req.log.warn({ err }, "media cleanup failed"));
     res.status(204).send();
   } catch (err) {
     req.log.error({ err }, "Failed to delete project");
