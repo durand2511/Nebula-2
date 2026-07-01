@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Nebula Exporter
  * Description: Exporteert de volledige WordPress-site (alle wp-content bestanden + database + gerenderde preview) naar een Nebula-project. Browser-gestuurd met voortgangsbalk: honderden kleine stapjes i.p.v. één lange request, dus het kan niet meer time-outen.
- * Version: 2.1.0
+ * Version: 2.2.0
  * Author: Nebula
  * License: MIT
  *
@@ -227,7 +227,7 @@ class Nebula_Exporter {
             set_transient(self::MANIFEST, $files, 24 * HOUR_IN_SECONDS);
             $job = array(
                 'project_id' => intval($init['projectId']),
-                'phase' => 'files', 'cursor' => 0, 'total' => count($files), 'sent' => 0, 'skipped' => 0,
+                'phase' => 'preview', 'cursor' => 0, 'total' => count($files), 'sent' => 0, 'skipped' => 0,
                 'include_db' => $include_db,
                 'db_started' => false, 'db_path' => '', 'db_size' => 0, 'db_offset' => 0,
                 'prev_started' => false, 'prev_urls' => array(), 'prev_cursor' => 0,
@@ -266,7 +266,7 @@ class Nebula_Exporter {
 
     private function step_files($api, $token, &$job) {
         $files = get_transient(self::MANIFEST);
-        if (!is_array($files)) { $job['phase'] = $job['include_db'] ? 'db' : 'preview'; $job['msg'] = 'Bestanden klaar.'; return true; }
+        if (!is_array($files)) { $job['phase'] = $job['include_db'] ? 'db' : 'finalize'; $job['msg'] = 'Bestanden klaar.'; return true; }
         $root = untrailingslashit(ABSPATH);
         $pid  = $job['project_id'];
         $n = count($files); $i = $job['cursor'];
@@ -306,7 +306,7 @@ class Nebula_Exporter {
             $job['sent'] += count($batch);
         }
         $job['cursor'] = $i; $job['skipped'] += $skipped;
-        if ($i >= $n) { $job['phase'] = $job['include_db'] ? 'db' : 'preview'; }
+        if ($i >= $n) { $job['phase'] = $job['include_db'] ? 'db' : 'finalize'; }
         $job['msg'] = "Bestanden: {$job['sent']} / {$job['total']}";
         return true;
     }
@@ -316,13 +316,13 @@ class Nebula_Exporter {
             $sql = $this->dump_database();
             $tmp = wp_tempnam('nebula-db');
             if (!$tmp || file_put_contents($tmp, $sql) === false) {
-                $job['phase'] = 'preview'; $job['msg'] = 'Database overgeslagen (kon tijdelijk bestand niet schrijven).'; return true;
+                $job['phase'] = 'finalize'; $job['msg'] = 'Database overgeslagen (kon tijdelijk bestand niet schrijven).'; return true;
             }
             $job['db_started'] = true; $job['db_path'] = $tmp; $job['db_size'] = strlen($sql); $job['db_offset'] = 0;
             unset($sql);
         }
         $size = $job['db_size'];
-        if ($size == 0 || empty($job['db_path']) || !file_exists($job['db_path'])) { $job['phase'] = 'preview'; $job['msg'] = 'Database klaar.'; return true; }
+        if ($size == 0 || empty($job['db_path']) || !file_exists($job['db_path'])) { $job['phase'] = 'finalize'; $job['msg'] = 'Database klaar.'; return true; }
 
         $off = $job['db_offset'];
         $fh = fopen($job['db_path'], 'rb');
@@ -338,7 +338,7 @@ class Nebula_Exporter {
         if (is_wp_error($r)) { return $r; }
 
         $job['db_offset'] = $new_off;
-        if ($new_off >= $size) { @unlink($job['db_path']); $job['db_path'] = ''; $job['phase'] = 'preview'; $job['msg'] = 'Database verzonden (' . size_format($size) . ').'; }
+        if ($new_off >= $size) { @unlink($job['db_path']); $job['db_path'] = ''; $job['phase'] = 'finalize'; $job['msg'] = 'Database verzonden (' . size_format($size) . ').'; }
         else { $job['msg'] = 'Database versturen… ' . size_format($new_off) . ' / ' . size_format($size); }
         return true;
     }
@@ -351,7 +351,7 @@ class Nebula_Exporter {
             $job['prev_urls'] = array_values(array_unique($urls)); $job['prev_cursor'] = 0; $job['prev_started'] = true;
         }
         $urls = $job['prev_urls']; $c = $job['prev_cursor']; $n = count($urls);
-        if ($c >= $n) { $job['phase'] = 'finalize'; $job['msg'] = 'Preview klaar.'; return true; }
+        if ($c >= $n) { $job['phase'] = 'files'; $job['msg'] = 'Preview klaar.'; return true; }
 
         $html = $this->fetch_rendered($urls[$c]);
         if ($html !== null) {
@@ -362,7 +362,7 @@ class Nebula_Exporter {
             $job['sent']++;
         }
         $job['prev_cursor'] = $c + 1;
-        if ($job['prev_cursor'] >= $n) { $job['phase'] = 'finalize'; }
+        if ($job['prev_cursor'] >= $n) { $job['phase'] = 'files'; }
         $job['msg'] = 'Preview ophalen… ' . $job['prev_cursor'] . ' / ' . $n;
         return true;
     }
@@ -378,9 +378,10 @@ class Nebula_Exporter {
 
     private function progress($job, $msg) {
         $pct = 0;
-        if ($job['phase'] === 'files')       { $pct = ($job['total'] > 0) ? ($job['sent'] / max(1, $job['total'])) * 80 : 5; }
-        elseif ($job['phase'] === 'db')      { $pct = 84; }
-        elseif ($job['phase'] === 'preview') { $pct = 92; }
+        // Volgorde: preview (eerst, klein) → bestanden (bulk) → database → afronden.
+        if ($job['phase'] === 'preview')     { $pct = 5; }
+        elseif ($job['phase'] === 'files')   { $pct = ($job['total'] > 0) ? 8 + ($job['sent'] / max(1, $job['total'])) * 80 : 8; }
+        elseif ($job['phase'] === 'db')      { $pct = 90; }
         elseif ($job['phase'] === 'finalize'){ $pct = 97; }
         elseif ($job['phase'] === 'done')    { $pct = 100; }
         return array(
@@ -526,7 +527,12 @@ class Nebula_Exporter {
     }
 
     private function fetch_rendered($url) {
-        $resp = wp_remote_get($url, array('timeout' => 8, 'redirection' => 2, 'sslverify' => false));
+        $resp = wp_remote_get($url, array(
+            'timeout' => 15, 'redirection' => 2, 'sslverify' => false,
+            // Browser-UA zodat Wordfence/SiteGround de eigen render-fetch niet met 403 blokkeert.
+            'user-agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+            'headers'    => array('Accept' => 'text/html,application/xhtml+xml'),
+        ));
         if (is_wp_error($resp)) { return null; }
         $code = wp_remote_retrieve_response_code($resp);
         if ($code < 200 || $code >= 300) { return null; }

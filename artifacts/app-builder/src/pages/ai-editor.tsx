@@ -356,8 +356,9 @@ function WordPressImportPanel({ wpProject, onContinue, onDelete, refresh }: {
         body: "{}",
       });
       const d = await r.json().catch(() => ({}));
-      if (r.ok) setPreviewMsg(`✅ Klaar! ${d.pages} pagina's opgehaald, project opgeschoond. Ga naar de chat — je ziet nu de echte preview.`);
-      else setPreviewMsg(d.error || "Preview genereren mislukt.");
+      if (r.ok && d.ok) setPreviewMsg(`✅ Klaar! ${d.pages} pagina's, project opgeschoond. Ga naar de chat — je ziet nu de echte preview.`);
+      else if (r.ok && d.message) setPreviewMsg("⚠️ " + d.message);
+      else setPreviewMsg(d.error || d.message || "Preview genereren mislukt.");
     } catch { setPreviewMsg("Preview genereren mislukt."); }
     finally { setPreviewBusy(false); }
   };

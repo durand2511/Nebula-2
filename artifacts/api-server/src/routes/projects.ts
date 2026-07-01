@@ -3905,28 +3905,24 @@ router.post("/projects/:projectId/wordpress-preview", async (req, res) => {
   if (!rawUrl) { res.status(400).json({ error: "Geen site-URL bekend voor dit project. Geef de URL mee." }); return; }
   if (!/^https?:\/\//i.test(rawUrl)) rawUrl = `https://${rawUrl}`;
 
-  let crawled: { pages: { key: string; url: string; html: string }[]; finalUrl: string };
+  // Best-effort crawl. Many hosts (SiteGround/Wordfence) block datacenter IPs, so the server-side
+  // crawl can time out even though the site is fine from a browser. That's OK — the WordPress plugin
+  // sends rendered pages from INSIDE the site (no external block), so we fall back to those.
+  let crawledPages: { key: string; url: string; html: string }[] = [];
   try {
-    crawled = await crawlSite(rawUrl);
+    const crawled = await crawlSite(rawUrl);
+    crawledPages = crawled.pages;
   } catch (err) {
-    req.log.warn({ err, rawUrl, projectId }, "wordpress-preview crawl failed");
-    res.status(400).json({ error: err instanceof Error ? err.message : "Kon de website niet ophalen." });
-    return;
+    req.log.warn({ err, rawUrl, projectId }, "wordpress-preview crawl failed — falling back to plugin pages");
   }
-  const homepage = crawled.pages.find((p) => p.key === "index.html") ?? crawled.pages[0];
-  if (!homepage) { res.status(422).json({ error: "Geen pagina's gevonden om te previewen." }); return; }
 
   try {
-    // SLIM the project first: the tens of thousands of raw PHP files + the multi-MB DB dump make
-    // EVERY operation (open/preview/publish/serve) load them into memory and OOM-crash the instance.
-    // They can't render or run in the browser anyway. Keep only the rendered .html pages we're about
-    // to write; the media stays on the persistent disk (project_assets is untouched).
-    const removed = await db.delete(projectFiles)
-      .where(and(eq(projectFiles.projectId, projectId), sql`${projectFiles.path} NOT LIKE '%.html'`))
-      .returning({ id: projectFiles.id });
-
+    // SLIM the project: the tens of thousands of raw PHP files + the multi-MB DB dump make EVERY
+    // operation (open/preview/publish/serve) load them into memory and OOM-crash the instance, and
+    // they can't render in a browser anyway. Keep only the rendered .html pages (from the crawl OR the
+    // plugin); the media stays on the persistent disk (project_assets is untouched).
     let written = 0;
-    for (const p of crawled.pages) {
+    for (const p of crawledPages) {
       const content = prepareImportedHtml(p.html, p.url);
       const [existing] = await db.select({ id: projectFiles.id }).from(projectFiles)
         .where(and(eq(projectFiles.projectId, projectId), eq(projectFiles.path, p.key)));
@@ -3934,9 +3930,21 @@ router.post("/projects/:projectId/wordpress-preview", async (req, res) => {
       else await db.insert(projectFiles).values({ projectId, path: p.key, content, language: "html" });
       written++;
     }
+    const removed = await db.delete(projectFiles)
+      .where(and(eq(projectFiles.projectId, projectId), sql`${projectFiles.path} NOT LIKE '%.html'`))
+      .returning({ id: projectFiles.id });
+
+    const [{ n: htmlPages }] = await db.select({ n: sql<number>`count(*)::int` }).from(projectFiles)
+      .where(and(eq(projectFiles.projectId, projectId), sql`${projectFiles.path} LIKE '%.html'`));
     await db.update(projects).set({ updatedAt: new Date() }).where(eq(projects.id, projectId));
-    req.log.info({ projectId, pages: written, removed: removed.length, finalUrl: crawled.finalUrl }, "wordpress-preview generated + slimmed");
-    res.json({ ok: true, pages: written, removed: removed.length });
+    req.log.info({ projectId, crawled: crawledPages.length, htmlPages, removed: removed.length }, "wordpress-preview slimmed");
+
+    if (htmlPages === 0) {
+      res.json({ ok: false, pages: 0, removed: removed.length,
+        message: "Je site blokkeert onze crawler (datacenter-IP), en er staan nog geen gerenderde pagina's klaar. Draai de WordPress-export opnieuw met de nieuwste plugin — die stuurt de preview nu als EERSTE (paar seconden), daarna werkt deze knop." });
+      return;
+    }
+    res.json({ ok: true, pages: htmlPages, removed: removed.length, crawled: crawledPages.length > 0 });
   } catch (err) {
     req.log.error({ err, projectId }, "wordpress-preview persist failed");
     res.status(500).json({ error: "Preview genereren mislukt." });
