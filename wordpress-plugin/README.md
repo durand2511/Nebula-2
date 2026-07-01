@@ -14,14 +14,19 @@ code in Nebula beschikbaar en bewerkbaar is.
 
 1. Ga naar **Extra → Nebula Export**.
 2. Vul in en sla op:
-   - **Nebula API-URL** — de basis-URL van je Nebula-server (bijv. `https://jouw-nebula.onrender.com`), **zonder** `/api`.
-   - **Nebula-token** — je Nebula-sessietoken. Log in op de Nebula-console; het token staat in
-     `localStorage` (de sleutel waarmee je bent ingelogd). Kopieer die waarde.
-3. Kies wat je meestuurt (bestanden / uploads / database) en klik **Exporteren naar Nebula**.
+   - **Nebula API-URL** — de basis-URL van je Nebula-server (bijv. `https://www.nebulabookings.com`), **zonder** `/api`. Kopieer 'm het liefst uit het WordPress-paneel in Nebula.
+   - **Nebula-token** — kopieer het uit datzelfde paneel in Nebula (Kopieer-knop).
+3. Kies wat je meestuurt (uploads / database) en klik **Exporteren naar Nebula**.
 
-De plugin maakt een nieuw project aan onder jouw Nebula-account en stuurt in batches:
+De export wordt **vanuit de browser aangestuurd** met een **voortgangsbalk**: honderden kleine
+stapjes achter elkaar (bestanden → database → preview → afronden), elk een korte AJAX-call. Zo kan
+geen enkele lange request time-outen. Valt er onderweg iets weg, dan retryt de plugin automatisch;
+klik je opnieuw op Exporteren, dan vult hij idempotent aan.
+
+Er wordt een nieuw project aangemaakt onder jouw Nebula-account met:
 - alle bestanden uit `wp-content` + de PHP-bestanden in de WordPress-root,
-- een `wordpress-database.sql` met een volledige dump (`SHOW CREATE TABLE` + `INSERT`s).
+- een `wordpress-database.sql` met een volledige dump (`SHOW CREATE TABLE` + `INSERT`s),
+- gerenderde `index.html` + pagina's voor een echte preview.
 
 ## Wat er gebeurt aan de Nebula-kant
 
@@ -48,9 +53,10 @@ juiste content-type en een lange cache-header.
   breid dan `$targets` in `send_files()` uit.
 - **Geheimen**: `wp-config.php` wordt gesaniteerd (DB-wachtwoord + salts worden verwijderd) voordat
   het verstuurd wordt.
-- **Grote sites**: bestanden > 80 MB worden overgeslagen; bestanden > ~4 MB worden in stukken gestuurd
-  (chunked/append). Media landt op de persistent disk, dus de uploads-map belast Postgres niet meer —
-  maar houd de disk-grootte in de gaten (standaard 10 GB in `render.yaml`, ophoogbaar in het dashboard).
+- **Grote sites**: rommel wordt overgeslagen (cache, Wordfence-logs, backups, `.zip/.gz/.log`, `.git`,
+  `node_modules`); bestanden > 50 MB worden overgeslagen; grote bestanden gaan gechunkt. Media landt op
+  de persistent disk, dus de uploads-map belast Postgres niet — houd wel de disk-grootte in de gaten
+  (standaard 10 GB in `render.yaml`, ophoogbaar in het dashboard).
 - **Disk vereist**: media-serving werkt alleen als de Render-service de persistent disk op `/data` heeft
   (staat in `render.yaml`) of als `MEDIA_DIR` naar een schrijfbare map wijst. Lokaal valt hij terug op
   `.media-data/` in de repo.
