@@ -180,20 +180,24 @@ router.post("/import/wordpress/files", bigJson, async (req, res) => {
         }
 
         const language = inferLanguage(path);
+        // Postgres text columns can't hold NUL bytes (\u0000). Some "text" files (Wordfence wflogs,
+        // object-cache.php, …) carry binary tails after __halt_compiler(); strip NUL so the insert
+        // never fails on them.
+        const safe = content.replace(/\u0000/g, "");
         const [existing] = await db.select({ id: projectFiles.id, content: projectFiles.content })
           .from(projectFiles)
           .where(and(eq(projectFiles.projectId, projectId), eq(projectFiles.path, path)));
 
         if (existing && append) {
           await db.update(projectFiles)
-            .set({ content: existing.content + content, language, updatedAt: new Date() })
+            .set({ content: existing.content + safe, language, updatedAt: new Date() })
             .where(eq(projectFiles.id, existing.id));
         } else if (existing) {
           await db.update(projectFiles)
-            .set({ content, language, updatedAt: new Date() })
+            .set({ content: safe, language, updatedAt: new Date() })
             .where(eq(projectFiles.id, existing.id));
         } else {
-          await db.insert(projectFiles).values({ projectId, path, content, language });
+          await db.insert(projectFiles).values({ projectId, path, content: safe, language });
         }
         written++;
       } catch (fileErr) {

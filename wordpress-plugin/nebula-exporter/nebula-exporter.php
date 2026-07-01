@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Nebula Exporter
  * Description: Exporteert de volledige WordPress-site (alle wp-content bestanden: thema's, plugins, uploads) plus een volledige database-dump en pusht alles naar een Nebula-project, zodat de complete code in Nebula beschikbaar is.
- * Version: 1.0.3
+ * Version: 1.0.4
  * Author: Nebula
  * License: MIT
  *
@@ -20,10 +20,10 @@ if (!defined('ABSPATH')) {
 class Nebula_Exporter {
     const OPT_KEY   = 'nebula_exporter_settings';
     const NONCE     = 'nebula_exporter_run';
-    // Houd elke request ruim onder de 60mb-limiet van het Nebula-endpoint (base64 blaast ~33% op).
-    const BATCH_BYTES = 6000000;      // ~6 MB ruwe inhoud per batch
-    const CHUNK_BYTES = 4000000;      // bestanden groter dan dit worden in stukken van ~4 MB gestuurd
-    const MAX_FILE_BYTES = 80000000;  // bestanden groter dan 80 MB worden overgeslagen (te groot om zinvol op te slaan)
+    // Kleine requests: veilig onder de body-limiet én laag geheugengebruik op de server (voorkomt 502).
+    const BATCH_BYTES = 2500000;      // ~2,5 MB ruwe inhoud per batch
+    const CHUNK_BYTES = 2500000;      // bestanden groter dan dit worden in stukken van ~2,5 MB gestuurd
+    const MAX_FILE_BYTES = 50000000;  // bestanden groter dan 50 MB worden overgeslagen (backups/video's)
 
     public function __construct() {
         add_action('admin_menu', array($this, 'menu'));
@@ -171,12 +171,6 @@ class Nebula_Exporter {
             $log[] = "Bestanden verzonden: {$result}.";
         }
 
-        // 2b) Gerenderde HTML voor een echte preview in Nebula. De ruwe export bevat alleen PHP —
-        //     dat rendert niet in de browser. We halen de homepage + gepubliceerde pagina's op als
-        //     kant-en-klare HTML (index.html + <slug>.html), zodat Nebula direct een preview toont.
-        $preview = $this->send_preview_pages($api, $token, $project_id, $log);
-        if (!is_wp_error($preview)) { $total_files += $preview; }
-
         // 3) Database-dump.
         if ($include_db) {
             $sql = $this->dump_database();
@@ -187,6 +181,12 @@ class Nebula_Exporter {
             $log[] = 'Database-dump verzonden (wordpress-database.sql, ' . size_format(strlen($sql)) . ').';
             $total_files += 1;
         }
+
+        // 3b) Gerenderde HTML voor een echte preview (index.html + <slug>.html). LAATST + tijd-begrensd:
+        //     PHP rendert niet in de browser, dus we halen de pagina's op. Best-effort — als het
+        //     misgaat of te lang duurt is de rest van de export al binnen.
+        $preview = $this->send_preview_pages($api, $token, $project_id, $log);
+        if (!is_wp_error($preview)) { $total_files += $preview; }
 
         // 4) Afronden.
         $fin = $this->api_post($api, '/api/import/wordpress/finalize', $token, array('projectId' => $project_id));
@@ -201,14 +201,17 @@ class Nebula_Exporter {
     // Haalt de homepage + gepubliceerde pagina's op als kant-en-klare HTML en stuurt ze als
     // index.html / <slug>.html, zodat Nebula een echte preview kan tonen (PHP rendert niet zelf).
     private function send_preview_pages($api, $token, $project_id, &$log) {
+        $deadline = time() + 45; // harde tijdslimiet: nooit langer dan ~45s aan preview besteden
         $pages = array();
         $home = $this->fetch_rendered(home_url('/'));
         if ($home !== null) {
             $pages[] = array('path' => 'index.html', 'content' => $home, 'encoding' => 'utf8');
         }
-        $posts = get_pages(array('post_status' => 'publish', 'number' => 30));
+        // Max 10 gepubliceerde pagina's — genoeg voor een goede preview zonder de export te vertragen.
+        $posts = get_pages(array('post_status' => 'publish', 'number' => 10));
         if (is_array($posts)) {
             foreach ($posts as $p) {
+                if (time() > $deadline) { $log[] = 'Preview: tijdslimiet bereikt, rest overgeslagen.'; break; }
                 $slug = $p->post_name ? $p->post_name : ('pagina-' . $p->ID);
                 $url  = get_permalink($p->ID);
                 if (!$url) { continue; }
@@ -233,7 +236,7 @@ class Nebula_Exporter {
     }
 
     private function fetch_rendered($url) {
-        $resp = wp_remote_get($url, array('timeout' => 30, 'redirection' => 3, 'sslverify' => false));
+        $resp = wp_remote_get($url, array('timeout' => 8, 'redirection' => 2, 'sslverify' => false));
         if (is_wp_error($resp)) { return null; }
         $code = wp_remote_retrieve_response_code($resp);
         if ($code < 200 || $code >= 300) { return null; }
@@ -300,6 +303,9 @@ class Nebula_Exporter {
                 $rel = $this->rel_path($abs, $root);
                 if ($rel === null) {
                     continue;
+                }
+                if ($this->is_excluded($rel)) {
+                    continue; // rommel: cache, Wordfence-logs, backups, .git, node_modules …
                 }
                 $size = @filesize($abs);
                 if ($size === false || $size > self::MAX_FILE_BYTES) {
@@ -402,13 +408,35 @@ class Nebula_Exporter {
     }
 
     private function is_binary($path, $content) {
-        $ext = strtolower(pathinfo($path, PATHINFO_EXTENSION));
-        $text_ext = array('php','html','htm','css','scss','js','mjs','cjs','json','svg','ts','tsx','jsx','md','txt','xml','yml','yaml','sql','ini','csv','po','pot');
-        if (in_array($ext, $text_ext, true)) {
-            return false;
+        // NUL-byte ergens vooraan → ALTIJD binair, ook bij een 'tekst'-extensie. Wordfence-logs en
+        // object-cache.php hebben een .php-extensie maar binaire data ná __halt_compiler(); Postgres
+        // kan die NUL-bytes niet als tekst opslaan, dus moeten ze als bestand (base64) de deur uit.
+        if (strpos(substr($content, 0, 16384), "\0") !== false) {
+            return true;
         }
-        // Heuristiek: NUL-byte in de eerste 8 KB → binair.
-        return strpos(substr($content, 0, 8192), "\0") !== false;
+        $ext = strtolower(pathinfo($path, PATHINFO_EXTENSION));
+        $text_ext = array('php','html','htm','css','scss','js','mjs','cjs','json','svg','ts','tsx','jsx','md','txt','xml','yml','yaml','sql','ini','csv','po','pot','htaccess','conf','map');
+        return !in_array($ext, $text_ext, true);
+    }
+
+    // Rommel die we NOOIT meesturen: cache, Wordfence-logs, backups, version control, dependencies.
+    // Dit voorkomt kapotte inserts (NUL-bytes) én dat de export een grote site laat crashen (502).
+    private function is_excluded($rel) {
+        $rel = strtolower($rel);
+        $dirs = array(
+            'wp-content/cache/', 'wp-content/wflogs/', 'wp-content/upgrade/',
+            'wp-content/uploads/cache/', 'wp-content/ai1wm-backups/', 'wp-content/updraft/',
+            'wp-content/backups-dup-lite/', 'wp-content/uploads/backupbuddy_backups/',
+            '.git/', 'node_modules/', 'wp-content/uploads/wp-migrate-db/',
+        );
+        foreach ($dirs as $d) {
+            if (strpos($rel, $d) !== false) { return true; }
+        }
+        // drop-in caches + losse backup/archief/log-bestanden.
+        if (strpos($rel, 'object-cache.php') !== false || strpos($rel, 'advanced-cache.php') !== false) { return true; }
+        if (preg_match('#(^|/)backup[^/]*$#', $rel)) { return true; }
+        if (preg_match('#\.(zip|tar|gz|tgz|bz2|log|sql\.gz)$#', $rel)) { return true; }
+        return false;
     }
 
     // Verwijder DB-wachtwoorden en salts uit wp-config voordat we het versturen.
