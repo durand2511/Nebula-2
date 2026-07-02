@@ -98,13 +98,6 @@ export async function serveProjectSite(projectId: number, req: Request, res: Res
       const st = `<style data-nebula-fonts>${fontBlob}</style>`;
       content = /<\/head>/i.test(content) ? content.replace(/<\/head>/i, st + "</head>") : content.replace(/<head[^>]*>/i, (m) => m + st);
     }
-    // Self-contained imported CSS (survives the domain move): inject after fonts so it wins over the
-    // original cross-origin <link> stylesheets (which 404 once the domain points at Nebula).
-    const cssBlob = rows.find((r) => r.path === ".nebula-imported.css")?.content;
-    if (cssBlob) {
-      const st = `<style data-nebula-imported-css>${cssBlob}</style>`;
-      content = /<\/head>/i.test(content) ? content.replace(/<\/head>/i, st + "</head>") : content.replace(/<head[^>]*>/i, (m) => m + st);
-    }
     // Free (unsubscribed) sites carry a non-removable Nebula badge bottom-right.
     if (!(await ownerSubscribed(projectId))) {
       content = /<\/body>/i.test(content) ? content.replace(/<\/body>/i, NEBULA_BADGE + "</body>") : content + NEBULA_BADGE;

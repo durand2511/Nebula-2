@@ -1035,7 +1035,6 @@ document.addEventListener("submit",function(e){
   // Self-contained fonts: inject the stored @font-face blob (data: URIs) at serve time. It lives in
   // its OWN file, so editing a page never removes it — the cross-origin "tofu" glyphs stay fixed.
   html = injectSelfContainedFonts(html, fileRows.find((f) => f.path === NEBULA_FONTS_PATH)?.content);
-  html = injectImportedCss(html, fileRows.find((f) => f.path === NEBULA_CSS_PATH)?.content);
 
   res.setHeader("Content-Type", "text/html; charset=utf-8");
   res.setHeader("Cache-Control", "no-store");
@@ -3916,62 +3915,6 @@ export function injectSelfContainedFonts(html: string, fontBlob: string | undefi
     : html.replace(/<head[^>]*>/i, (m) => m + tag);
 }
 
-// ── Self-contained CSS: download the imported site's linked stylesheets and inline them ──────
-// After the domain moves to Nebula (or when the origin blocks our IP), the page's <link> stylesheets
-// on the original domain 404, so the copy renders unstyled. We fetch each stylesheet ONCE (Bright Data
-// when needed), absolutize its url() references + inline its fonts, and store the combined CSS in one
-// ".nebula-imported.css" file that the preview + published site inject at serve time (survives edits).
-export const NEBULA_CSS_PATH = ".nebula-imported.css";
-function absolutizeCssUrls(css: string, cssUrl: string): string {
-  return css.replace(/url\(\s*(['"]?)([^)'"]+)\1\s*\)/gi, (full: string, q: string, raw: string) => {
-    const t = String(raw).trim();
-    if (!t || t.startsWith("data:") || /^https?:\/\//i.test(t) || t.startsWith("#")) return full;
-    try { return `url(${q}${new URL(t, cssUrl).toString()}${q})`; } catch { return full; }
-  });
-}
-async function inlineCssForProject(projectId: number): Promise<void> {
-  const files = await db.select().from(projectFiles)
-    .where(and(eq(projectFiles.projectId, projectId), sql`${projectFiles.path} LIKE '%.html'`));
-  const hrefs = new Set<string>();
-  for (const f of files) {
-    for (const tag of f.content.match(/<link\b[^>]*>/gi) || []) {
-      if (!/\brel=["']?stylesheet/i.test(tag) || /\bmedia=["']?print/i.test(tag)) continue;
-      const hm = tag.match(/\bhref=["']([^"']+)["']/i);
-      if (hm && /^https?:\/\//i.test(hm[1])) hrefs.add(hm[1]);
-    }
-  }
-  if (!hrefs.size) return;
-  const fontCache = new Map<string, string>();
-  const parts: string[] = [];
-  let count = 0;
-  for (const href of hrefs) {
-    if (count >= 40) break; // safety cap: never crawl an unbounded number of stylesheets
-    let buf: Buffer | null = null;
-    try { buf = await fetchImportAsset(href); } catch { /* skip */ }
-    if (!buf || buf.length > 2_000_000) continue;
-    let css = buf.toString("utf8");
-    css = absolutizeCssUrls(css, href);
-    try { css = await inlineFontsInCss(css, href, fontCache); } catch { /* keep un-inlined */ }
-    parts.push(`/* imported: ${href} */\n${css}`);
-    count++;
-  }
-  const blob = parts.join("\n\n");
-  if (!blob.trim()) return;
-  const [existing] = await db.select({ id: projectFiles.id }).from(projectFiles)
-    .where(and(eq(projectFiles.projectId, projectId), eq(projectFiles.path, NEBULA_CSS_PATH)));
-  if (existing) await db.update(projectFiles).set({ content: blob, updatedAt: new Date() }).where(eq(projectFiles.id, existing.id));
-  else await db.insert(projectFiles).values({ projectId, path: NEBULA_CSS_PATH, content: blob, language: "css" });
-  logger.info({ projectId, sheets: count, bytes: blob.length }, "[import] self-contained CSS stored");
-}
-/** Inject the stored imported-CSS blob at serve time (after fonts), so imported styling survives edits. */
-export function injectImportedCss(html: string, cssBlob: string | undefined): string {
-  if (!cssBlob) return html;
-  const tag = `<style data-nebula-imported-css>${cssBlob}</style>`;
-  return /<\/head>/i.test(html)
-    ? html.replace(/<\/head>/i, tag + "</head>")
-    : html.replace(/<head[^>]*>/i, (m) => m + tag);
-}
-
 // Import a live website by URL and seed a new project with it so the user can
 // edit it with AI. Registered before "/projects/:projectId" — though that route
 // is GET/DELETE only, this keeps the more specific path unambiguous.
@@ -4063,9 +4006,6 @@ router.post("/projects/import-url", async (req, res) => {
     // Make fonts self-contained in the BACKGROUND (fetch + inline as data: URIs) so the import
     // response stays fast and the preview loses its cross-origin "tofu" glyphs after a refresh.
     void inlineFontsForProject(project.id).catch((err) => req.log.warn({ err, projectId: project.id }, "[import] background font inline failed"));
-    // Also make the imported CSS self-contained (download linked stylesheets → one local file) so the
-    // copy keeps its styling even after the domain is pointed at Nebula.
-    void inlineCssForProject(project.id).catch((err) => req.log.warn({ err, projectId: project.id }, "[import] background css inline failed"));
 
     res.status(201).json({
       ...project,
