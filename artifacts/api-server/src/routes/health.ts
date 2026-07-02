@@ -8,4 +8,12 @@ router.get("/healthz", (_req, res) => {
   res.json(data);
 });
 
+// Diagnose: is de import-proxy (IMPORT_PROXY_URL) door Render opgepikt? Toont GEEN wachtwoord.
+router.get("/healthz/import-proxy", (_req, res) => {
+  const url = process.env.IMPORT_PROXY_URL || "";
+  let host = "";
+  try { if (url) host = new URL(url).host; } catch { host = "ongeldige-url"; }
+  res.json({ proxySet: !!url, host });
+});
+
 export default router;
