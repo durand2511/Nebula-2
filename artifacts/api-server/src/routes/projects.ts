@@ -201,36 +201,35 @@ async function fetchWebsiteHtml(rawUrl: string): Promise<{ html: string; finalUr
   let current = rawUrl;
   for (let hop = 0; hop <= IMPORT_MAX_REDIRECTS; hop++) {
     const safe = await assertSafeUrl(current);
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), IMPORT_FETCH_TIMEOUT_MS);
-    const opts = {
-      redirect: "manual" as const,
-      signal: controller.signal,
-      headers: {
-        // Present as a real browser — many sites return 403 to non-browser
-        // User-Agents / missing browser headers (e.g. Cloudflare bot checks).
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        Accept:
-          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9,nl;q=0.8",
-        "Upgrade-Insecure-Requests": "1",
-      },
+    const headers = {
+      // Present as a real browser — many sites return 403 to non-browser
+      // User-Agents / missing browser headers (e.g. Cloudflare bot checks).
+      "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+      Accept:
+        "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+      "Accept-Language": "en-US,en;q=0.9,nl;q=0.8",
+      "Upgrade-Insecure-Requests": "1",
+    };
+    // Each attempt gets its OWN timeout controller — otherwise a hanging direct fetch would use up the
+    // shared timer and the proxy retry could never run.
+    const attempt = async (dispatcher: Agent | ProxyAgent, timeoutMs: number) => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      try { return await safeFetch(safe.toString(), { redirect: "manual" as const, dispatcher, signal: controller.signal, headers }); }
+      finally { clearTimeout(timer); }
     };
     let res: Awaited<ReturnType<typeof safeFetch>> | null = null;
     try {
-      try {
-        res = await safeFetch(safe.toString(), { ...opts, dispatcher: importDispatcher });
-      } catch (err) {
-        if (!importProxy) throw err; // no proxy → surface the original error
-      }
-      // Fall back to the residential proxy on a direct FAILURE ("fetch failed") OR a bot-block STATUS
-      // (403/429/451/503). The proxy returns the SAME raw HTML, so the 1-on-1 output is untouched.
-      if (importProxy && (!res || [403, 429, 451, 503].includes(res.status))) {
-        res = await safeFetch(safe.toString(), { ...opts, dispatcher: importProxy });
-      }
-    } finally {
-      clearTimeout(timer);
+      // With a proxy configured, give the DIRECT try a short leash (a blocked site often just hangs).
+      res = await attempt(importDispatcher, importProxy ? 8000 : IMPORT_FETCH_TIMEOUT_MS);
+    } catch (err) {
+      if (!importProxy) throw err; // no proxy → surface the original error
+    }
+    // Fall back to the residential proxy on a direct FAILURE/timeout OR a bot-block STATUS
+    // (403/429/451/503). The proxy returns the SAME raw HTML, so the 1-on-1 output is untouched.
+    if (importProxy && (!res || [403, 429, 451, 503].includes(res.status))) {
+      res = await attempt(importProxy, 30000); // fresh, generous timeout for the proxy
     }
     if (!res) throw new Error("Kon de website niet ophalen.");
 
@@ -3794,16 +3793,18 @@ function fontMime(url: string): string {
   return ({ woff2: "font/woff2", woff: "font/woff", ttf: "font/ttf", otf: "font/otf", eot: "application/vnd.ms-fontobject" } as Record<string, string>)[ext] || "font/woff2";
 }
 async function fetchImportAsset(url: string): Promise<Buffer | null> {
-  const opts = { signal: AbortSignal.timeout(12000), headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36" } };
   const safe = await assertSafeUrl(url).catch(() => null);
   if (!safe) return null;
+  const headers = { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36" };
+  // Each attempt gets its OWN timeout signal (shared signals let a slow direct try starve the proxy).
+  const get = async (dispatcher: Agent | ProxyAgent, timeoutMs: number) => safeFetch(safe.toString(), { dispatcher, signal: AbortSignal.timeout(timeoutMs), headers });
   try {
-    const r = await safeFetch(safe.toString(), { ...opts, dispatcher: importDispatcher });
+    const r = await get(importDispatcher, importProxy ? 8000 : 12000);
     if (r.ok) { const buf = Buffer.from(await r.arrayBuffer()); if (buf.length) return buf; }
-    else if (importProxy) { const r2 = await safeFetch(safe.toString(), { ...opts, dispatcher: importProxy }); if (r2.ok) { const b = Buffer.from(await r2.arrayBuffer()); if (b.length) return b; } }
+    else if (importProxy) { const r2 = await get(importProxy, 30000); if (r2.ok) { const b = Buffer.from(await r2.arrayBuffer()); if (b.length) return b; } }
   } catch {
-    // Direct blocked → try the residential proxy (raw passthrough).
-    if (importProxy) { try { const r2 = await safeFetch(safe.toString(), { ...opts, dispatcher: importProxy }); if (r2.ok) { const b = Buffer.from(await r2.arrayBuffer()); if (b.length) return b; } } catch { /* give up */ } }
+    // Direct blocked/timed out → try the residential proxy (raw passthrough).
+    if (importProxy) { try { const r2 = await get(importProxy, 30000); if (r2.ok) { const b = Buffer.from(await r2.arrayBuffer()); if (b.length) return b; } } catch { /* give up */ } }
   }
   return null;
 }
