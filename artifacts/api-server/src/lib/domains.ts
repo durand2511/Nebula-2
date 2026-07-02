@@ -100,6 +100,15 @@ export async function findActiveByHost(host: string): Promise<{ projectId: numbe
   return row && row.status === "active" ? { projectId: row.projectId } : null;
 }
 
+/** Any domain row for a Host (any status) — lets the host router tell a PENDING (still-connecting)
+ *  domain apart from a truly unknown one, so it can show a "connecting" page instead of a redirect. */
+export async function findByHost(host: string): Promise<{ projectId: number; status: string } | null> {
+  const h = normalizeHost(host);
+  if (!h || isReserved(h)) return null;
+  const [row] = await db.select().from(domains).where(eq(domains.domain, h));
+  return row ? { projectId: row.projectId, status: row.status } : null;
+}
+
 /**
  * Real DNS check. A subdomain (www./book.) verifies via CNAME → customers.nebulabookings.com.
  * A bare apex domain can't CNAME, so it verifies via A-record: its IPs must match the platform's

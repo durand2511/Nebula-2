@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { timingSafeEqual } from "node:crypto";
 import router from "./routes";
 import { logger } from "./lib/logger";
-import { isReserved, findActiveByHost, PLATFORM_HOST } from "./lib/domains";
+import { isReserved, findByHost, PLATFORM_HOST } from "./lib/domains";
 import { serveProjectSite } from "./lib/host-site";
 
 const app: Express = express();
@@ -82,10 +82,28 @@ app.use((req, res, next) => {
 app.use((req, res, next) => {
   const host = req.headers.host || "";
   if (isReserved(host) || req.path === "/api" || req.path.startsWith("/api/")) return next();
-  findActiveByHost(host)
+  findByHost(host)
     .then((match) => {
-      if (match) return serveProjectSite(match.projectId, req, res);
-      res.redirect(302, "https://" + PLATFORM_HOST);
+      if (match && match.status === "active") return serveProjectSite(match.projectId, req, res);
+      // NEVER let a browser cache these. Without this, a machine that visited the domain during DNS
+      // setup keeps redirecting to the platform even after it goes live (it works on fresh machines,
+      // but the one that set it up is stuck on a remembered redirect).
+      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+      if (match) {
+        // Domain is added but not verified yet → a neutral "connecting" page. No redirect means there
+        // is nothing for the browser to remember, so once it's live the real site simply appears.
+        res.status(200).type("html").send(
+          `<!doctype html><meta charset="utf-8"><meta name="robots" content="noindex">` +
+          `<title>Domein wordt gekoppeld…</title>` +
+          `<body style="font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;max-width:640px;margin:12vh auto;padding:0 20px;color:#1f2937;line-height:1.5">` +
+          `<h1 style="font-size:28px">Bijna klaar 🚀</h1>` +
+          `<p>Dit domein wordt gekoppeld aan je website. Zodra de DNS is geverifieerd en het SSL-certificaat klaarstaat, verschijnt hier automatisch je site — dit kan enkele minuten duren.</p>` +
+          `<p style="color:#6b7280">Ververs deze pagina straks nog eens.</p></body>`,
+        );
+        return;
+      }
+      // Truly unknown domain → send to the platform, but non-cacheably.
+      return res.redirect(302, "https://" + PLATFORM_HOST);
     })
     .catch(next);
 });
