@@ -91,6 +91,13 @@ export async function serveProjectSite(projectId: number, req: Request, res: Res
     if (/<head[^>]*>/i.test(content)) content = content.replace(/<head[^>]*>/i, (m) => m + tag);
     else if (/<body[^>]*>/i.test(content)) content = content.replace(/<body[^>]*>/i, (m) => m + tag);
     else content = tag + content;
+    // Self-contained fonts (survive edits): inject the stored @font-face blob (data: URIs) at serve
+    // time, so imported icon-fonts render instead of "tofu" boxes.
+    const fontBlob = rows.find((r) => r.path === ".nebula-fonts.css")?.content;
+    if (fontBlob) {
+      const st = `<style data-nebula-fonts>${fontBlob}</style>`;
+      content = /<\/head>/i.test(content) ? content.replace(/<\/head>/i, st + "</head>") : content.replace(/<head[^>]*>/i, (m) => m + st);
+    }
     // Free (unsubscribed) sites carry a non-removable Nebula badge bottom-right.
     if (!(await ownerSubscribed(projectId))) {
       content = /<\/body>/i.test(content) ? content.replace(/<\/body>/i, NEBULA_BADGE + "</body>") : content + NEBULA_BADGE;

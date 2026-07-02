@@ -1032,6 +1032,10 @@ document.addEventListener("submit",function(e){
   // Insert inject at the very start of <head>
   html = html.replace(/<head[^>]*>/i, (m) => m + injectScript);
 
+  // Self-contained fonts: inject the stored @font-face blob (data: URIs) at serve time. It lives in
+  // its OWN file, so editing a page never removes it — the cross-origin "tofu" glyphs stay fixed.
+  html = injectSelfContainedFonts(html, fileRows.find((f) => f.path === NEBULA_FONTS_PATH)?.content);
+
   res.setHeader("Content-Type", "text/html; charset=utf-8");
   res.setHeader("Cache-Control", "no-store");
   res.send(html);
@@ -3853,10 +3857,10 @@ async function collectFontFaces(css: string, cssUrl: string, fontCache: Map<stri
   }
   return out;
 }
-async function inlineStylesheetFonts(html: string, cssCache: Map<string, string>, fontCache: Map<string, string>): Promise<string> {
+// Collect the @font-face blocks (fonts inlined as data: URIs) from every stylesheet a page links.
+async function collectFontFacesFromHtml(html: string, cssCache: Map<string, string>, fontCache: Map<string, string>): Promise<string[]> {
   const tags = html.match(/<link\b[^>]*>/gi) || [];
-  const faces: string[] = [];
-  const seen = new Set<string>();
+  const out: string[] = [];
   for (const tag of tags) {
     if (!/\brel=["']?stylesheet/i.test(tag) || /\bmedia=["']?print/i.test(tag)) continue;
     const hm = tag.match(/\bhref=["']([^"']+)["']/i);
@@ -3868,29 +3872,47 @@ async function inlineStylesheetFonts(html: string, cssCache: Map<string, string>
       blocks = buf ? (await collectFontFaces(buf.toString("utf8"), href, fontCache)).join("\n") : "";
       cssCache.set(href, blocks);
     }
-    if (blocks && !seen.has(blocks)) { seen.add(blocks); faces.push(blocks); }
+    if (blocks) out.push(blocks);
   }
-  if (!faces.length) return html;
-  const styleTag = `<style data-nebula-fonts>\n${faces.join("\n")}\n</style>`;
-  // Inject at the END of <head> so our self-contained @font-face rules win over the site's broken ones.
-  return /<\/head>/i.test(html)
-    ? html.replace(/<\/head>/i, styleTag + "</head>")
-    : html.replace(/<head[^>]*>/i, (m) => m + styleTag);
+  return out;
 }
-/** Background: make a just-imported project's fonts self-contained (fixes cross-origin "tofu" glyphs). */
+export const NEBULA_FONTS_PATH = ".nebula-fonts.css";
+/**
+ * Make a project's imported fonts self-contained. We DON'T modify the page HTML (so editing a page
+ * never undoes it); instead we store the @font-face rules (fonts as base64 data: URIs) in a single
+ * ".nebula-fonts.css" file, which the preview + published site inject at SERVE time. Fixes the
+ * cross-origin "tofu" glyphs (e.g. a nav dropdown arrow) robustly, across edits.
+ */
 async function inlineFontsForProject(projectId: number): Promise<void> {
   const files = await db.select().from(projectFiles)
     .where(and(eq(projectFiles.projectId, projectId), sql`${projectFiles.path} LIKE '%.html'`));
   const cssCache = new Map<string, string>();
   const fontCache = new Map<string, string>();
-  let updated = 0;
+  const seen = new Set<string>();
+  const faces: string[] = [];
   for (const f of files) {
+    // Clean up any <style data-nebula-fonts> the earlier (edit-fragile) approach left in the HTML.
+    const cleaned = f.content.replace(/<style data-nebula-fonts>[\s\S]*?<\/style>/gi, "");
+    if (cleaned !== f.content) await db.update(projectFiles).set({ content: cleaned, updatedAt: new Date() }).where(eq(projectFiles.id, f.id));
     try {
-      const next = await inlineStylesheetFonts(f.content, cssCache, fontCache);
-      if (next !== f.content) { await db.update(projectFiles).set({ content: next, updatedAt: new Date() }).where(eq(projectFiles.id, f.id)); updated++; }
-    } catch (err) { logger.warn({ err, projectId, path: f.path }, "[import] font inline failed"); }
+      for (const b of await collectFontFacesFromHtml(cleaned, cssCache, fontCache)) if (b && !seen.has(b)) { seen.add(b); faces.push(b); }
+    } catch (err) { logger.warn({ err, projectId, path: f.path }, "[import] font collect failed"); }
   }
-  logger.info({ projectId, files: files.length, updated, fonts: fontCache.size }, "[import] fonts inlined (self-contained)");
+  const blob = faces.join("\n");
+  if (!blob) { logger.info({ projectId }, "[import] no fonts to inline"); return; }
+  const [existing] = await db.select({ id: projectFiles.id }).from(projectFiles)
+    .where(and(eq(projectFiles.projectId, projectId), eq(projectFiles.path, NEBULA_FONTS_PATH)));
+  if (existing) await db.update(projectFiles).set({ content: blob, updatedAt: new Date() }).where(eq(projectFiles.id, existing.id));
+  else await db.insert(projectFiles).values({ projectId, path: NEBULA_FONTS_PATH, content: blob, language: "css" });
+  logger.info({ projectId, faces: faces.length, fonts: fontCache.size }, "[import] self-contained fonts stored");
+}
+/** Inject the stored @font-face blob (data: URIs) into a page at serve time, so it survives edits. */
+export function injectSelfContainedFonts(html: string, fontBlob: string | undefined): string {
+  if (!fontBlob) return html;
+  const tag = `<style data-nebula-fonts>${fontBlob}</style>`;
+  return /<\/head>/i.test(html)
+    ? html.replace(/<\/head>/i, tag + "</head>")
+    : html.replace(/<head[^>]*>/i, (m) => m + tag);
 }
 
 // Import a live website by URL and seed a new project with it so the user can
