@@ -3793,6 +3793,106 @@ router.post("/projects", async (req, res) => {
   }
 });
 
+// ── Self-contained fonts: inline @font-face fonts as data: URIs ─────────────
+// Fonts are CORS-restricted, so an icon-font loaded cross-origin from the original site renders as a
+// "tofu" box in the preview (e.g. a nav dropdown arrow). We fetch the stylesheets + their fonts ONCE
+// (Bright Data when the site blocks our IP), inline the fonts as base64 data: URIs, and replace the
+// <link> with a <style>. The result is same-origin + self-contained → no tofu, no live proxy needed.
+// Runs in the background after import so it never makes the import request time out.
+const FONT_EXT_RE = /\.(woff2?|ttf|otf|eot)(\?|#|$)/i;
+function fontMime(url: string): string {
+  const ext = (url.split("?")[0].split("#")[0].split(".").pop() || "").toLowerCase();
+  return ({ woff2: "font/woff2", woff: "font/woff", ttf: "font/ttf", otf: "font/otf", eot: "application/vnd.ms-fontobject" } as Record<string, string>)[ext] || "font/woff2";
+}
+async function fetchImportAsset(url: string): Promise<Buffer | null> {
+  // Direct first (fast); Bright Data fallback for sites that block our datacenter IP.
+  try {
+    const safe = await assertSafeUrl(url);
+    const r = await safeFetch(safe.toString(), {
+      dispatcher: importDispatcher,
+      signal: AbortSignal.timeout(12000),
+      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36" },
+    });
+    if (r.ok) { const buf = Buffer.from(await r.arrayBuffer()); if (buf.length) return buf; }
+  } catch { /* fall through to Bright Data */ }
+  if (brightDataEnabled()) {
+    try { const bd = await fetchViaBrightData(url, 45000); if (bd.status >= 200 && bd.status < 300 && bd.body.length) return bd.body; } catch { /* ignore */ }
+  }
+  return null;
+}
+async function inlineFontsInCss(css: string, cssUrl: string, fontCache: Map<string, string>): Promise<string> {
+  const re = /url\(\s*(['"]?)([^)'"]+)\1\s*\)/gi;
+  const wanted = new Set<string>();
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(css)) !== null) {
+    const raw = m[2].trim();
+    if (FONT_EXT_RE.test(raw) && !raw.startsWith("data:")) { try { wanted.add(new URL(raw, cssUrl).toString()); } catch { /* skip */ } }
+  }
+  for (const u of wanted) {
+    if (fontCache.has(u)) continue;
+    const buf = await fetchImportAsset(u);
+    fontCache.set(u, buf ? `data:${fontMime(u)};base64,${buf.toString("base64")}` : "");
+  }
+  return css.replace(re, (full: string, _q: string, raw: string) => {
+    const t = String(raw).trim();
+    if (!FONT_EXT_RE.test(t) || t.startsWith("data:")) return full;
+    let abs: string; try { abs = new URL(t, cssUrl).toString(); } catch { return full; }
+    const uri = fontCache.get(abs);
+    return uri ? `url(${uri})` : full;
+  });
+}
+// Extract the @font-face blocks from a stylesheet and inline their fonts as data: URIs. We keep the
+// site's own <link> CSS (it loads fine + fast, cross-origin CSS isn't blocked) and only add these
+// self-contained @font-face rules — they override the site's broken cross-origin ones.
+async function collectFontFaces(css: string, cssUrl: string, fontCache: Map<string, string>): Promise<string[]> {
+  const blocks = css.match(/@font-face\s*\{[^}]*\}/gi) || [];
+  const out: string[] = [];
+  for (const block of blocks) {
+    const inlined = await inlineFontsInCss(block, cssUrl, fontCache);
+    if (/url\(\s*data:/i.test(inlined)) out.push(inlined); // only keep faces we actually fetched
+  }
+  return out;
+}
+async function inlineStylesheetFonts(html: string, cssCache: Map<string, string>, fontCache: Map<string, string>): Promise<string> {
+  const tags = html.match(/<link\b[^>]*>/gi) || [];
+  const faces: string[] = [];
+  const seen = new Set<string>();
+  for (const tag of tags) {
+    if (!/\brel=["']?stylesheet/i.test(tag) || /\bmedia=["']?print/i.test(tag)) continue;
+    const hm = tag.match(/\bhref=["']([^"']+)["']/i);
+    if (!hm || !/^https?:\/\//i.test(hm[1])) continue;
+    const href = hm[1];
+    let blocks = cssCache.get(href);
+    if (blocks === undefined) {
+      const buf = await fetchImportAsset(href);
+      blocks = buf ? (await collectFontFaces(buf.toString("utf8"), href, fontCache)).join("\n") : "";
+      cssCache.set(href, blocks);
+    }
+    if (blocks && !seen.has(blocks)) { seen.add(blocks); faces.push(blocks); }
+  }
+  if (!faces.length) return html;
+  const styleTag = `<style data-nebula-fonts>\n${faces.join("\n")}\n</style>`;
+  // Inject at the END of <head> so our self-contained @font-face rules win over the site's broken ones.
+  return /<\/head>/i.test(html)
+    ? html.replace(/<\/head>/i, styleTag + "</head>")
+    : html.replace(/<head[^>]*>/i, (m) => m + styleTag);
+}
+/** Background: make a just-imported project's fonts self-contained (fixes cross-origin "tofu" glyphs). */
+async function inlineFontsForProject(projectId: number): Promise<void> {
+  const files = await db.select().from(projectFiles)
+    .where(and(eq(projectFiles.projectId, projectId), sql`${projectFiles.path} LIKE '%.html'`));
+  const cssCache = new Map<string, string>();
+  const fontCache = new Map<string, string>();
+  let updated = 0;
+  for (const f of files) {
+    try {
+      const next = await inlineStylesheetFonts(f.content, cssCache, fontCache);
+      if (next !== f.content) { await db.update(projectFiles).set({ content: next, updatedAt: new Date() }).where(eq(projectFiles.id, f.id)); updated++; }
+    } catch (err) { logger.warn({ err, projectId, path: f.path }, "[import] font inline failed"); }
+  }
+  logger.info({ projectId, files: files.length, updated, fonts: fontCache.size }, "[import] fonts inlined (self-contained)");
+}
+
 // Import a live website by URL and seed a new project with it so the user can
 // edit it with AI. Registered before "/projects/:projectId" — though that route
 // is GET/DELETE only, this keeps the more specific path unambiguous.
@@ -3881,6 +3981,10 @@ router.post("/projects/import-url", async (req, res) => {
       "Imported website",
     );
 
+    // Make fonts self-contained in the BACKGROUND (fetch + inline as data: URIs) so the import
+    // response stays fast and the preview loses its cross-origin "tofu" glyphs after a refresh.
+    void inlineFontsForProject(project.id).catch((err) => req.log.warn({ err, projectId: project.id }, "[import] background font inline failed"));
+
     res.status(201).json({
       ...project,
       messageCount: 0,
@@ -3889,6 +3993,21 @@ router.post("/projects/import-url", async (req, res) => {
   } catch (err) {
     req.log.error({ err }, "Failed to create imported project");
     res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Manually (re)run font-inlining for an EXISTING project — so an already-imported site can be made
+// self-contained without re-importing. Returns when done (can take ~30-60s for a protected site).
+router.post("/projects/:projectId/inline-fonts", async (req, res) => {
+  const projectId = Number(req.params.projectId);
+  if (!Number.isInteger(projectId)) { res.status(400).json({ error: "Invalid project ID" }); return; }
+  if (!(await requireOwner(req, res, projectId))) return;
+  try {
+    await inlineFontsForProject(projectId);
+    res.json({ ok: true });
+  } catch (err) {
+    req.log.error({ err, projectId }, "inline-fonts failed");
+    res.status(500).json({ error: "Fonts inlinen mislukt." });
   }
 });
 
