@@ -340,17 +340,6 @@ export const sitePublishes = pgTable("site_publishes", {
   publishedAt: timestamp("published_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
-// Imported binary assets (images/fonts/etc.) stored per-file and served ONE at a time (never bundled
-// into the site blob) so a faithful 1-on-1 import can't reintroduce the load-everything OOM.
-export const importAssets = pgTable("import_assets", {
-  id: serial("id").primaryKey(),
-  projectId: integer("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
-  path: text("path").notNull(),                    // local path, e.g. "assets/ab12cd34.png"
-  contentType: text("content_type").notNull().default("application/octet-stream"),
-  data: text("data").notNull().default(""),        // base64-encoded bytes
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-}, (t) => ({ byProjPath: uniqueIndex("import_assets_proj_path").on(t.projectId, t.path) }));
-
 // Per-studio toggles. Additive: a missing row means all defaults (everything off).
 export const studioSettings = pgTable("studio_settings", {
   projectId: integer("project_id").primaryKey().references(() => projects.id, { onDelete: "cascade" }),
@@ -539,7 +528,6 @@ export type InsertProject = z.infer<typeof insertProjectSchema>;
 export type ProjectMessage = typeof projectMessages.$inferSelect;
 export type InsertProjectMessage = z.infer<typeof insertProjectMessageSchema>;
 export type ProjectFile = typeof projectFiles.$inferSelect;
-export type ImportAsset = typeof importAssets.$inferSelect;
 export type InsertProjectFile = z.infer<typeof insertProjectFileSchema>;
 export type ProjectSnapshot = typeof projectSnapshots.$inferSelect;
 export type ProjectStripe = typeof projectStripe.$inferSelect;
