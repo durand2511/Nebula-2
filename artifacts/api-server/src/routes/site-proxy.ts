@@ -234,23 +234,6 @@ document.addEventListener("submit",function(e){if(e.defaultPrevented)return;e.pr
       return;
     }
 
-    // Expose CORS so cross-origin loads (esp. fonts) aren't blocked.
-    res.setHeader("Access-Control-Allow-Origin", "*");
-
-    // CSS: rewrite absolute same-origin url(...) (fonts, background images) to the proxy so they load
-    // SAME-ORIGIN. Fonts are CORS-restricted, so a cross-origin icon-font renders as a "tofu" box
-    // (e.g. the nav dropdown arrow). Routing them through the proxy fixes that.
-    if (ct.includes("text/css")) {
-      const domRe = domain.replace(/[.]/g, "\\.");
-      const css = bodyBuffer.toString("utf8").replace(
-        new RegExp(`url\\(\\s*(['"]?)(?:https?:)?//(?:www\\.)?${domRe}(/[^)'"]*)\\1\\s*\\)`, "gi"),
-        (_m, q, path) => `url(${q}/api/site-proxy/${domain}${path}${q})`,
-      );
-      res.setHeader("Content-Type", ct);
-      res.send(css);
-      return;
-    }
-
     if (ct) res.setHeader("Content-Type", ct);
 
     // Pass through cache headers from the direct response (not available on the Bright Data path).

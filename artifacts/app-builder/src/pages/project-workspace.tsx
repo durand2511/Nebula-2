@@ -2936,7 +2936,7 @@ export function ProjectWorkspace() {
                 </TabsTrigger>
               </TabsList>
 
-              <div className="ml-auto flex items-center gap-1 flex-wrap justify-end [&>button]:text-xs [&>button]:px-2 [&>button]:whitespace-nowrap">
+              <div className="ml-auto flex items-center gap-1 min-w-0 overflow-x-auto [&>button]:text-xs [&>button]:px-2 [&>button]:shrink-0 [&>button]:whitespace-nowrap [&>*]:shrink-0">
                 {!isStreaming && activeTab === "preview" && previewHtml && (
                   <Button
                     variant={selectMode ? "default" : "ghost"}

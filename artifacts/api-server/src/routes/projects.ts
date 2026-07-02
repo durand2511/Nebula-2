@@ -776,17 +776,6 @@ router.get("/projects/:id/preview-page", async (req, res) => {
     html = html.replace(/<head[^>]*>/i, (m) => m + `<base href="/api/site-proxy/${domain}/">`);
   }
 
-  // Route stylesheets (and thus their @font-face fonts) through the proxy so they load SAME-ORIGIN.
-  // Fonts are CORS-restricted: an icon-font loaded cross-origin from the original site renders as a
-  // "tofu" box (e.g. the nav dropdown-arrow shows a square). Proxying the CSS fixes that.
-  {
-    const domRe = domain.replace(/[.]/g, "\\.");
-    html = html.replace(
-      new RegExp(`(<link\\b[^>]*\\bhref=)(["'])(?:https?:)?//(?:www\\.)?${domRe}(/[^"']*\\.css[^"']*)\\2`, "gi"),
-      (_m, pre, q, path) => `${pre}${q}/api/site-proxy/${domain}${path}${q}`,
-    );
-  }
-
   // Strip Next.js/Nuxt/SvelteKit runtime scripts when detected.
   // These SPA frameworks read window.location.pathname during hydration. Since our
   // preview URL (/api/projects/…) doesn't match any real route on the origin site,
