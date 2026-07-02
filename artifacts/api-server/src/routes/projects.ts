@@ -16,7 +16,6 @@ import {
 } from "@workspace/api-zod";
 import { anthropic } from "@workspace/integrations-openai-ai-server";
 import { logger } from "../lib/logger";
-import { brightDataEnabled, fetchViaBrightData } from "../lib/brightdata.js";
 import { checkWritePlanViolation, BOOKING_BLOCK_KEYWORDS, isNewPageOnImportedSite, detectExplicitNewPage, fitHistoryToContext, importedSiteHasEdits } from "../lib/write-plan.js";
 import { applyAction, rebuildBookingApp, ACTION_CATALOGUE, type BuilderAction } from "../lib/actions.js";
 import { seedStaffAccounts } from "../lib/studio-auth.js";
@@ -193,22 +192,6 @@ const importDispatcher = new Agent({
 // Fetch HTML while following redirects manually, re-validating every hop so a
 // redirect can't bounce us to an internal address.
 async function fetchWebsiteHtml(rawUrl: string): Promise<{ html: string; finalUrl: string }> {
-  // Prefer Bright Data when configured: it fetches from a residential/unblocked network so sites that
-  // block our datacenter IP (SiteGround/Wordfence/Cloudflare) or render with JS still return real HTML.
-  // Falls through to the direct fetch below if Bright Data errors or returns empty.
-  if (brightDataEnabled()) {
-    try {
-      const safe = await assertSafeUrl(rawUrl);
-      const bd = await fetchViaBrightData(safe.toString());
-      const html = bd.body.toString("utf8");
-      if (bd.status >= 200 && bd.status < 300 && html.trim().length > 200) {
-        return { html, finalUrl: safe.toString() };
-      }
-      logger.warn({ rawUrl, status: bd.status, len: html.length }, "[brightdata] import returned little/empty — falling back to direct");
-    } catch (err) {
-      logger.warn({ err, rawUrl }, "[brightdata] import fetch failed — falling back to direct");
-    }
-  }
   let current = rawUrl;
   for (let hop = 0; hop <= IMPORT_MAX_REDIRECTS; hop++) {
     const safe = await assertSafeUrl(current);

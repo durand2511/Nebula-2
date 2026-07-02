@@ -15,7 +15,6 @@
 import { Router } from "express";
 import type { Request, Response } from "express";
 import { readCookies, storeCookies, isPrivateHostname } from "../lib/preview-session";
-import { brightDataEnabled, fetchViaBrightData } from "../lib/brightdata.js";
 
 const router = Router();
 
@@ -73,50 +72,30 @@ async function handleSiteProxy(req: Request, res: Response): Promise<void> {
   }
 
   try {
-    // Fetch direct first (fast/free). If the origin blocks our datacenter IP (403/429/451/5xx or an
-    // empty body) or errors, and Bright Data is configured, refetch through Bright Data's unblocked
-    // network so blocked CSS/fonts/images/pages still load — key for a complete preview.
-    let status = 0;
-    let ct = "";
-    let bodyBuffer: Buffer;
-    let upstreamHeaders: Headers | null = null;
+    const upstream = await fetch(targetUrl, {
+      method,
+      headers: fwdHeaders,
+      body,
+      redirect: "follow",
+    });
 
-    try {
-      const upstream = await fetch(targetUrl, {
-        method,
-        headers: fwdHeaders,
-        body,
-        redirect: "follow",
-        signal: AbortSignal.timeout(15000),
-      });
-      if (sid) {
-        const setCookies: string[] =
-          typeof (upstream.headers as { getSetCookie?: () => string[] }).getSetCookie === "function"
-            ? (upstream.headers as { getSetCookie: () => string[] }).getSetCookie()
-            : upstream.headers.get("set-cookie")
-              ? [upstream.headers.get("set-cookie")!]
-              : [];
-        if (setCookies.length) storeCookies(sid, domain, setCookies);
-      }
-      status = upstream.status;
-      ct = upstream.headers.get("content-type") ?? "";
-      upstreamHeaders = upstream.headers;
-      bodyBuffer = Buffer.from(await upstream.arrayBuffer());
-      const blocked = status === 403 || status === 429 || status === 451 || status >= 500 || bodyBuffer.length === 0;
-      if (blocked && brightDataEnabled()) throw new Error("origin blocked — retry via Bright Data");
-    } catch (directErr) {
-      if (!brightDataEnabled()) throw directErr;
-      const bd = await fetchViaBrightData(targetUrl);
-      status = bd.status >= 200 && bd.status < 600 ? bd.status : 200;
-      ct = bd.contentType;
-      bodyBuffer = bd.body;
-      upstreamHeaders = null;
+    // Store Set-Cookie
+    if (sid) {
+      const setCookies: string[] =
+        typeof (upstream.headers as { getSetCookie?: () => string[] }).getSetCookie === "function"
+          ? (upstream.headers as { getSetCookie: () => string[] }).getSetCookie()
+          : upstream.headers.get("set-cookie")
+            ? [upstream.headers.get("set-cookie")!]
+            : [];
+      if (setCookies.length) storeCookies(sid, domain, setCookies);
     }
+
+    const ct = upstream.headers.get("content-type") ?? "";
 
     // __inject=1: rewrite HTML so the page loads correctly inside our preview iframe.
     // This lets live Shopify/WooCommerce product pages navigate through our proxy.
-    if (shouldInject && ct.includes("text/html") && status === 200) {
-      let html = bodyBuffer.toString("utf8");
+    if (shouldInject && ct.includes("text/html") && upstream.status === 200) {
+      let html = await upstream.text();
 
       // Rewrite or inject <base href> so all relative URLs resolve through site-proxy
       const hasBase = /<base\s[^>]*href=/i.test(html);
@@ -236,17 +215,18 @@ document.addEventListener("submit",function(e){if(e.defaultPrevented)return;e.pr
 
     if (ct) res.setHeader("Content-Type", ct);
 
-    // Pass through cache headers from the direct response (not available on the Bright Data path).
-    // Skip content-length — res.send(buffer) sets it correctly for the actual body we return.
-    if (upstreamHeaders) {
-      for (const h of ["cache-control", "etag", "last-modified", "expires", "content-language"]) {
-        const v = upstreamHeaders.get(h);
-        if (v) res.setHeader(h, v);
-      }
+    // Pass through most headers (skip hop-by-hop and security headers that would break framing)
+    const passthroughHeaders = [
+      "cache-control", "etag", "last-modified", "expires",
+      "content-language", "content-length",
+    ];
+    for (const h of passthroughHeaders) {
+      const v = upstream.headers.get(h);
+      if (v) res.setHeader(h, v);
     }
 
-    res.status(status || 200);
-    res.send(bodyBuffer);
+    res.status(upstream.status);
+    res.send(Buffer.from(await upstream.arrayBuffer()));
   } catch (err) {
     console.error("[site-proxy] error proxying", targetUrl, err);
     res.status(502).json({ error: "upstream error" });
