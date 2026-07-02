@@ -1339,10 +1339,13 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
     .then(function(r){return r.json().then(function(d){return{ok:r.ok,d:d};});})
     .then(function(x){done(x.ok&&x.d&&x.d.ok,x.d||{});}).catch(function(){done(false,{});});}
   function refreshStripeStatus(){var b=root.querySelector('#ba-stripe-badge');if(!b||!projId())return;
+    var ex=root.querySelector('#ba-stripe-extra');
     fetch(api('stripe/status')).then(function(r){return r.json();}).then(function(d){
       if(d.connected&&d.chargesEnabled){b.textContent='gekoppeld';b.className='ba-badge ok';}
       else if(d.connected){b.textContent='onboarding afronden';b.className='ba-badge';}
       else{b.textContent='niet gekoppeld';b.className='ba-badge';}
+      // Gekoppeld → toon een 1-klik-link naar het eigen Stripe-dashboard (saldo, uitbetalingen, betalingen).
+      if(ex&&d.connected){ex.innerHTML='<button class="ba-btn sm" data-act="stripe-dashboard">Open Stripe-dashboard ↗</button> <span class="ba-note" style="margin:0">— bekijk je saldo &amp; uitbetalingen</span>';}
     }).catch(function(){b.textContent='—';});}
   function refreshGcalStatus(){var b=root.querySelector('#ba-gcal-status');if(!b||!projId())return;
     var ex=root.querySelector('#ba-gcal-extra');
@@ -1729,6 +1732,11 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
           if(ex)ex.innerHTML='<a href="'+d.url+'" target="_blank" rel="noopener" style="color:var(--ba);font-weight:700">Open Stripe-onboarding ↗</a> — daarna Integraties opnieuw openen om de status te verversen.';
         } else { if(w){try{w.close();}catch(e){}} if(ex)ex.textContent=d.error||'Koppelen mislukt.'; }
       }).catch(function(){if(w){try{w.close();}catch(e){}}if(ex)ex.textContent='Koppelen mislukt.';});return;}
+    if(act==='stripe-dashboard'){var sw=null;try{sw=window.open('about:blank','_blank');}catch(e){} // sync in de klik (Safari)
+      fetch(api('stripe/dashboard'),{method:'POST'}).then(function(r){return r.json();}).then(function(d){
+        if(d.url){try{if(sw)sw.location.href=d.url;}catch(e){}}
+        else{if(sw){try{sw.close();}catch(e){}}alert(d.error||'Kon het Stripe-dashboard niet openen.');}
+      }).catch(function(){if(sw){try{sw.close();}catch(e){}}alert('Kon het Stripe-dashboard niet openen.');});return;}
     if(act==='gcal-connect'){var gx=root.querySelector('#ba-gcal-extra');if(gx)gx.textContent='Bezig…';
       var gw=null;try{gw=window.open('about:blank','_blank');}catch(e){} // open SYNC binnen de klik (Safari)
       fetch(api('gcal/connect'),{method:'POST'}).then(function(r){return r.json();}).then(function(d){

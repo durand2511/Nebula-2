@@ -10,7 +10,7 @@
  */
 import { Router, type IRouter, type Request, raw, json } from "express";
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { db, projectStripe, studioVideoAccess, studioPurchases, studioWallets, platformUsers } from "@workspace/db";
+import { db, projectStripe, projects, studioVideoAccess, studioPurchases, studioWallets, platformUsers } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
 import { logger } from "../lib/logger";
 import { sendBookingEmail } from "../lib/email.js";
@@ -136,6 +136,36 @@ export async function stripeRefund(projectId: number, opts: { paymentIntent?: st
   return { ok: true, refunded: true, amount: (refund.amount || 0) / 100 };
 }
 
+// A Stripe statement_descriptor (what the customer sees on their bank statement) must be 5–22 chars,
+// contain a letter, and use only latin letters/numbers/spaces (no < > \ " '). Derive it from the
+// studio's name so the CUSTOMER sees the studio — not the platform — on their statement.
+function toStatementDescriptor(name: string): string | null {
+  let s = (name || "")
+    .normalize("NFKD").replace(/[̀-ͯ]/g, "") // strip accents
+    .replace(/[^A-Za-z0-9 ]/g, " ")                    // only latin letters/digits/spaces
+    .replace(/\s+/g, " ").trim();
+  if (!/[A-Za-z]/.test(s)) return null;                // must contain at least one letter
+  if (s.length > 22) s = s.slice(0, 22).trim();
+  if (s.length < 5) s = `${s} STUDIO`.slice(0, 22).trim(); // meet the 5-char minimum
+  return s.length >= 5 ? s : null;
+}
+
+// Set the connected account's statement descriptor to the studio's name. Best-effort: never block
+// onboarding on it. Runs automatically for every studio (new + existing) via the onboard route.
+async function applyStatementDescriptor(projectId: number, accountId: string): Promise<void> {
+  try {
+    const [proj] = await db.select({ name: projects.name }).from(projects).where(eq(projects.id, projectId));
+    const descriptor = toStatementDescriptor(proj?.name || "");
+    if (!descriptor) return;
+    await stripeReq("POST", `accounts/${accountId}`, {
+      settings: { payments: { statement_descriptor: descriptor } },
+    });
+    logger.info({ projectId, accountId, descriptor }, "[stripe] statement_descriptor set to studio name");
+  } catch (err) {
+    logger.warn({ err, projectId, accountId }, "[stripe] statement_descriptor update failed");
+  }
+}
+
 // ── 1. Onboarding: get-or-create the studio's Express account + an onboarding link ──
 router.post("/projects/:id/stripe/onboard", json({ limit: "16kb" }), async (req, res) => {
   const projectId = Number(req.params.id);
@@ -163,6 +193,9 @@ router.post("/projects/:id/stripe/onboard", json({ limit: "16kb" }), async (req,
         logger.warn({ err, projectId }, "[stripe] capability upgrade failed");
       }
     }
+    // Put the studio's OWN name on the customer's bank statement (not the platform). Automatic for
+    // every studio, new or existing. Best-effort.
+    await applyStatementDescriptor(projectId, row.accountId);
     const link = await stripeReq("POST", "account_links", {
       account: row.accountId,
       refresh_url: refreshUrl,
@@ -192,6 +225,23 @@ router.get("/projects/:id/stripe/status", async (req, res) => {
   } catch (err) {
     logger.error({ err, projectId }, "[stripe] status failed");
     res.status(500).json({ error: "Status ophalen mislukt" });
+  }
+});
+
+// ── 2b. Dashboard: one-click login link into the studio's own Stripe Express dashboard ──
+// So the studio can see their balance, payouts and payments. Works once onboarding is submitted.
+router.post("/projects/:id/stripe/dashboard", async (req, res) => {
+  const projectId = Number(req.params.id);
+  if (isNaN(projectId)) { res.status(400).json({ error: "Invalid project ID" }); return; }
+  try {
+    const [row] = await db.select().from(projectStripe).where(eq(projectStripe.projectId, projectId));
+    if (!row) { res.status(400).json({ error: "Stripe is nog niet gekoppeld." }); return; }
+    const link = await stripeReq("POST", `accounts/${row.accountId}/login_links`);
+    res.json({ url: link.url });
+  } catch (err) {
+    // Stripe rejects login links until onboarding is submitted — surface a friendly hint.
+    logger.warn({ err, projectId }, "[stripe] dashboard login link failed");
+    res.status(400).json({ error: "Kon het Stripe-dashboard niet openen. Rond eerst de Stripe-onboarding af." });
   }
 });
 
