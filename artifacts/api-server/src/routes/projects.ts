@@ -2,7 +2,7 @@ import { Router, json, type Response } from "express";
 import { eq, desc, sql, and } from "drizzle-orm";
 import { lookup as dnsLookup } from "node:dns/promises";
 import { isIP } from "node:net";
-import { Agent, fetch as safeFetch } from "undici";
+import { Agent, ProxyAgent, fetch as safeFetch } from "undici";
 import { load as cheerioLoad } from "cheerio";
 import { db, projects, projectMessages, projectFiles, projectSnapshots, learnings, emailReminders, studioClasses, studioUsers, studioBookings, type PlatformUser } from "@workspace/db";
 import { getSessionUser, tokenFrom } from "../lib/platform-auth.js";
@@ -189,6 +189,12 @@ const importDispatcher = new Agent({
   },
 });
 
+// Optional PLAIN proxy (residential) used ONLY as a fallback when the direct fetch is blocked (a site
+// that refuses our datacenter IP → "fetch failed"). Unlike a rendering "unlocker", a plain proxy just
+// forwards the request and returns the site's RAW HTML unchanged — so the import stays 1-on-1. Set
+// IMPORT_PROXY_URL in Render to a proxy URL like http://user:pass@host:port (e.g. a residential proxy).
+const importProxy = process.env.IMPORT_PROXY_URL ? new ProxyAgent(process.env.IMPORT_PROXY_URL) : null;
+
 // Fetch HTML while following redirects manually, re-validating every hop so a
 // redirect can't bounce us to an internal address.
 async function fetchWebsiteHtml(rawUrl: string): Promise<{ html: string; finalUrl: string }> {
@@ -197,23 +203,30 @@ async function fetchWebsiteHtml(rawUrl: string): Promise<{ html: string; finalUr
     const safe = await assertSafeUrl(current);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), IMPORT_FETCH_TIMEOUT_MS);
+    const opts = {
+      redirect: "manual" as const,
+      signal: controller.signal,
+      headers: {
+        // Present as a real browser — many sites return 403 to non-browser
+        // User-Agents / missing browser headers (e.g. Cloudflare bot checks).
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        Accept:
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9,nl;q=0.8",
+        "Upgrade-Insecure-Requests": "1",
+      },
+    };
     let res: Awaited<ReturnType<typeof safeFetch>>;
     try {
-      res = await safeFetch(safe.toString(), {
-        redirect: "manual",
-        dispatcher: importDispatcher,
-        signal: controller.signal,
-        headers: {
-          // Present as a real browser — many sites return 403 to non-browser
-          // User-Agents / missing browser headers (e.g. Cloudflare bot checks).
-          "User-Agent":
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-          Accept:
-            "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-          "Accept-Language": "en-US,en;q=0.9,nl;q=0.8",
-          "Upgrade-Insecure-Requests": "1",
-        },
-      });
+      try {
+        res = await safeFetch(safe.toString(), { ...opts, dispatcher: importDispatcher });
+      } catch (err) {
+        // Direct fetch blocked (datacenter IP refused → "fetch failed"). Retry through the residential
+        // proxy: it returns the SAME raw HTML, so the importer + 1-on-1 output are untouched.
+        if (!importProxy) throw err;
+        res = await safeFetch(safe.toString(), { ...opts, dispatcher: importProxy });
+      }
     } finally {
       clearTimeout(timer);
     }
@@ -3778,15 +3791,17 @@ function fontMime(url: string): string {
   return ({ woff2: "font/woff2", woff: "font/woff", ttf: "font/ttf", otf: "font/otf", eot: "application/vnd.ms-fontobject" } as Record<string, string>)[ext] || "font/woff2";
 }
 async function fetchImportAsset(url: string): Promise<Buffer | null> {
+  const opts = { signal: AbortSignal.timeout(12000), headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36" } };
+  const safe = await assertSafeUrl(url).catch(() => null);
+  if (!safe) return null;
   try {
-    const safe = await assertSafeUrl(url);
-    const r = await safeFetch(safe.toString(), {
-      dispatcher: importDispatcher,
-      signal: AbortSignal.timeout(12000),
-      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36" },
-    });
+    const r = await safeFetch(safe.toString(), { ...opts, dispatcher: importDispatcher });
     if (r.ok) { const buf = Buffer.from(await r.arrayBuffer()); if (buf.length) return buf; }
-  } catch { /* asset unavailable */ }
+    else if (importProxy) { const r2 = await safeFetch(safe.toString(), { ...opts, dispatcher: importProxy }); if (r2.ok) { const b = Buffer.from(await r2.arrayBuffer()); if (b.length) return b; } }
+  } catch {
+    // Direct blocked → try the residential proxy (raw passthrough).
+    if (importProxy) { try { const r2 = await safeFetch(safe.toString(), { ...opts, dispatcher: importProxy }); if (r2.ok) { const b = Buffer.from(await r2.arrayBuffer()); if (b.length) return b; } } catch { /* give up */ } }
+  }
   return null;
 }
 async function inlineFontsInCss(css: string, cssUrl: string, fontCache: Map<string, string>): Promise<string> {
