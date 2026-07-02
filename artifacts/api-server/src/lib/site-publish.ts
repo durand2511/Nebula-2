@@ -10,10 +10,21 @@ import { eq } from "drizzle-orm";
 
 export type PublishedFile = { content: string; language: string };
 
+// Short-TTL cache of the parsed published map. Serving a page used to re-query AND re-parse the whole
+// site blob on EVERY request, so clicking around a large published site spiked memory (many transient
+// copies at once) → OOM → 502 on Render. Caching keeps ONE parsed copy per project and reuses it.
+const CACHE_TTL_MS = 30_000;
+const mapCache = new Map<number, { map: Record<string, PublishedFile> | null; at: number }>();
+
 async function loadMap(projectId: number): Promise<Record<string, PublishedFile> | null> {
+  const hit = mapCache.get(projectId);
+  if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.map;
   const [row] = await db.select().from(sitePublishes).where(eq(sitePublishes.projectId, projectId));
-  if (!row) return null;
-  try { return JSON.parse(row.files) as Record<string, PublishedFile>; } catch { return {}; }
+  let map: Record<string, PublishedFile> | null = null;
+  if (row) { try { map = JSON.parse(row.files) as Record<string, PublishedFile>; } catch { map = {}; } }
+  if (mapCache.size > 200) mapCache.clear(); // bound the cache
+  mapCache.set(projectId, { map, at: Date.now() });
+  return map;
 }
 
 async function saveMap(projectId: number, map: Record<string, PublishedFile>): Promise<void> {
@@ -21,6 +32,7 @@ async function saveMap(projectId: number, map: Record<string, PublishedFile>): P
   const [ex] = await db.select().from(sitePublishes).where(eq(sitePublishes.projectId, projectId));
   if (ex) await db.update(sitePublishes).set({ files, publishedAt: new Date() }).where(eq(sitePublishes.projectId, projectId));
   else await db.insert(sitePublishes).values({ projectId, files });
+  mapCache.set(projectId, { map, at: Date.now() }); // keep cache consistent after a (re)publish
 }
 
 /** Snapshot ALL the project's current files as the published site (full publish). Returns file count. */
@@ -35,8 +47,9 @@ export async function publishSite(projectId: number): Promise<number> {
 /** Re-publish ONLY the files whose path matches `match` (merge into the existing snapshot). No-op if
  *  the site was never fully published yet (so we never push a partial site live by surprise). */
 export async function republishMatching(projectId: number, match: (path: string) => boolean): Promise<void> {
-  const map = await loadMap(projectId);
-  if (!map) return;
+  const base = await loadMap(projectId);
+  if (!base) return;
+  const map = { ...base }; // clone so we never mutate the cached copy
   const rows = await db.select().from(projectFiles).where(eq(projectFiles.projectId, projectId));
   for (const r of rows) if (match(r.path)) map[r.path] = { content: r.content, language: r.language };
   await saveMap(projectId, map);

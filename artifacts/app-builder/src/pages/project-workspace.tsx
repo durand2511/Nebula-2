@@ -1236,6 +1236,7 @@ export function ProjectWorkspace() {
   // SEO/AEO content engine: auto-publish toggle + manual generate state.
   const [seoAuto, setSeoAuto] = useState(false);
   const [seoBusy, setSeoBusy] = useState(false);
+  const [fontsBusy, setFontsBusy] = useState(false);
   useEffect(() => {
     if (!projectId) return;
     fetch(`/api/projects/${projectId}/seo`).then((r) => r.json()).then((d) => setSeoAuto(!!d.autoEnabled)).catch(() => {});
@@ -3043,6 +3044,29 @@ export function ProjectWorkspace() {
                   >
                     <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
                     Refresh
+                  </Button>
+                )}
+                {!isStreaming && activeTab === "preview" && previewHtml && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 text-muted-foreground hover:text-foreground"
+                    disabled={fontsBusy}
+                    title="Haalt de lettertypes van de geïmporteerde site op en maakt ze zelfstandig, zodat icoontjes/pijltjes renderen i.p.v. blokjes"
+                    onClick={async () => {
+                      if (fontsBusy) return;
+                      setFontsBusy(true);
+                      try {
+                        const r = await fetch(`/api/projects/${projectId}/inline-fonts`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+                        const d = await r.json().catch(() => ({}));
+                        if (r.ok && d.ok) { setPreviewKey((k) => k + 1); }
+                        else window.alert(d.error || "Fonts fixen mislukt. Zorg dat de originele site bereikbaar is.");
+                      } catch { window.alert("Fonts fixen mislukt."); }
+                      finally { setFontsBusy(false); }
+                    }}
+                  >
+                    {fontsBusy ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : null}
+                    Fonts fixen
                   </Button>
                 )}
                 {!isStreaming && activeTab === "preview" && (
