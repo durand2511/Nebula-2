@@ -217,19 +217,22 @@ async function fetchWebsiteHtml(rawUrl: string): Promise<{ html: string; finalUr
         "Upgrade-Insecure-Requests": "1",
       },
     };
-    let res: Awaited<ReturnType<typeof safeFetch>>;
+    let res: Awaited<ReturnType<typeof safeFetch>> | null = null;
     try {
       try {
         res = await safeFetch(safe.toString(), { ...opts, dispatcher: importDispatcher });
       } catch (err) {
-        // Direct fetch blocked (datacenter IP refused → "fetch failed"). Retry through the residential
-        // proxy: it returns the SAME raw HTML, so the importer + 1-on-1 output are untouched.
-        if (!importProxy) throw err;
+        if (!importProxy) throw err; // no proxy → surface the original error
+      }
+      // Fall back to the residential proxy on a direct FAILURE ("fetch failed") OR a bot-block STATUS
+      // (403/429/451/503). The proxy returns the SAME raw HTML, so the 1-on-1 output is untouched.
+      if (importProxy && (!res || [403, 429, 451, 503].includes(res.status))) {
         res = await safeFetch(safe.toString(), { ...opts, dispatcher: importProxy });
       }
     } finally {
       clearTimeout(timer);
     }
+    if (!res) throw new Error("Kon de website niet ophalen.");
 
     if (res.status >= 300 && res.status < 400) {
       const location = res.headers.get("location");
