@@ -3778,7 +3778,6 @@ function fontMime(url: string): string {
   return ({ woff2: "font/woff2", woff: "font/woff", ttf: "font/ttf", otf: "font/otf", eot: "application/vnd.ms-fontobject" } as Record<string, string>)[ext] || "font/woff2";
 }
 async function fetchImportAsset(url: string): Promise<Buffer | null> {
-  // Direct first (fast); Bright Data fallback for sites that block our datacenter IP.
   try {
     const safe = await assertSafeUrl(url);
     const r = await safeFetch(safe.toString(), {
@@ -3787,10 +3786,7 @@ async function fetchImportAsset(url: string): Promise<Buffer | null> {
       headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36" },
     });
     if (r.ok) { const buf = Buffer.from(await r.arrayBuffer()); if (buf.length) return buf; }
-  } catch { /* fall through to Bright Data */ }
-  if (brightDataEnabled()) {
-    try { const bd = await fetchViaBrightData(url, 45000); if (bd.status >= 200 && bd.status < 300 && bd.body.length) return bd.body; } catch { /* ignore */ }
-  }
+  } catch { /* asset unavailable */ }
   return null;
 }
 async function inlineFontsInCss(css: string, cssUrl: string, fontCache: Map<string, string>): Promise<string> {
