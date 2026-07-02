@@ -4,7 +4,7 @@ import { lookup as dnsLookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import { Agent, ProxyAgent, fetch as safeFetch } from "undici";
 import { load as cheerioLoad } from "cheerio";
-import { db, projects, projectMessages, projectFiles, projectSnapshots, learnings, emailReminders, studioClasses, studioUsers, studioBookings, type PlatformUser } from "@workspace/db";
+import { db, projects, projectMessages, projectFiles, projectSnapshots, importAssets, learnings, emailReminders, studioClasses, studioUsers, studioBookings, type PlatformUser } from "@workspace/db";
 import { getSessionUser, tokenFrom } from "../lib/platform-auth.js";
 import { isSubscribed, isBookingRequest, chargeTrackedUsage } from "../lib/billing.js";
 import { runWithUsage } from "../lib/ai-usage.js";
@@ -3956,6 +3956,57 @@ export function injectImportedCss(html: string, cssBlob: string | undefined): st
     : html.replace(/<head[^>]*>/i, (m) => m + tag);
 }
 
+// ── Self-contained assets: download the imported site's images/media into import_assets ──────────
+// So the copy is truly 1-on-1 and independent of the original domain (which the customer may point at
+// Nebula, breaking every absolute asset URL). Stored PER FILE and served one at a time (see
+// serveProjectSite), never bundled into the site blob → no load-everything OOM. Capped to stay bounded.
+const ASSET_EXT_RE = /\.(png|jpe?g|gif|webp|avif|svg|ico|bmp|woff2?|ttf|otf|eot|mp4|webm|ogg|mp3|wav|pdf)$/i;
+const ASSET_MAX_COUNT = 400, ASSET_MAX_EACH = 8_000_000, ASSET_MAX_TOTAL = 150_000_000;
+function assetHash(s: string): string { let h = 5381; for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0; return h.toString(16).padStart(8, "0"); }
+function assetContentType(ext: string): string {
+  return ({ png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", avif: "image/avif",
+    svg: "image/svg+xml", ico: "image/x-icon", bmp: "image/bmp", woff: "font/woff", woff2: "font/woff2", ttf: "font/ttf",
+    otf: "font/otf", eot: "application/vnd.ms-fontobject", mp4: "video/mp4", webm: "video/webm", ogg: "audio/ogg",
+    mp3: "audio/mpeg", wav: "audio/wav", pdf: "application/pdf" } as Record<string, string>)[ext] || "application/octet-stream";
+}
+async function downloadImportAssets(projectId: number): Promise<void> {
+  const files = await db.select().from(projectFiles)
+    .where(and(eq(projectFiles.projectId, projectId), sql`(${projectFiles.path} LIKE '%.html' OR ${projectFiles.path} = ${NEBULA_CSS_PATH})`));
+  const urls = new Set<string>();
+  const URL_RE = /https?:\/\/[^"'()\s\\<>]+/gi;
+  for (const f of files) {
+    for (const m of f.content.match(URL_RE) || []) {
+      const clean = m.replace(/[.,;:)]+$/, "");
+      if (ASSET_EXT_RE.test(clean.split(/[?#]/)[0])) urls.add(clean);
+    }
+  }
+  if (!urls.size) return;
+  const map = new Map<string, string>(); // original URL → local "/assets/…"
+  let total = 0, count = 0;
+  for (const url of urls) {
+    if (count >= ASSET_MAX_COUNT || total > ASSET_MAX_TOTAL) break;
+    let buf: Buffer | null = null;
+    try { buf = await fetchImportAsset(url); } catch { /* skip */ }
+    if (!buf || !buf.length || buf.length > ASSET_MAX_EACH) continue;
+    const ext = (url.split(/[?#]/)[0].split(".").pop() || "bin").toLowerCase().slice(0, 5);
+    const local = `assets/${assetHash(url)}.${ext}`;
+    const data = buf.toString("base64");
+    const [existing] = await db.select({ id: importAssets.id }).from(importAssets)
+      .where(and(eq(importAssets.projectId, projectId), eq(importAssets.path, local)));
+    if (existing) await db.update(importAssets).set({ data, contentType: assetContentType(ext) }).where(eq(importAssets.id, existing.id));
+    else await db.insert(importAssets).values({ projectId, path: local, contentType: assetContentType(ext), data });
+    map.set(url, "/" + local);
+    total += buf.length; count++;
+  }
+  if (!map.size) return;
+  for (const f of files) {
+    let content = f.content, changed = false;
+    for (const [orig, local] of map) if (content.includes(orig)) { content = content.split(orig).join(local); changed = true; }
+    if (changed) await db.update(projectFiles).set({ content, updatedAt: new Date() }).where(eq(projectFiles.id, f.id));
+  }
+  logger.info({ projectId, assets: count, bytes: total }, "[import] local assets stored");
+}
+
 // Import a live website by URL and seed a new project with it so the user can
 // edit it with AI. Registered before "/projects/:projectId" — though that route
 // is GET/DELETE only, this keeps the more specific path unambiguous.
@@ -4047,9 +4098,12 @@ router.post("/projects/import-url", async (req, res) => {
     // Make fonts self-contained in the BACKGROUND (fetch + inline as data: URIs) so the import
     // response stays fast and the preview loses its cross-origin "tofu" glyphs after a refresh.
     void inlineFontsForProject(project.id).catch((err) => req.log.warn({ err, projectId: project.id }, "[import] background font inline failed"));
-    // Also make the imported CSS self-contained (download linked stylesheets → one local file) so the
-    // copy keeps its styling even after the domain is pointed at Nebula.
-    void inlineCssForProject(project.id).catch((err) => req.log.warn({ err, projectId: project.id }, "[import] background css inline failed"));
+    // Make the imported CSS self-contained (linked stylesheets → one local file), THEN download the
+    // images/media into import_assets (rewrites refs to /assets/…). Chained so the CSS url()s are
+    // localised too. Both run in the background so the import response stays fast.
+    void inlineCssForProject(project.id)
+      .then(() => downloadImportAssets(project.id))
+      .catch((err) => req.log.warn({ err, projectId: project.id }, "[import] background css/assets failed"));
 
     res.status(201).json({
       ...project,
