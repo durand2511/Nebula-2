@@ -1148,6 +1148,8 @@ export function ProjectWorkspace() {
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"code" | "preview">("preview");
   const [isDownloading, setIsDownloading] = useState(false);
+  // Setup instructions stay reachable (collapsible), not just before the first message.
+  const [showHelp, setShowHelp] = useState(true);
   const [previewKey, setPreviewKey] = useState(0);
   // Full-screen "web viewer" for the preview. There is no zoom/scaling: the site always
   // renders at its real, fixed size (exactly how it looks in a real browser). This toggle
@@ -2418,31 +2420,39 @@ export function ProjectWorkspace() {
         <div className="w-[380px] border-r border-border bg-card/30 flex flex-col shrink-0">
           <div ref={chatScrollRef} className="flex-1 overflow-y-auto p-4" onScroll={handleChatScroll}>
             <div className="space-y-5 pb-4">
+              {/* Setup-instructies: altijd bereikbaar (inklapbaar), niet alleen vóór je eerste bericht. */}
+              <div className="border border-border/60 rounded-2xl bg-card/60 overflow-hidden">
+                <button type="button" onClick={() => setShowHelp((v) => !v)} className="w-full flex items-center justify-between px-4 py-2.5 text-sm font-semibold text-foreground hover:bg-muted/40" data-testid="button-toggle-help">
+                  <span className="flex items-center gap-2"><Sparkles className="h-4 w-4 text-primary" /> Aan de slag &amp; setup</span>
+                  <ChevronDown className={`h-4 w-4 transition-transform ${showHelp ? "" : "-rotate-90"}`} />
+                </button>
+                {showHelp && (
+                  <div className="px-5 pb-5 text-sm space-y-4">
+                    <div>
+                      <p className="text-muted-foreground">Vraag de chat om iets te bouwen of aan te passen. Bijvoorbeeld een boekingssysteem in je website:</p>
+                      <div className="mt-2 rounded-lg bg-muted/60 px-3 py-2 font-mono text-[12px] text-foreground/80">Voeg een boekingssysteem toe aan mijn website</div>
+                    </div>
+                    <div>
+                      <div className="font-medium text-foreground">Je admin-account instellen</div>
+                      <p className="text-muted-foreground mt-1">Wil je later kunnen inloggen op je boekingsbeheer? Typ in de chat:</p>
+                      <div className="mt-2 rounded-lg bg-muted/60 px-3 py-2 font-mono text-[12px] text-foreground/80">admin gebruikersnaam jouwmail@gmail.com wachtwoord</div>
+                      <p className="text-muted-foreground mt-1 text-xs">Daarmee maak je de beheerder-login aan waarmee je op het boekingssysteem inlogt.</p>
+                    </div>
+                    <div className="rounded-lg border border-amber-300/60 bg-amber-50 p-3">
+                      <div className="font-medium text-amber-900">Voordat je systeem werkt — 2 stappen</div>
+                      <p className="text-amber-900/80 mt-1">Doe deze in je boekingssysteem op het tabblad <span className="font-semibold">Integraties</span>:</p>
+                      <ul className="text-amber-900/80 mt-2 space-y-1.5 list-disc pl-4">
+                        <li><span className="font-semibold">Koppel Stripe</span> via de knop bij Integraties — anders kunnen klanten niet betalen.</li>
+                        <li><span className="font-semibold">Vul je bedrijfsgegevens in</span> (bedrijfsnaam, KvK, BTW, adres) bij Integraties — zonder dit worden er geen automatische facturen gemaakt of gemaild.</li>
+                      </ul>
+                    </div>
+                  </div>
+                )}
+              </div>
+
               {isLoadingMessages ? (
                 <div className="flex justify-center p-4">
                   <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-                </div>
-              ) : messages?.length === 0 && !isStreaming ? (
-                <div className="p-5 text-sm border border-border/60 rounded-2xl bg-card/60 space-y-4">
-                  <div>
-                    <div className="font-semibold text-foreground flex items-center gap-2"><Sparkles className="h-4 w-4 text-primary" /> Begin hier</div>
-                    <p className="text-muted-foreground mt-1">Vraag de chat om iets te bouwen of aan te passen. Bijvoorbeeld een boekingssysteem in je website:</p>
-                    <div className="mt-2 rounded-lg bg-muted/60 px-3 py-2 font-mono text-[12px] text-foreground/80">Voeg een boekingssysteem toe aan mijn website</div>
-                  </div>
-                  <div>
-                    <div className="font-medium text-foreground">Je admin-account instellen</div>
-                    <p className="text-muted-foreground mt-1">Wil je later kunnen inloggen op je boekingsbeheer? Typ in de chat:</p>
-                    <div className="mt-2 rounded-lg bg-muted/60 px-3 py-2 font-mono text-[12px] text-foreground/80">admin gebruikersnaam jouwmail@gmail.com wachtwoord</div>
-                    <p className="text-muted-foreground mt-1 text-xs">Daarmee maak je de beheerder-login aan waarmee je op het boekingssysteem inlogt.</p>
-                  </div>
-                  <div className="rounded-lg border border-amber-300/60 bg-amber-50 p-3">
-                    <div className="font-medium text-amber-900">Voordat je systeem werkt — 2 stappen</div>
-                    <p className="text-amber-900/80 mt-1">Doe deze in je boekingssysteem op het tabblad <span className="font-semibold">Integraties</span>:</p>
-                    <ul className="text-amber-900/80 mt-2 space-y-1.5 list-disc pl-4">
-                      <li><span className="font-semibold">Koppel Stripe</span> via de knop bij Integraties — anders kunnen klanten niet betalen.</li>
-                      <li><span className="font-semibold">Vul je bedrijfsgegevens in</span> (bedrijfsnaam, KvK, BTW, adres) bij Integraties — zonder dit worden er geen automatische facturen gemaakt of gemaild.</li>
-                    </ul>
-                  </div>
                 </div>
               ) : (
                 messages?.map((msg) => {
