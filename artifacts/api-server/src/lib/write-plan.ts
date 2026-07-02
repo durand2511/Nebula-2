@@ -224,10 +224,31 @@ export function insertNavLink(html: string, href: string, label: string): string
     return -1;
   }
 
-  // Build the new item from an existing one: clone its markup, swap href + label, drop id/active.
+  // Strip any nested <ul>…</ul> (dropdown submenu) + dropdown markers from a cloned item, so the new
+  // link is a plain top-level item. Without this, cloning a "Over mij"-with-submenu item drags its
+  // whole submenu (e.g. "Tarieven van Joyce") along, producing a bogus duplicate dropdown.
+  function stripSubmenu(s: string): string {
+    let out = s;
+    for (let guard = 0; guard < 6; guard++) {
+      const ulOpen = out.search(/<ul\b/i);
+      if (ulOpen < 0) break;
+      const ulClose = balancedClose(out, "ul", ulOpen);
+      if (ulClose < 0) break;
+      const end = out.indexOf(">", ulClose);
+      if (end < 0) break;
+      out = out.slice(0, ulOpen) + out.slice(end + 1);
+    }
+    return out
+      .replace(/\s+aria-haspopup=("|')[^"']*\1/gi, "")
+      .replace(/\s+aria-expanded=("|')[^"']*\1/gi, "")
+      .replace(/\s+(?:menu-item-has-children|page_item_has_children|has-children|has-submenu|has-dropdown|menu-item-has-dropdown|dropdown)(?=["'\s])/gi, "");
+  }
+
+  // Build the new item from an existing one: clone its markup, drop any submenu, swap href + label,
+  // drop id/active.
   function cloneItem(tmpl: string): string {
     return dropTarget(dropId(dropActive(
-      tmpl
+      stripSubmenu(tmpl)
         .replace(/\bhref=("|')[^"']*\1/i, `href="${href}"`)
         .replace(/(<a\b[^>]*>)[\s\S]*?(<\/a>)/i, `$1${label}$2`),
     )));
@@ -253,7 +274,9 @@ export function insertNavLink(html: string, href: string, label: string): string
           const liClose = balancedClose(block, "li", cursor);
           if (liClose < 0 || liClose > ulClose) break;
           const li = block.slice(cursor, liClose + 5); // include "</li>"
-          if (/<a\b/i.test(li)) template = li;
+          // Prefer a SIMPLE item (a plain link with no dropdown submenu) as the template, so the new
+          // item never inherits someone else's submenu. Fall back to any linked item if none is simple.
+          if (/<a\b/i.test(li) && (!template || !/<ul\b/i.test(li))) template = li;
           const next = block.slice(liClose).search(/<li\b/i);
           if (next < 0) break;
           cursor = liClose + next;
