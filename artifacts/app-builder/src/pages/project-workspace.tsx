@@ -1510,6 +1510,12 @@ export function ProjectWorkspace() {
     // Clicked an element inside the bar: its selector path starts at a nav/header ancestor.
     /(?:^|>)(?:#?header\b|#?nav\b|[\w-]*navbar[\w-]*|[\w-]*menu-?bar[\w-]*|[\w-]*site-header[\w-]*)/i.test(s.selector || "");
 
+  // Normalise a typed hex code ("59A886" or "#59a886") → "#59a886", or null if it isn't valid hex.
+  const normHex = (v: string): string | null => {
+    const s = "#" + v.trim().replace(/^#/, "");
+    return /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(s) ? s : null;
+  };
+
   // Per-element colour / background — applies immediately when a swatch is picked.
   // For the nav/header bar the background is applied to ALL pages via change_color.
   const applyElementColor = async (op: "color" | "background", value: string) => {
@@ -3492,25 +3498,42 @@ export function ProjectWorkspace() {
                               className="text-sm"
                               autoFocus
                             />
-                            <div className="flex items-center gap-4">
-                              <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
-                                Tekstkleur
+                            <div className="space-y-2">
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs text-muted-foreground w-20 shrink-0">Tekstkleur</span>
                                 <input
                                   type="color"
                                   className="h-7 w-9 rounded border bg-transparent cursor-pointer p-0"
                                   onChange={(e) => void applyElementColor("color", e.target.value)}
-                                  title="Verander de tekstkleur van dit element"
+                                  title="Kies de tekstkleur met de kleurenkiezer"
                                 />
-                              </label>
-                              <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
-                                Achtergrond
+                                <input
+                                  type="text"
+                                  placeholder="#59A886"
+                                  spellCheck={false}
+                                  className="h-7 w-24 rounded border bg-transparent px-2 text-xs font-mono"
+                                  onKeyDown={(e) => { if (e.key === "Enter") { const h = normHex((e.target as HTMLInputElement).value); if (h) void applyElementColor("color", h); } }}
+                                  title="Typ een hex-kleur (bijv. #59A886) en druk op Enter"
+                                />
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs text-muted-foreground w-20 shrink-0">Achtergrond</span>
                                 <input
                                   type="color"
                                   className="h-7 w-9 rounded border bg-transparent cursor-pointer p-0"
                                   onChange={(e) => void applyElementColor("background", e.target.value)}
-                                  title="Verander de achtergrondkleur van dit element"
+                                  title="Kies de achtergrondkleur met de kleurenkiezer"
                                 />
-                              </label>
+                                <input
+                                  type="text"
+                                  placeholder="#ffffff"
+                                  spellCheck={false}
+                                  className="h-7 w-24 rounded border bg-transparent px-2 text-xs font-mono"
+                                  onKeyDown={(e) => { if (e.key === "Enter") { const h = normHex((e.target as HTMLInputElement).value); if (h) void applyElementColor("background", h); } }}
+                                  title="Typ een hex-kleur (bijv. #ffffff) en druk op Enter"
+                                />
+                              </div>
+                              <p className="text-[11px] text-muted-foreground">Tip: typ een hex-code en druk op <span className="font-medium">Enter</span>.</p>
                             </div>
                           </div>
                         ) : (
