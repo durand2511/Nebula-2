@@ -2365,18 +2365,20 @@ export function ProjectWorkspace() {
             <div className="rounded-lg border p-4">
               <div className="flex items-center gap-2 mb-1"><Globe className="h-4 w-4 text-muted-foreground" /><h4 className="font-medium text-sm">Eigen domein koppelen</h4></div>
               <div className="text-xs text-muted-foreground mb-3 space-y-2">
-                <p>Koppel je eigen domein (bijv. <span className="font-medium">jouwstudio.nl</span>) aan Nebula. Voeg bij je DNS-provider de volgende record(s) toe, afhankelijk van hoe je je domein wilt gebruiken:</p>
+                <p>Koppel je eigen domein (bijv. <span className="font-medium">jouwstudio.nl</span>) aan Nebula. Voeg bij je DNS-provider deze <span className="font-medium">3 records</span> toe:</p>
                 <div className="rounded-md bg-muted/50 px-3 py-2">
-                  <div className="font-medium text-foreground">Met www (bijv. www.jouwstudio.nl):</div>
+                  <div className="font-medium text-foreground">1. CNAME — voor www (www.jouwstudio.nl)</div>
                   <div className="mt-1">Naam: <code className="bg-muted px-1 rounded">www</code></div>
                   <div>Type: <code className="bg-muted px-1 rounded">CNAME</code></div>
                   <div>Waarde: <code className="bg-muted px-1 rounded">{pubData?.target || "customers.nebulabookings.com"}</code></div>
                 </div>
                 <div className="rounded-md bg-muted/50 px-3 py-2">
-                  <div className="font-medium text-foreground">Zonder www, op het hoofddomein (bijv. jouwstudio.nl):</div>
+                  <div className="font-medium text-foreground">2 + 3. A-records — voor het hoofddomein (jouwstudio.nl)</div>
                   <div className="mt-1">Naam: <code className="bg-muted px-1 rounded">@</code> (of leeg, afhankelijk van je provider)</div>
                   <div>Type: <code className="bg-muted px-1 rounded">A</code></div>
-                  <div>Waarde: <code className="bg-muted px-1 rounded">216.24.57.1</code></div>
+                  <div>Voeg <span className="font-medium">twee</span> A-records toe met deze waardes:</div>
+                  <div className="mt-1">Waarde 1: <code className="bg-muted px-1 rounded">216.24.57.1</code></div>
+                  <div>Waarde 2: <code className="bg-muted px-1 rounded">216.24.57.9</code></div>
                 </div>
                 <p>TTL kan op de standaardwaarde van je provider blijven staan (meestal 1 uur).</p>
                 <p>Typ je domein hieronder, klik op <span className="font-medium">Koppelen</span> en daarna op <span className="font-medium">Verifiëren</span>. Wijzigingen kunnen tot een paar uur duren voordat ze actief zijn. SSL wordt <span className="font-medium">automatisch</span> geregeld zodra de verificatie is gelukt.</p>
