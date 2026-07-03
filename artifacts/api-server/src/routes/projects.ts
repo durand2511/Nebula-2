@@ -5575,7 +5575,7 @@ function validateAction(p: Record<string, unknown>): BuilderAction {
     case "create_page":
       return s("name") && s("navLabel") ? { action: "create_page", name: s("name"), navLabel: s("navLabel") } : { action: "none", reason: "missing name/navLabel" };
     case "change_color": {
-      const allowed = ["primary", "background", "text", "buttons", "links", "nav", "headings"] as const;
+      const allowed = ["primary", "background", "text", "buttons", "links", "nav", "nav-text", "headings"] as const;
       const t = s("target").toLowerCase();
       const target = (allowed as readonly string[]).includes(t) ? (t as (typeof allowed)[number]) : "primary";
       return s("color") ? { action: "change_color", target, color: s("color") } : { action: "none", reason: "missing color" };

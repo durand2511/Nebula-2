@@ -13,7 +13,7 @@
 import { insertNavLink } from "./write-plan.js";
 import { buildBookingAppPage, type BookingAccount } from "./booking-app.js";
 
-export type ColorTarget = "primary" | "background" | "text" | "buttons" | "links" | "nav" | "headings";
+export type ColorTarget = "primary" | "background" | "text" | "buttons" | "links" | "nav" | "nav-text" | "headings";
 export type ImageMatch = "all" | "logo" | "hero" | string;
 
 export type BuilderAction =
@@ -123,17 +123,24 @@ function colorCss(target: ColorTarget, color: string, specifics: string[] = []):
       // High-specificity selectors built from the real nav's id+classes (e.g. #header.navbar.fixed-top)
       // guarantee we out-specify Bootstrap utilities like `.bg-light{...!important}` on every page.
       const bar = specifics.length ? `${generic},${specifics.join(",")}` : generic;
-      const inner = `header .container,nav .container,header [class*="container"],nav [class*="container"],[class*="navbar"] .container,.navbar-collapse,[class*="navbar"] .navbar-collapse,header .dropdown-menu,nav .dropdown-menu,[class*="navbar"] .dropdown-menu`;
+      // Inner wrappers AND dropdown/submenu panels get the bar colour too — incl. Elementor's
+      // `.sub-menu` / `.elementor-sub-item` (otherwise the dropdown stays white while its text flips
+      // to the light contrast colour → invisible white-on-white items).
+      const inner = `header .container,nav .container,header [class*="container"],nav [class*="container"],[class*="navbar"] .container,.navbar-collapse,[class*="navbar"] .navbar-collapse,header .dropdown-menu,nav .dropdown-menu,[class*="navbar"] .dropdown-menu,header .sub-menu,nav .sub-menu,.elementor-nav-menu .sub-menu,ul.sub-menu,[class*="sub-menu"],[class*="elementor-sub-item"]`;
       let css = `${bar}{background-color:${c} !important;background-image:none !important;}`;
       css += `${inner}{background-color:${c} !important;}`;
       if (fg) {
-        // Links, menu text and dropdown items stay readable against the new bar.
-        css += `header a,nav a,[class*="site-header"] a,[class*="navbar"] a,[role="banner"] a,header .dropdown-item,nav .dropdown-item,header .nav-link,nav .nav-link{color:${fg} !important;}`;
+        // Links, menu text and dropdown items stay readable against the new bar (incl. Elementor items).
+        css += `header a,nav a,[class*="site-header"] a,[class*="navbar"] a,[role="banner"] a,header .dropdown-item,nav .dropdown-item,header .nav-link,nav .nav-link,.elementor-item,.elementor-sub-item,.sub-menu a{color:${fg} !important;}`;
         // Buttons inside the bar flip to a visible inverted style (skip the hamburger toggler).
         css += `header button:not(.navbar-toggler),nav button:not(.navbar-toggler),header .btn,nav .btn,header [class*="button"],nav [class*="button"],header input[type="submit"],nav input[type="submit"]{background-color:${fg} !important;color:${c} !important;border-color:${fg} !important;}`;
       }
       return css;
     }
+    case "nav-text":
+      // Colour ONLY the nav/menu text (links + Elementor items) across the whole bar, on every page —
+      // the background is left untouched. Used when the user picks the "text colour" swatch on the nav.
+      return `header a,nav a,[class*="site-header"] a,[class*="main-header"] a,[class*="navbar"] a,[class*="nav-bar"] a,[class*="menu-bar"] a,[class*="topbar"] a,[role="banner"] a,header .nav-link,nav .nav-link,.elementor-item,.elementor-sub-item,.elementor-nav-menu a,.sub-menu a{color:${c} !important;}`;
     case "primary":
     default:
       // Brand colour: links, buttons, and common theme CSS variables.
@@ -579,7 +586,7 @@ export function rebuildBookingApp(files: ProjectFile[]): ProjectFile | null {
 
 const COLOR_LABEL: Record<ColorTarget, string> = {
   primary: "hoofdkleur", background: "achtergrond", text: "tekst", buttons: "knoppen",
-  links: "links", nav: "navigatiebalk", headings: "koppen",
+  links: "links", nav: "navigatiebalk", "nav-text": "navigatie-tekst", headings: "koppen",
 };
 
 /**

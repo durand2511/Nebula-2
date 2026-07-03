@@ -1515,9 +1515,11 @@ export function ProjectWorkspace() {
   const applyElementColor = async (op: "color" | "background", value: string) => {
     if (!selection || !selection.selector) return;
     setApplyingEdit(true);
+    // On the nav/header bar, BOTH colours apply site-wide (the bar must match on every page):
+    // background → target "nav", text → target "nav-text" (leaves the background untouched).
     const action =
-      isNavLike(selection) && op === "background"
-        ? { action: "change_color", target: "nav", color: value }
+      isNavLike(selection)
+        ? { action: "change_color", target: op === "background" ? "nav" : "nav-text", color: value }
         : { action: "edit_element", page: currentPagePath(), selector: selection.selector, op, value };
     const ok = await postAction(action);
     if (ok) await refreshAfterEdit();
@@ -3525,7 +3527,7 @@ export function ProjectWorkspace() {
                         )}
                         <p className="mt-2 text-[11px] text-muted-foreground">
                           {isNavLike(selection)
-                            ? "Navigatiebalk — de achtergrondkleur wordt op alle pagina's toegepast."
+                            ? "Navigatiebalk — tekst- én achtergrondkleur worden op alle pagina's toegepast."
                             : `Past alleen dit ene element aan${selection.tag ? ` (<${selection.tag}>)` : ""}.`}
                         </p>
                         <div className="flex items-center justify-between gap-2 mt-4">
