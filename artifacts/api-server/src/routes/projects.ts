@@ -220,16 +220,19 @@ async function fetchWebsiteHtml(rawUrl: string): Promise<{ html: string; finalUr
       finally { clearTimeout(timer); }
     };
     let res: Awaited<ReturnType<typeof safeFetch>> | null = null;
-    try {
-      // With a proxy configured, give the DIRECT try a short leash (a blocked site often just hangs).
-      res = await attempt(importDispatcher, importProxy ? 8000 : IMPORT_FETCH_TIMEOUT_MS);
-    } catch (err) {
-      if (!importProxy) throw err; // no proxy → surface the original error
-    }
-    // Fall back to the residential proxy on a direct FAILURE/timeout OR a bot-block STATUS
-    // (403/429/451/503). The proxy returns the SAME raw HTML, so the 1-on-1 output is untouched.
-    if (importProxy && (!res || [403, 429, 451, 503].includes(res.status))) {
-      res = await attempt(importProxy, 30000); // fresh, generous timeout for the proxy
+    if (importProxy) {
+      // A proxy is configured precisely to bypass datacenter-IP blocks — so use it FIRST. Some sites
+      // (SiteGround/Wordfence) return a 200 "blocked" page to direct datacenter requests, which no
+      // status-code check would catch; the proxy avoids that entirely. The proxy returns the SAME raw
+      // HTML, so the 1-on-1 output is untouched. Fall back to a DIRECT try only if the proxy fails or
+      // is itself blocked.
+      try { res = await attempt(importProxy, 30000); } catch { /* proxy failed → try direct below */ }
+      if (!res || [403, 429, 451, 503].includes(res.status)) {
+        try { const direct = await attempt(importDispatcher, IMPORT_FETCH_TIMEOUT_MS); if (direct) res = direct; } catch { /* keep the proxy result, if any */ }
+      }
+    } else {
+      // No proxy configured → direct fetch; surface its error as before.
+      res = await attempt(importDispatcher, IMPORT_FETCH_TIMEOUT_MS);
     }
     if (!res) throw new Error("Kon de website niet ophalen.");
 
@@ -3828,16 +3831,18 @@ async function fetchImportAsset(url: string): Promise<Buffer | null> {
   if (!safe) return null;
   const headers = { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36" };
   // Each attempt gets its OWN timeout signal (shared signals let a slow direct try starve the proxy).
-  const get = async (dispatcher: Agent | ProxyAgent, timeoutMs: number) => safeFetch(safe.toString(), { dispatcher, signal: AbortSignal.timeout(timeoutMs), headers });
-  try {
-    const r = await get(importDispatcher, importProxy ? 8000 : 12000);
-    if (r.ok) { const buf = Buffer.from(await r.arrayBuffer()); if (buf.length) return buf; }
-    else if (importProxy) { const r2 = await get(importProxy, 30000); if (r2.ok) { const b = Buffer.from(await r2.arrayBuffer()); if (b.length) return b; } }
-  } catch {
-    // Direct blocked/timed out → try the residential proxy (raw passthrough).
-    if (importProxy) { try { const r2 = await get(importProxy, 30000); if (r2.ok) { const b = Buffer.from(await r2.arrayBuffer()); if (b.length) return b; } } catch { /* give up */ } }
+  const get = async (dispatcher: Agent | ProxyAgent, timeoutMs: number): Promise<Buffer | null> => {
+    try { const r = await safeFetch(safe.toString(), { dispatcher, signal: AbortSignal.timeout(timeoutMs), headers }); if (r.ok) { const b = Buffer.from(await r.arrayBuffer()); if (b.length) return b; } } catch { /* fall through */ }
+    return null;
+  };
+  // Proxy FIRST when configured (same reason as fetchWebsiteHtml: a datacenter IP gets a 200 "blocked"
+  // page for these asset URLs too, so a direct fetch would store the block page as the CSS/image).
+  if (importProxy) {
+    const viaProxy = await get(importProxy, 30000);
+    if (viaProxy) return viaProxy;
+    return await get(importDispatcher, 12000); // fallback: direct
   }
-  return null;
+  return await get(importDispatcher, 12000);
 }
 async function inlineFontsInCss(css: string, cssUrl: string, fontCache: Map<string, string>): Promise<string> {
   const re = /url\(\s*(['"]?)([^)'"]+)\1\s*\)/gi;
