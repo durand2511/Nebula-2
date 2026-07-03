@@ -98,20 +98,27 @@ export async function serveProjectSite(projectId: number, req: Request, res: Res
   if (ext === "html") {
     // Keep navigation on the new domain: rewrite links to the imported site's original domain.
     content = rewriteInternalLinks(content, rows.map((r) => r.path));
+    // Belt-and-suspenders: neutralise any <base href="https://ORIGINAL/…"> tag. Left in place it makes
+    // every relative link/asset resolve to the OLD site, so visiting the published domain bounces the
+    // visitor to the original site. Rewrite to root "/" (assets are absolute or /assets/… → unaffected).
+    content = content.replace(/(<base\b[^>]*\bhref=)(["'])https?:\/\/[^"']*\2/gi, "$1$2/$2");
     const tag = `<script>window.__BA_PID__=${projectId};</script>`;
     if (/<head[^>]*>/i.test(content)) content = content.replace(/<head[^>]*>/i, (m) => m + tag);
     else if (/<body[^>]*>/i.test(content)) content = content.replace(/<body[^>]*>/i, (m) => m + tag);
     else content = tag + content;
+    // The GENERATED booking-app page is self-contained: injecting the imported site's fonts/CSS
+    // would override its own nav/hero styling (nav-colour mismatch), so skip both for it.
+    const isBookingApp = file.path === "booking-app.html";
     // Self-contained fonts (survive edits): inject the stored @font-face blob (data: URIs) at serve
     // time, so imported icon-fonts render instead of "tofu" boxes.
-    const fontBlob = rows.find((r) => r.path === ".nebula-fonts.css")?.content;
+    const fontBlob = isBookingApp ? undefined : rows.find((r) => r.path === ".nebula-fonts.css")?.content;
     if (fontBlob) {
       const st = `<style data-nebula-fonts>${fontBlob}</style>`;
       content = /<\/head>/i.test(content) ? content.replace(/<\/head>/i, st + "</head>") : content.replace(/<head[^>]*>/i, (m) => m + st);
     }
     // Self-contained imported CSS (survives the domain move): inject after fonts so it wins over the
     // original cross-origin <link> stylesheets (which 404 once the domain points at Nebula).
-    const cssBlob = rows.find((r) => r.path === ".nebula-imported.css")?.content;
+    const cssBlob = isBookingApp ? undefined : rows.find((r) => r.path === ".nebula-imported.css")?.content;
     if (cssBlob) {
       const st = `<style data-nebula-imported-css>${cssBlob}</style>`;
       content = /<\/head>/i.test(content) ? content.replace(/<\/head>/i, st + "</head>") : content.replace(/<head[^>]*>/i, (m) => m + st);

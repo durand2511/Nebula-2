@@ -687,6 +687,25 @@ async function crawlSite(
 // Serves stored (possibly AI-modified) HTML for an imported site, with the
 // <base href> rewritten to route all relative requests through the site-proxy.
 // The iframe uses allow-same-origin so requests are same-origin (no CORS).
+// Serve an imported binary asset (image/font/media) for the EDITOR PREVIEW. The preview rewrites the
+// page's /assets/… refs to this project-scoped path so localised assets load in the editor too (the
+// published site serves /assets/ directly via host-site). One row per request → no OOM.
+router.get("/projects/:projectId/asset/:name", async (req, res) => {
+  const projectId = Number(req.params.projectId);
+  if (isNaN(projectId)) { res.status(400).send("Invalid project ID"); return; }
+  const [asset] = await db.select().from(importAssets)
+    .where(and(eq(importAssets.projectId, projectId), eq(importAssets.path, "assets/" + req.params.name)));
+  if (!asset) { res.status(404).send("Not found"); return; }
+  res.setHeader("Content-Type", asset.contentType || "application/octet-stream");
+  res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+  res.send(Buffer.from(asset.data, "base64"));
+});
+
+// Hosts that are NEVER the imported site's own origin — so the preview's <base href> detection can't
+// mistake a third-party link (e.g. the booking app's "Koppel Google Agenda" → calendar.google.com) for
+// the site domain and route everything through the proxy → "upstream error".
+const PREVIEW_ORIGIN_SKIP = /(^|\.)(google|gstatic|googleapis|googletagmanager|googlesyndication|doubleclick|youtube|youtu\.be|vimeo|facebook|fbcdn|instagram|twitter|x\.com|linkedin|tiktok|pinterest|wa\.me|whatsapp|t\.me|telegram|gmpg\.org|wpconsent|jsdelivr|unpkg|cloudflare|jquery|gravatar|schema\.org|w3\.org|wordpress\.org|paypal|stripe)/i;
+
 //
 // GET /api/projects/:id/preview-page?page=index.html&sid=<session-id>
 router.get("/projects/:id/preview-page", async (req, res) => {
@@ -713,6 +732,7 @@ router.get("/projects/:id/preview-page", async (req, res) => {
     let m: RegExpExecArray | null;
     while ((m = aRe.exec(html)) !== null) {
       const h = m[1].replace(/^www\./, "").toLowerCase();
+      if (PREVIEW_ORIGIN_SKIP.test(h)) continue; // never pick a 3rd-party host (google/calendar/social) as "origin"
       counts.set(h, (counts.get(h) ?? 0) + 1);
     }
     if (counts.size > 0) {
@@ -736,6 +756,7 @@ router.get("/projects/:id/preview-page", async (req, res) => {
         let m: RegExpExecArray | null;
         while ((m = aRe.exec(indexFile.content)) !== null) {
           const h = m[1].replace(/^www\./, "").toLowerCase();
+          if (PREVIEW_ORIGIN_SKIP.test(h)) continue;
           counts.set(h, (counts.get(h) ?? 0) + 1);
         }
         if (counts.size > 0) domain = [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
@@ -1018,8 +1039,17 @@ document.addEventListener("submit",function(e){
 
   // Self-contained fonts: inject the stored @font-face blob (data: URIs) at serve time. It lives in
   // its OWN file, so editing a page never removes it — the cross-origin "tofu" glyphs stay fixed.
-  html = injectSelfContainedFonts(html, fileRows.find((f) => f.path === NEBULA_FONTS_PATH)?.content);
-  html = injectImportedCss(html, fileRows.find((f) => f.path === NEBULA_CSS_PATH)?.content);
+  // NB: skip for the GENERATED booking-app page — it is self-contained; injecting the imported
+  // site's CSS/fonts would override its own nav/hero styling (nav-colour mismatch).
+  if (page !== "booking-app.html") {
+    html = injectSelfContainedFonts(html, fileRows.find((f) => f.path === NEBULA_FONTS_PATH)?.content);
+    html = injectImportedCss(html, fileRows.find((f) => f.path === NEBULA_CSS_PATH)?.content);
+  }
+
+  // Localised assets live at /assets/… (served directly by the published site). In the EDITOR PREVIEW
+  // point them at the project-scoped asset route so images + CSS url() load here too (base href only
+  // affects original-domain URLs; these root-relative ones resolve to our origin → the asset route).
+  html = html.replace(/\/assets\/([0-9a-f]{8}\.[a-z0-9]{2,5})\b/gi, `/api/projects/${projectId}/asset/$1`);
 
   res.setHeader("Content-Type", "text/html; charset=utf-8");
   res.setHeader("Cache-Control", "no-store");
@@ -3925,19 +3955,19 @@ async function inlineCssForProject(projectId: number): Promise<void> {
     }
   }
   if (!hrefs.size) return;
-  const fontCache = new Map<string, string>();
   const parts: string[] = [];
-  let count = 0;
+  let count = 0, total = 0;
+  const MAX_CSS_TOTAL = 5_000_000; // hard cap so the injected CSS can never balloon (was 307MB!)
   for (const href of hrefs) {
-    if (count >= 40) break; // safety cap: never crawl an unbounded number of stylesheets
+    if (count >= 60 || total > MAX_CSS_TOTAL) break;
     let buf: Buffer | null = null;
     try { buf = await fetchImportAsset(href); } catch { /* skip */ }
     if (!buf || buf.length > 2_000_000) continue;
-    let css = buf.toString("utf8");
-    css = absolutizeCssUrls(css, href);
-    try { css = await inlineFontsInCss(css, href, fontCache); } catch { /* keep un-inlined */ }
+    // Only absolutize url() — do NOT inline fonts here (they're stored ONCE in .nebula-fonts.css;
+    // inlining them into every stylesheet duplicated the font data dozens of times → 307MB blob).
+    const css = absolutizeCssUrls(buf.toString("utf8"), href);
     parts.push(`/* imported: ${href} */\n${css}`);
-    count++;
+    count++; total += css.length;
   }
   const blob = parts.join("\n\n");
   if (!blob.trim()) return;
@@ -4000,7 +4030,12 @@ async function downloadImportAssets(projectId: number): Promise<void> {
   }
   if (!map.size) return;
   for (const f of files) {
-    let content = f.content, changed = false;
+    // Re-read the CURRENT content: a concurrent edit (e.g. "voeg bookings toe" adding a nav link) may
+    // have run during the ~minute of downloading. Rewriting asset URLs on the FRESH content preserves
+    // that edit instead of clobbering it with the stale copy we read at the start.
+    const [fresh] = await db.select({ content: projectFiles.content }).from(projectFiles).where(eq(projectFiles.id, f.id));
+    if (!fresh) continue;
+    let content = fresh.content, changed = false;
     for (const [orig, local] of map) if (content.includes(orig)) { content = content.split(orig).join(local); changed = true; }
     if (changed) await db.update(projectFiles).set({ content, updatedAt: new Date() }).where(eq(projectFiles.id, f.id));
   }
@@ -4095,12 +4130,10 @@ router.post("/projects/import-url", async (req, res) => {
       "Imported website",
     );
 
-    // Make fonts self-contained in the BACKGROUND (fetch + inline as data: URIs) so the import
-    // response stays fast and the preview loses its cross-origin "tofu" glyphs after a refresh.
-    void inlineFontsForProject(project.id).catch((err) => req.log.warn({ err, projectId: project.id }, "[import] background font inline failed"));
-    // Make the imported CSS self-contained (linked stylesheets → one local file), THEN download the
-    // images/media into import_assets (rewrites refs to /assets/…). Chained so the CSS url()s are
-    // localised too. Both run in the background so the import response stays fast.
+    // Self-contained assets in the BACKGROUND: bundle the linked stylesheets into one local
+    // .nebula-imported.css, THEN download images/media/fonts into import_assets and rewrite refs to
+    // /assets/…. Served locally by BOTH the published site (host-site) AND the editor preview (rewritten
+    // to /api/projects/:id/asset/… at serve time), so the copy is 1-on-1 and works on a moved domain.
     void inlineCssForProject(project.id)
       .then(() => downloadImportAssets(project.id))
       .catch((err) => req.log.warn({ err, projectId: project.id }, "[import] background css/assets failed"));
@@ -5423,13 +5456,48 @@ async function handleConversational(session: BuildSession, projectId: number, co
   }
 }
 
+// Run a DETERMINISTIC action (e.g. add booking app) inside a chat/stream session — same persist logic
+// as the /command route, but streams events to the chat. Critically it uses applyAction (surgical:
+// creates booking-app.html + one nav link) instead of the full AI rebuild, so an IMPORTED site is
+// never rewritten/broken and its images/content stay exactly as imported.
+async function handleDeterministicAction(session: BuildSession, projectId: number, content: string, action: BuilderAction): Promise<void> {
+  const send = (event: BuildEvent) => emitBuildEvent(session, event);
+  try {
+    const files = await db.select().from(projectFiles).where(eq(projectFiles.projectId, projectId));
+    const result = applyAction(action, files.map((f) => ({ path: f.path, content: f.content })));
+    if (result.changed.length > 0 || result.created.length > 0) await snapshotProject(projectId, content.slice(0, 120));
+    const byPath = new Map(files.map((f) => [f.path, f]));
+    for (const c of result.changed) { const ex = byPath.get(c.path); if (ex) await db.update(projectFiles).set({ content: c.content, updatedAt: new Date() }).where(eq(projectFiles.id, ex.id)); }
+    for (const n of result.created) await db.insert(projectFiles).values({ projectId, path: n.path, content: n.content, language: "html" });
+    await db.insert(projectMessages).values({ projectId, role: "user", content });
+    await db.insert(projectMessages).values({ projectId, role: "assistant", content: result.summary });
+    await db.update(projects).set({ updatedAt: new Date() }).where(eq(projects.id, projectId));
+    if ((action.action === "add_booking_app" || action.action === "set_booking_logins") && "accounts" in action && Array.isArray(action.accounts) && action.accounts.length) {
+      try { await seedStaffAccounts(projectId, action.accounts, true); } catch (err) { logger.warn({ err, projectId }, "[stream] staff seed failed"); }
+    }
+    if (action.action === "add_booking_app" && result.created.some((c) => c.path === "booking-app.html")) {
+      const all = await db.select().from(projectFiles).where(eq(projectFiles.projectId, projectId));
+      try { await generateEmailBrand(projectId, all.map((f) => ({ path: f.path, content: f.content }))); } catch { /* best-effort */ }
+    }
+    send({ type: "text", text: result.summary });
+    send({ type: "done", files: [...result.changed.map((c) => c.path), ...result.created.map((c) => c.path)] });
+    finishBuildSession(session, "done");
+  } catch (err) {
+    logger.error({ err, projectId }, "handleDeterministicAction failed");
+    send({ type: "error", message: "Er ging iets mis bij het toevoegen." });
+    finishBuildSession(session, "error");
+  }
+}
+
 // ─── Command architecture: AI classifies intent → JSON; hardcoded functions execute ──────
 //
 // The ONLY AI call here maps free text to one fixed action (no HTML/CSS generation). The
 // action is then carried out by the deterministic functions in lib/actions.ts.
 async function classifyCommand(text: string): Promise<BuilderAction> {
-  // Deterministic shortcut: a "booking app" request needs NO AI at all — the app is hard-coded.
-  if (/\b(booking[\s-]?app|boekings?[\s-]?app|boekings?systeem|reserverings?(?:systeem|app)|reservatie[\s-]?systeem)\b/i.test(text)) {
+  // Deterministic shortcut: a "booking app" request needs NO AI at all — the app is hard-coded. Match
+  // broadly (EN + NL, singular/plural, "system"/"app") so it's caught reliably and never falls through
+  // to the full AI rebuild (which would rewrite/break an imported site).
+  if (/\b(bookings?|boeking|boekingen|booking[\s-]?(app|system|systeem)|boekings?[\s-]?(app|systeem)|boekings?systeem|reserverings?(?:systeem|app)|reservatie[\s-]?systeem|reservation[\s-]?system)\b/i.test(text)) {
     return { action: "add_booking_app" };
   }
   const catalogue = ACTION_CATALOGUE
@@ -6151,6 +6219,19 @@ router.post("/projects/:projectId/messages/stream", json({ limit: "25mb" }), asy
     void runWithUsage(() => handleConversational(session, projectId, content)).then(({ totals }) => chargeTrackedUsage(owner.id, projectId, content, totals)).catch(() => {});
     attachToBuild(session, res);
     return;
+  }
+
+  // SAFETY NET: a booking (or login) request must run the SURGICAL deterministic action, never the full
+  // AI rebuild — otherwise "add a booking system" rewrites an imported site and drops its images. The
+  // frontend already tries /command first, but this guarantees it even if that was skipped.
+  if (images.length === 0) {
+    const detAction = await classifyCommand(content);
+    if (detAction.action === "add_booking_app" || detAction.action === "set_booking_logins") {
+      const session = createBuildSession(projectId);
+      void runWithUsage(() => handleDeterministicAction(session, projectId, content, detAction)).then(({ totals }) => chargeTrackedUsage(owner.id, projectId, content, totals)).catch(() => {});
+      attachToBuild(session, res);
+      return;
+    }
   }
 
   // Billing gate for real AI changes.
