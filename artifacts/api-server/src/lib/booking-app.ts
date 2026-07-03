@@ -1889,8 +1889,10 @@ export function buildBookingAppPage(opts: BookingAppOpts = {}): string {
   // Accounts are configured IN THE CHAT (the AI asks). A fresh app starts with NO accounts —
   // the studio sets the admin/teacher logins via the chat; customers self-register at login.
   const accounts: BookingAccount[] = (opts.accounts && opts.accounts.length) ? opts.accounts : [];
-  const logo = (opts.logo && /^https?:\/\//i.test(opts.logo)) ? opts.logo : "";
-  const bg = (opts.homeBg && /^(data:image\/|https?:\/\/)/i.test(opts.homeBg)) ? opts.homeBg : "";
+  // Accept absolute URLs, data: images, AND root-relative "/assets/…" (a LOCALISED import asset served
+  // by the Nebula host itself — an absolute original-domain URL would 404 after the domain moves).
+  const logo = (opts.logo && /^(https?:\/\/|\/assets\/)/i.test(opts.logo)) ? opts.logo : "";
+  const bg = (opts.homeBg && /^(data:image\/|https?:\/\/|\/assets\/)/i.test(opts.homeBg)) ? opts.homeBg : "";
   // Bake only a FLAG (not the data URI) so the image is inlined ONCE — in the CSS var below.
   // SECURITY: never bake staff passwords into the served page (they'd be readable in page source).
   // Auth runs against the studio_users table (seeded server-side); the page only needs role/name/email.

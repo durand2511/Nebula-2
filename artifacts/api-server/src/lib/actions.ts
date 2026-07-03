@@ -517,10 +517,25 @@ function extractDomain(html: string): string {
   return (html.match(/<a\b[^>]*\bhref=["']https?:\/\/([^/"']+)/i) ?? [])[1] ?? "";
 }
 
+// The REAL image URL of an <img> tag. Lazy-loading themes put a 1×1 data: placeholder in src and the
+// actual image in data-src/data-lazy-src/srcset — so reading only src would miss every content photo.
+function realImgSrc(tag: string): string {
+  const attr = (n: string) => (tag.match(new RegExp('\\b' + n + '=["\']([^"\']+)["\']', "i")) ?? [])[1] ?? "";
+  const src = attr("src");
+  if (src && !/^data:/i.test(src)) return src;
+  for (const n of ["data-src", "data-lazy-src", "data-original", "data-lazy"]) {
+    const v = attr(n);
+    if (v && !/^data:/i.test(v)) return v;
+  }
+  const srcset = attr("srcset") || attr("data-srcset");
+  if (srcset) { const first = srcset.split(",")[0].trim().split(/\s+/)[0]; if (first && !/^data:/i.test(first)) return first; }
+  return src; // may be a data: placeholder → the caller's data:/logo filters drop it
+}
+
 /** Best-guess site logo as an ABSOLUTE url: an <img> that looks like a logo, else first image. */
 function extractLogo(html: string, domain: string): string {
   const imgs = html.match(/<img\b[^>]*>/gi) ?? [];
-  const srcOf = (t: string) => (t.match(/\bsrc=["']([^"']+)["']/i) ?? [])[1] ?? "";
+  const srcOf = (t: string) => realImgSrc(t);
   let pick = "";
   for (const t of imgs) {
     const meta = `${srcOf(t)} ${(t.match(/\bclass=["']([^"']*)["']/i) ?? [])[1] ?? ""} ${(t.match(/\balt=["']([^"']*)["']/i) ?? [])[1] ?? ""}`;
@@ -530,6 +545,9 @@ function extractLogo(html: string, domain: string): string {
   if (!pick) return "";
   if (/^https?:\/\//i.test(pick)) return pick;
   if (pick.startsWith("//")) return "https:" + pick;
+  // A LOCALISED asset (import stored it at /assets/<hash>) is served by the Nebula host itself — keep it
+  // root-relative. Prepending the original domain gives a 404 (that path only exists on Nebula).
+  if (pick.startsWith("/assets/")) return pick;
   if (!domain) return "";
   if (pick.startsWith("/")) return "https://" + domain + pick;
   return "https://" + domain + "/" + pick.replace(/^\.?\//, "");
@@ -545,7 +563,7 @@ function extractHeroImage(html: string, domain: string, logo: string): string {
   const imgRe = /<img\b[^>]*>/gi;
   let t: RegExpExecArray | null;
   while ((t = imgRe.exec(html)) !== null) {
-    const s = (t[0].match(/\bsrc=["']([^"']+)["']/i) ?? [])[1];
+    const s = realImgSrc(t[0]);
     if (s) cands.push(s);
   }
   let best = "", bestScore = 0;
@@ -564,6 +582,8 @@ function extractHeroImage(html: string, domain: string, logo: string): string {
   if (!best) return "";
   if (/^https?:\/\//i.test(best)) return best;
   if (best.startsWith("//")) return "https:" + best;
+  // Localised asset → keep root-relative (served by the Nebula host; original domain would 404).
+  if (best.startsWith("/assets/")) return best;
   if (!domain) return "";
   if (best.startsWith("/")) return "https://" + domain + best;
   return "https://" + domain + "/" + best.replace(/^\.?\//, "");
