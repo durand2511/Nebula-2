@@ -1172,7 +1172,7 @@ export function ProjectWorkspace() {
   const [blogBusy, setBlogBusy] = useState(false);
   const selectModeRef = useRef(false);
   selectModeRef.current = selectMode;
-  type Selection = { kind: "text" | "image"; tag: string; selector: string; cls?: string; text?: string; src?: string; file?: string; alt?: string; w?: number; h?: number };
+  type Selection = { kind: "text" | "image"; tag: string; selector: string; cls?: string; text?: string; src?: string; file?: string; alt?: string; w?: number; h?: number; nav?: boolean };
   const [selection, setSelection] = useState<Selection | null>(null);
   const [editValue, setEditValue] = useState("");
   const [applyingEdit, setApplyingEdit] = useState(false);
@@ -1397,6 +1397,7 @@ export function ProjectWorkspace() {
         tag?: string;
         selector?: string;
         cls?: string;
+        nav?: boolean;
         text?: string;
         src?: string;
         file?: string;
@@ -1410,7 +1411,7 @@ export function ProjectWorkspace() {
       if (!d) return;
       // Visual select mode: the user clicked an element in the preview to edit it.
       if (d.__buildlySelected && (d.kind === "text" || d.kind === "image")) {
-        const sel: Selection = { kind: d.kind, tag: d.tag ?? "", selector: d.selector ?? "", cls: d.cls, text: d.text, src: d.src, file: d.file, alt: d.alt, w: d.w, h: d.h };
+        const sel: Selection = { kind: d.kind, tag: d.tag ?? "", selector: d.selector ?? "", cls: d.cls, text: d.text, src: d.src, file: d.file, alt: d.alt, w: d.w, h: d.h, nav: d.nav };
         setSelection(sel);
         setEditValue(d.kind === "text" ? (d.text ?? "") : "");
         return;
@@ -1503,6 +1504,7 @@ export function ProjectWorkspace() {
   // Is the selected element the nav/header bar itself? Then colour changes should be
   // site-wide (the nav must look the same on every page), not a one-element/one-page edit.
   const isNavLike = (s: Selection) =>
+    s.nav === true || // picker walked the real DOM with closest() — reliable even for deep menus
     /^(nav|header)$/i.test(s.tag) ||
     /(^|\s|-)(navbar|nav-bar|site-header|main-header|menu-bar|topbar|navigation|masthead)/i.test(s.cls || "") ||
     // Clicked an element inside the bar: its selector path starts at a nav/header ancestor.

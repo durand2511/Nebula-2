@@ -1020,6 +1020,9 @@ document.addEventListener("submit",function(e){
     if(!active)return;var el=e.target;if(!pickable(el))return;
     e.preventDefault();e.stopPropagation();if(e.stopImmediatePropagation)e.stopImmediatePropagation();
     var k=kindOf(el),msg={__buildlySelected:true,kind:k,tag:el.tagName.toLowerCase(),selector:cssPath(el),cls:(el.getAttribute("class")||"").slice(0,160)};
+    // Explicit "is this inside the nav/header bar?" via closest() — walks the FULL DOM, so it's reliable
+    // even for deeply-nested menus (Elementor) where the depth-limited cssPath can't reach the header.
+    try{msg.nav=!!(el.closest&&el.closest('header,nav,[role=banner],[class*=navbar],[class*=nav-bar],[class*=site-header],[class*=main-header],[class*=menu-bar],[class*=topbar],[class*=nav-menu],[class*=navigation],[class*=location-header]'));}catch(e){}
     if(k==="image"){var src=el.getAttribute("src")||el.src||"";msg.src=el.src||src;msg.file=fileName(src);msg.alt=el.getAttribute("alt")||"";msg.w=el.naturalWidth||el.width||0;msg.h=el.naturalHeight||el.height||0;}
     else{msg.text=(el.textContent||"").replace(/\\s+/g," ").trim().slice(0,300);}
     try{parent.postMessage(msg,"*");}catch(err){}
