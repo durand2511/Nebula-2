@@ -993,12 +993,27 @@ document.addEventListener("submit",function(e){
   function kindOf(el){return el.tagName==="IMG"?"image":"text";}
   // Build a stable CSS selector for the clicked element so the server can edit THAT element.
   function esc(s){try{return (window.CSS&&CSS.escape)?CSS.escape(s):s.replace(/([^a-zA-Z0-9_-])/g,"\\\\$1");}catch(e){return s;}}
+  function uniqueClass(node){
+    // A class that occurs exactly ONCE on the page pins the element precisely — Elementor gives every
+    // element a unique "elementor-element-XXXX" class, so the server can find the exact element.
+    try{
+      var cls=(node.getAttribute("class")||"").split(/\s+/);
+      for(var i=0;i<cls.length;i++){var c=cls[i];if(c&&/^[A-Za-z][\w-]*$/.test(c)&&document.getElementsByClassName(c).length===1)return c;}
+    }catch(e){}
+    return "";
+  }
   function cssPath(el){
     if(el.id)return"#"+esc(el.id);
     var parts=[],node=el,depth=0;
-    while(node&&node.nodeType===1&&node.tagName!=="BODY"&&node.tagName!=="HTML"&&depth<7){
+    while(node&&node.nodeType===1&&node.tagName!=="BODY"&&node.tagName!=="HTML"&&depth<8){
       if(node.id){parts.unshift("#"+esc(node.id));break;}
-      var tag=node.tagName.toLowerCase(),p=node.parentElement;
+      var tag=node.tagName.toLowerCase();
+      // Anchor on a page-unique class as soon as we find one (on the element itself or an ancestor) —
+      // gives a short, robust selector that cheerio matches server-side instead of a fragile nth-of-type
+      // path that a depth limit can truncate before reaching anything distinctive.
+      var uc=uniqueClass(node);
+      if(uc){parts.unshift(tag+"."+esc(uc));break;}
+      var p=node.parentElement;
       if(p){
         var same=[];for(var i=0;i<p.children.length;i++){if(p.children[i].tagName===node.tagName)same.push(p.children[i]);}
         if(same.length>1)tag+=":nth-of-type("+(same.indexOf(node)+1)+")";
