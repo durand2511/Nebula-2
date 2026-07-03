@@ -29,6 +29,7 @@ export type BuilderAction =
   | { action: "add_section"; page: string; kind: SectionKind }
   | { action: "add_booking_app"; accounts?: BookingAccount[] }
   | { action: "set_booking_logins"; accounts: BookingAccount[] }
+  | { action: "remove_external_bookings" }
   | { action: "undo"; reason: string }
   | { action: "none"; reason: string };
 
@@ -45,6 +46,7 @@ export const ACTION_CATALOGUE = [
   { action: "change_font", params: ["family"], when: "change the font / typeface of the whole site" },
   { action: "add_booking_app", params: [], when: "the user wants a booking/reservation app or system added (e.g. 'maak een booking app', 'voeg een boekingssysteem toe', 'reserveringssysteem', 'agenda waar klanten lessen kunnen boeken')" },
   { action: "set_booking_logins", params: ["accounts"], when: "the user provides login credentials (e-mail + password, optionally names) for the booking app — the admin login and/or teacher logins — so they can log in (e.g. 'de admin login is ...', 'docent Lisa: lisa@x.nl wachtwoord ...')" },
+  { action: "remove_external_bookings", params: [], when: "remove all links/buttons/widgets that point to OTHER (external) booking/scheduling platforms (bsport, Momoyoga, Eversports, Mindbody, etc.) from the site — e.g. 'verwijder alle links naar andere boekingsplatformen', 'haal de rooster/reserveer-knoppen naar bsport weg', 'weg met de externe booking widgets'" },
   { action: "undo", params: ["reason"], when: "undo/revert/reverse the previous change, take it back, remove the last edit (e.g. 'draai dit terug', 'maak ongedaan', 'toch niet', 'haal die wijziging weg', 'undo')" },
   { action: "none", params: ["reason"], when: "the request is none of the above / unclear / needs custom layout or content" },
 ] as const;
@@ -190,6 +192,75 @@ export function renameNavItem(html: string, from: string, to: string): string {
   return html.replace(/(<a\b[^>]*>)([\s\S]*?)(<\/a>)/gi, (m, open: string, inner: string, close: string) =>
     norm(inner) === target ? `${open}${to}${close}` : m,
   );
+}
+
+// Distinctive brand tokens of external booking/scheduling platforms. Used to catch their embedded
+// WIDGETS too — WordPress plugin blocks/scripts reference them via class/id or a RELATIVE plugin path
+// (e.g. class="wp-block-momoyoga…", /wp-content/plugins/momoyoga-integration/…), not just an external URL.
+const BOOKING_PLATFORM_TOKENS = [
+  "momoyoga", "bsport", "eversport", "mindbody", "arketa", "gymly", "virtuagym", "glofox", "wellnessliving",
+  "fitmanager", "bookwhen", "acuityscheduling", "fitogram", "punchpass", "wodify", "perfectgym", "sportbit",
+  "clubplanner", "hello-again", "teamup", "trainin", "mywellness", "simplybook", "setmore", "ovatu", "bookeo",
+];
+const TOKEN_RE = new RegExp("(" + BOOKING_PLATFORM_TOKENS.join("|") + ")", "i");
+const hasBookingToken = (s: string): boolean => !!s && TOKEN_RE.test(s);
+
+// Remove every element whose START TAG matches tokenRe (e.g. class/id contains a platform name),
+// INCLUDING its full (possibly nested) content — used to strip embedded schedule/booking widget blocks.
+function removeElementsWithAttrToken(html: string, tokenRe: RegExp): string {
+  const openTag = /<([a-zA-Z][\w-]*)\b([^>]*)>/g;
+  const voids = /^(img|br|hr|input|meta|link|source|track|area|base|col|embed|param|wbr)$/i;
+  let m: RegExpExecArray | null;
+  while ((m = openTag.exec(html)) !== null) {
+    const tag = m[1];
+    if (voids.test(tag) || m[0].endsWith("/>") || !tokenRe.test(m[2])) continue;
+    const start = m.index;
+    const scan = new RegExp(`<(/?)${tag}\\b[^>]*>`, "gi");
+    scan.lastIndex = openTag.lastIndex;
+    let depth = 1, end = -1, w: RegExpExecArray | null;
+    while ((w = scan.exec(html)) !== null) {
+      if (w[0].endsWith("/>")) continue;
+      depth += w[1] ? -1 : 1;
+      if (depth === 0) { end = scan.lastIndex; break; }
+    }
+    if (end === -1) continue; // unbalanced → leave it alone (safety)
+    html = html.slice(0, start) + html.slice(end);
+    openTag.lastIndex = start; // keep scanning from the cut point
+  }
+  return html;
+}
+
+const isExternalBookingUrl = (url: string): boolean =>
+  (/^https?:\/\//i.test(url) || url.startsWith("//")) && hasBookingToken(url);
+
+/**
+ * Remove everything that points to / embeds an EXTERNAL booking platform (bsport, Momoyoga, Eversports,
+ * …): widget blocks (class/id), platform scripts/styles/iframes (incl. relative WP-plugin paths), and
+ * links/buttons. Nav items that are ONLY such a link get dropped whole; mixed items keep their other
+ * links. Internal links (the site's own pages, the Nebula "Boeken" page) are never touched.
+ */
+export function removeExternalBookings(html: string): string {
+  let out = html;
+  // 1. Widget CONTAINERS: elements whose class/id carries a platform token (e.g. the Momoyoga block).
+  out = removeElementsWithAttrToken(out, new RegExp('\\b(?:class|id)=["\'][^"\']*(?:' + BOOKING_PLATFORM_TOKENS.join("|") + ')', "i"));
+  // 2. Platform assets: <script src>/<link href>/<style id>/<iframe src> referencing a platform token
+  //    (matches absolute URLs AND relative WP-plugin paths). Inline scripts are matched by src only.
+  out = out.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, (m) => hasBookingToken(m.match(/\bsrc=["']([^"']+)["']/i)?.[1] ?? "") ? "" : m);
+  out = out.replace(/<link\b[^>]*>/gi, (m) => hasBookingToken(m.match(/\bhref=["']([^"']+)["']/i)?.[1] ?? "") ? "" : m);
+  out = out.replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, (m) => hasBookingToken(m.match(/\bid=["']([^"']+)["']/i)?.[1] ?? "") ? "" : m);
+  out = out.replace(/<iframe\b[^>]*>(?:[\s\S]*?<\/iframe>)?/gi, (m) => hasBookingToken(m.match(/\bsrc=["']([^"']+)["']/i)?.[1] ?? "") ? "" : m);
+  // 3. Nav items: a <li> whose only link(s) are external → drop it; mixed → strip just those <a>.
+  out = out.replace(/<li\b[^>]*>[\s\S]*?<\/li>/gi, (li) => {
+    const hrefs = [...li.matchAll(/\bhref=["']([^"']+)["']/gi)].map((mm) => mm[1]);
+    const ext = hrefs.filter(isExternalBookingUrl).length;
+    if (ext === 0) return li;
+    const anchors = (li.match(/<a\b[^>]*>/gi) || []).length;
+    if (anchors <= ext) return ""; // the whole item is just external booking link(s)
+    return li.replace(/<a\b[^>]*\bhref=["']([^"']+)["'][^>]*>[\s\S]*?<\/a>/gi, (a, href) => isExternalBookingUrl(href) ? "" : a);
+  });
+  // 4. Any remaining bare <a href=ext …>…</a> (CTA buttons outside a nav list).
+  out = out.replace(/<a\b[^>]*\bhref=["']([^"']+)["'][^>]*>[\s\S]*?<\/a>/gi, (m, href) => isExternalBookingUrl(href) ? "" : m);
+  return out;
 }
 
 /** Remove background declarations from an inline style="" value; "" if nothing useful is left. */
@@ -643,6 +714,12 @@ export function applyAction(action: BuilderAction, files: ProjectFile[]): Action
     case "change_font":
       mapHtml((h) => changeFont(h, action.family));
       return { changed, created, summary: `Lettertype aangepast naar "${action.family}" op ${changed.length} pagina's.` };
+
+    case "remove_external_bookings":
+      mapHtml((h) => removeExternalBookings(h));
+      return { changed, created, summary: changed.length
+        ? `Links, knoppen en widgets naar externe boekingsplatformen verwijderd op ${changed.length} pagina's.`
+        : "Geen links naar externe boekingsplatformen gevonden." };
 
     case "change_text":
       mapHtml((h) => changeText(h, action.from, action.to));

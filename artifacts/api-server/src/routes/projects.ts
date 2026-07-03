@@ -5502,6 +5502,14 @@ async function handleDeterministicAction(session: BuildSession, projectId: numbe
 // The ONLY AI call here maps free text to one fixed action (no HTML/CSS generation). The
 // action is then carried out by the deterministic functions in lib/actions.ts.
 async function classifyCommand(text: string): Promise<BuilderAction> {
+  // Deterministic shortcut: "remove links/widgets to EXTERNAL booking platforms". Must come BEFORE the
+  // booking-app shortcut below (whose regex also matches "booking"). Requires a removal verb PLUS an
+  // external/other-platform/widget signal (or a known platform name) so it can't fire on a plain
+  // "voeg booking toe".
+  if (/\b(verwijder|verwijderen|weghal|haal\s+weg|weg\s+met|remove|delete|strip|wis)\b/i.test(text)
+      && /(extern|andere?\s*(booking|boeking|reserv|platform|systeem|widget)|booking[\s-]?platform|boekings?[\s-]?platform|widgets?|bsport|momoyoga|eversports?|mindbody|arketa|gymly|virtuagym|glofox|wellnessliving|fitmanager|eversport)/i.test(text)) {
+    return { action: "remove_external_bookings" };
+  }
   // Deterministic shortcut: a "booking app" request needs NO AI at all — the app is hard-coded. Match
   // broadly (EN + NL, singular/plural, "system"/"app") so it's caught reliably and never falls through
   // to the full AI rebuild (which would rewrite/break an imported site).
@@ -5570,6 +5578,8 @@ function validateAction(p: Record<string, unknown>): BuilderAction {
       return s("label") && s("href") ? { action: "add_nav_item", label: s("label"), href: s("href") } : { action: "none", reason: "missing label/href" };
     case "remove_nav_item":
       return s("label") ? { action: "remove_nav_item", label: s("label") } : { action: "none", reason: "missing label" };
+    case "remove_external_bookings":
+      return { action: "remove_external_bookings" };
     case "rename_nav_item":
       return s("from") && s("to") ? { action: "rename_nav_item", from: s("from"), to: s("to") } : { action: "none", reason: "missing from/to" };
     case "create_page":
@@ -5742,6 +5752,19 @@ router.post("/projects/:projectId/command", json({ limit: "1mb" }), async (req, 
       await db.insert(projectMessages).values({ projectId, role: "assistant", content: summary });
       res.json({ handled: true, action, summary, changedFiles: undone?.affected ?? [], createdFiles: [], undone: !!undone });
       return;
+    }
+
+    // Removing competitor booking links/widgets is a PAID feature — requires an active subscription.
+    if (action.action === "remove_external_bookings") {
+      const owner = await requireOwner(req, res, projectId);
+      if (!owner) return; // requireOwner already replied 401/403
+      if (!isSubscribed(owner)) {
+        const summary = "Externe boekingslinks en -widgets verwijderen kan met een abonnement. Abonneer je in je profiel → Abonnement.";
+        await db.insert(projectMessages).values({ projectId, role: "user", content: message });
+        await db.insert(projectMessages).values({ projectId, role: "assistant", content: summary });
+        res.json({ handled: true, action, summary, changedFiles: [], createdFiles: [] });
+        return;
+      }
     }
 
     // 2) Hardcoded execution on the project's files.
@@ -6235,6 +6258,14 @@ router.post("/projects/:projectId/messages/stream", json({ limit: "25mb" }), asy
   if (images.length === 0) {
     const detAction = await classifyCommand(content);
     if (detAction.action === "add_booking_app" || detAction.action === "set_booking_logins") {
+      const session = createBuildSession(projectId);
+      void runWithUsage(() => handleDeterministicAction(session, projectId, content, detAction)).then(({ totals }) => chargeTrackedUsage(owner.id, projectId, content, totals)).catch(() => {});
+      attachToBuild(session, res);
+      return;
+    }
+    if (detAction.action === "remove_external_bookings") {
+      // Paid feature: only subscribers can strip competitor booking links/widgets.
+      if (!isSubscribed(owner)) { res.status(402).json({ error: "Externe boekingslinks en -widgets verwijderen kan met een abonnement. Abonneer je in je profiel → Abonnement." }); return; }
       const session = createBuildSession(projectId);
       void runWithUsage(() => handleDeterministicAction(session, projectId, content, detAction)).then(({ totals }) => chargeTrackedUsage(owner.id, projectId, content, totals)).catch(() => {});
       attachToBuild(session, res);
