@@ -4974,14 +4974,16 @@ async function runBuild(
 
     const isFirstBuild = existingFiles.length === 0;
     const isImported = (projectRows[0].description ?? "").startsWith("Imported from");
-    const importMode = !isImported
-      ? "none"
-      : importedSpaRebuilt(existingFiles)
-        ? "edit"
-        : "rebuild";
+    // Imports are ALWAYS edited surgically (never a full "rebuild" of the homepage) — the user's site
+    // must stay 1-on-1; only the specific change is applied via edit_file.
+    const importMode = isImported ? "edit" : "none";
     const learningsContext = await buildLearningsContext();
     const fileCtx = buildFileContext(existingFiles, isImported, intent?.category);
     const protectedPaths = new Set(fileCtx.omitted);
+    // Surgical-only on imports: protect the homepage too, so write_file (full rewrite) is rejected and
+    // the AI must use edit_file for targeted changes. ONLY the enforcement set — index.html stays fully
+    // visible in the context (fileCtx.omitted) so edit_file can still find its exact text.
+    if (isImported) protectedPaths.add("index.html");
     // Build the write plan. If the pipeline already produced one, use it.
     // If not (e.g. ArchitectureAgent failed), derive a minimal safety plan from
     // intent alone — this ensures enforcement ALWAYS runs for new_page tasks
