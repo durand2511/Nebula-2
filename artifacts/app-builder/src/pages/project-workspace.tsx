@@ -1809,6 +1809,16 @@ export function ProjectWorkspace() {
           }
 
           if (!res.ok || !res.body) {
+            // A 4xx (subscription gate, no AI-credit, auth) is TERMINAL — don't silently retry into a
+            // generic error; read the server's message and show it so the user knows what to do.
+            if (res.status >= 400 && res.status < 500) {
+              let msg = "";
+              try { const j = await res.json(); msg = (j && (j.error || j.message)) || ""; } catch { /* no JSON body */ }
+              setBuildError(msg || "De AI-bewerking kon niet worden uitgevoerd.");
+              setPendingUser(null);
+              setLiveStatus(null);
+              break;
+            }
             first = false;
             if (++attempts > MAX_RECONNECTS) {
               setBuildError("Something went wrong while building");

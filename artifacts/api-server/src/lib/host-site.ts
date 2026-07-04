@@ -64,6 +64,34 @@ export function rewriteInternalLinks(html: string, paths: string[]): string {
   });
 }
 
+// Imported sites lazy-load images (the REAL url sits in data-src/srcset, a 1×1 data: placeholder in
+// src) and rely on the theme's JS for the mobile hamburger — but that JS lives on the ORIGINAL domain
+// and 404s once the domain points at Nebula, so on a phone the images stay blank and the menu won't
+// open. Fix without shipping the fragile WordPress JS: promote the real image to src (shows without
+// JS) and inject a tiny self-contained menu toggle.
+function unlazyImages(html: string): string {
+  return html.replace(/<img\b[^>]*>/gi, (tag) => {
+    const cur = (tag.match(/\bsrc=["']([^"']+)["']/i) ?? [])[1] ?? "";
+    if (cur && !/^data:/i.test(cur)) return tag; // already has a real src
+    let real = "";
+    for (const n of ["data-src", "data-lazy-src", "data-original", "data-lazy"]) {
+      const v = (tag.match(new RegExp('\\b' + n + '=["\']([^"\']+)["\']', "i")) ?? [])[1];
+      if (v && !/^data:/i.test(v)) { real = v; break; }
+    }
+    if (!real) {
+      const ss = (tag.match(/\bsrcset=["']([^"']+)["']/i) ?? [])[1] ?? (tag.match(/\bdata-srcset=["']([^"']+)["']/i) ?? [])[1] ?? "";
+      const f = ss.split(",")[0].trim().split(/\s+/)[0];
+      if (f && !/^data:/i.test(f)) real = f;
+    }
+    if (!real) return tag;
+    return cur ? tag.replace(/\bsrc=["'][^"']*["']/i, `src="${real}"`) : tag.replace(/<img\b/i, `<img src="${real}"`);
+  });
+}
+
+// Self-contained mobile-menu toggle: makes the hamburger open the menu even though the theme's own JS
+// (on the original domain) never loads. Captures clicks on a *-menu-toggle and shows the nearest menu.
+const MOBILE_MENU_SCRIPT = `<script>(function(){document.addEventListener("click",function(e){var el=e.target;var t=el&&el.closest?el.closest('.elementor-menu-toggle,[class*="menu-toggle"]'):null;if(!t)return;e.preventDefault();var open=!t.classList.contains("elementor-active");t.classList.toggle("elementor-active",open);t.setAttribute("aria-expanded",open?"true":"false");var scope=t.closest("nav,.elementor-widget-nav-menu,.elementor-nav-menu--main,header")||document;var dd=scope.querySelector(".elementor-nav-menu--dropdown")||scope.querySelector(".elementor-nav-menu__container")||scope.querySelector("ul.elementor-nav-menu")||scope.querySelector(".sub-menu");if(dd){dd.style.display=open?"block":"";}},true);})();</script>`;
+
 export async function serveProjectSite(projectId: number, req: Request, res: Response): Promise<void> {
   // Serve the PUBLISHED snapshot when present (draft → publish). Fall back to live files for
   // projects that haven't used publish yet (back-compat — they stay live as before).
@@ -122,6 +150,12 @@ export async function serveProjectSite(projectId: number, req: Request, res: Res
     if (cssBlob) {
       const st = `<style data-nebula-imported-css>${cssBlob}</style>`;
       content = /<\/head>/i.test(content) ? content.replace(/<\/head>/i, st + "</head>") : content.replace(/<head[^>]*>/i, (m) => m + st);
+    }
+    // Mobile fixes for imported pages: show lazy-loaded images without the (404'ing) theme JS, and give
+    // the hamburger a working toggle. Skip the self-contained booking-app page.
+    if (!isBookingApp) {
+      content = unlazyImages(content);
+      content = /<\/body>/i.test(content) ? content.replace(/<\/body>/i, MOBILE_MENU_SCRIPT + "</body>") : content + MOBILE_MENU_SCRIPT;
     }
     // Free (unsubscribed) sites carry a non-removable Nebula badge bottom-right.
     if (!(await ownerSubscribed(projectId))) {
