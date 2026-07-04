@@ -6288,9 +6288,9 @@ router.post("/projects/:projectId/messages/stream", json({ limit: "25mb" }), asy
     }
   }
 
-  // Billing gate for real AI changes.
+  // Billing gate for real AI changes. Lifetime/admin-unlocked accounts are never blocked on credit.
   const subscribed = isSubscribed(owner);
-  if (subscribed && (owner.aiCredit ?? 0) <= 0) {
+  if (subscribed && (owner.aiCredit ?? 0) <= 0 && owner.subscriptionId !== "lifetime") {
     res.status(402).json({ error: "Je AI-tegoed is op. Koop bij in je profiel → Abonnement." });
     return;
   }
