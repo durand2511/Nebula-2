@@ -62,7 +62,8 @@ function inferLanguage(path: string): string {
 // --- Website import (AI Editor) ---------------------------------------------
 
 const IMPORT_FETCH_TIMEOUT_MS = 12000;
-const IMPORT_MAX_BYTES = 1_500_000; // cap so a huge page can't blow the model's context
+const IMPORT_MAX_BYTES = 10_000_000; // cap against absurd pages; high enough for big Elementor sites
+                                     // (e.g. senszenjoy ~5.3MB — mostly legit inline <style>, kept as-is)
 const IMPORT_MAX_REDIRECTS = 4;
 
 // Block requests that resolve to loopback / private / link-local ranges so a
@@ -4101,23 +4102,15 @@ router.post("/projects/import-url", async (req, res) => {
   // Refuse imports that returned no real content. Bot-protection challenges and
   // JS-only sites hand back an empty <body>, which would otherwise become a project
   // that previews as a blank page with no explanation.
+  const NO_CONTENT_ERROR =
+    "Deze website kon niet geïmporteerd worden — hij gaf een lege pagina terug. " +
+    "Sites die geautomatiseerde toegang blokkeren of hun inhoud met JavaScript laden, " +
+    "kunnen niet geïmporteerd worden. Dit is vaak tijdelijk: probeer het later opnieuw, " +
+    "kies een andere website, of beschrijf wat je wilt bouwen.";
   const homepage = crawled.pages.find((p) => p.key === "index.html") ?? crawled.pages[0];
-  const bestScore = crawled.pages.reduce(
-    (max, p) => Math.max(max, meaningfulContentScore(prepareImportedHtml(p.html, p.url))),
-    0,
-  );
-  if (!homepage || bestScore < MIN_IMPORT_CONTENT_SCORE) {
-    req.log.warn(
-      { rawUrl, finalUrl: crawled.finalUrl, pageCount: crawled.pages.length, bestScore },
-      "Website import returned no usable content",
-    );
-    res.status(422).json({
-      error:
-        "Deze website kon niet geïmporteerd worden — hij gaf een lege pagina terug. " +
-        "Sites die geautomatiseerde toegang blokkeren of hun inhoud met JavaScript laden, " +
-        "kunnen niet geïmporteerd worden. Dit is vaak tijdelijk: probeer het later opnieuw, " +
-        "kies een andere website, of beschrijf wat je wilt bouwen.",
-    });
+  if (!homepage) {
+    req.log.warn({ rawUrl, finalUrl: crawled.finalUrl, pageCount: 0 }, "Website import returned no usable content");
+    res.status(422).json({ error: NO_CONTENT_ERROR });
     return;
   }
 
@@ -4139,14 +4132,28 @@ router.post("/projects/import-url", async (req, res) => {
       })
       .returning();
 
-    await db.insert(projectFiles).values(
-      crawled.pages.map((p) => ({
-        projectId: project.id,
-        path: p.key,
-        content: prepareImportedHtml(p.html, p.url),
-        language: "html" as const,
-      })),
-    );
+    // Process + store pages ONE AT A TIME. A multi-page import of very large (e.g. Elementor) pages —
+    // 30×~5MB — would OOM if we built all processed copies in one array for a single bulk insert AND
+    // parsed each page twice (scoring + storing). Here prepareImportedHtml runs ONCE per page, we insert
+    // it immediately, then release the raw source so peak memory stays ~one page. The content-score
+    // reject runs in the same pass (a no-content import is cleaned up right after).
+    let bestScore = 0;
+    for (const p of crawled.pages) {
+      const processed = prepareImportedHtml(p.html, p.url);
+      const score = meaningfulContentScore(processed);
+      if (score > bestScore) bestScore = score;
+      await db.insert(projectFiles).values({ projectId: project.id, path: p.key, content: processed, language: "html" as const });
+      p.html = ""; // free the raw source now that the processed copy is stored
+    }
+
+    if (bestScore < MIN_IMPORT_CONTENT_SCORE) {
+      // Bot-challenge / JS-only site: no usable content — remove the empty project we just created.
+      await db.delete(projectFiles).where(eq(projectFiles.projectId, project.id));
+      await db.delete(projects).where(eq(projects.id, project.id));
+      req.log.warn({ rawUrl, finalUrl: crawled.finalUrl, pageCount: crawled.pages.length, bestScore }, "Website import returned no usable content");
+      res.status(422).json({ error: NO_CONTENT_ERROR });
+      return;
+    }
 
     req.log.info(
       { projectId: project.id, pageCount: crawled.pages.length, finalUrl: crawled.finalUrl },
