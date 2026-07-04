@@ -11,6 +11,7 @@
  */
 import { db, projectFiles, seoArticles, projectSeo } from "@workspace/db";
 import { republishMatching } from "./site-publish.js";
+import { listDomains, PLATFORM_HOST } from "./domains.js";
 import { eq, and } from "drizzle-orm";
 import { anthropic } from "@workspace/integrations-openai-ai-server";
 import { addNavItem, emailBrandSeed, type ProjectFile } from "./actions.js";
@@ -43,10 +44,41 @@ function refHtml(files: ProjectFile[]): string {
   return f?.content ?? "";
 }
 
-export function deriveContext(files: ProjectFile[], language = "nl"): Ctx {
+// Hosts that are NEVER the site's own domain — so the link-guess can't pick a social/analytics/booking
+// link as the canonical domain (which would point Google at the wrong site).
+const SEO_THIRD_PARTY = /(google|gstatic|googleapis|googletagmanager|doubleclick|youtube|youtu\.be|vimeo|facebook|fbcdn|instagram|twitter|x\.com|linkedin|tiktok|pinterest|wa\.me|whatsapp|t\.me|telegram|paypal|stripe|gravatar|wp\.com|jsdelivr|unpkg|cloudflare|bsport|momoyoga|eversport|mindbody|gmpg\.org|w3\.org|schema\.org)/i;
+function guessDomainFromLinks(html: string): string {
+  const counts: Record<string, number> = {};
+  const re = /<a\b[^>]*\bhref=["']https?:\/\/([^/"'?#\s]+)/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html))) {
+    const h = m[1].toLowerCase().replace(/^www\./, "");
+    if (SEO_THIRD_PARTY.test(h) || !h.includes(".")) continue;
+    counts[h] = (counts[h] ?? 0) + 1;
+  }
+  let best = "", n = 0;
+  for (const h of Object.keys(counts)) if (counts[h] > n) { n = counts[h]; best = h; }
+  return best;
+}
+
+/** The project's real published domain for canonical/sitemap: a connected CUSTOM domain first (best
+ * for SEO), else the free Nebula subdomain, else "" (caller falls back to the link-guess). */
+export async function resolvePublishedDomain(projectId: number): Promise<string> {
+  try {
+    const all = await listDomains(projectId);
+    const isNebula = (d: string) => d.endsWith("." + PLATFORM_HOST);
+    const custom = all.find((d) => d.status === "active" && !isNebula(d.domain)) ?? all.find((d) => !isNebula(d.domain));
+    if (custom) return custom.domain.replace(/^www\./, "");
+    const sub = all.find((d) => isNebula(d.domain));
+    if (sub) return sub.domain;
+  } catch { /* fall through to the link-guess */ }
+  return "";
+}
+
+export function deriveContext(files: ProjectFile[], language = "nl", domainOverride?: string): Ctx {
   const seed = emailBrandSeed(files);
   const html = refHtml(files);
-  const domain = (html.match(/<a\b[^>]*\bhref=["']https?:\/\/([^/"']+)/i) ?? [])[1] ?? "";
+  const domain = (domainOverride && domainOverride.trim()) || guessDomainFromLinks(html);
   const description = (html.match(/<meta[^>]+name=["']description["'][^>]*content=["']([^"']+)/i) ?? [])[1] ?? "";
   return { studio: seed.studio, logo: seed.logo, accent: seed.accent, domain, description, language };
 }
@@ -194,7 +226,7 @@ export function llmsTxt(ctx: Ctx, articles: { title: string; slug: string }[]): 
 }
 export function sitemapXml(domain: string, paths: string[]): string {
   const base = domain ? `https://${domain}` : "";
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemap.org/schemas/sitemap/0.9">\n${paths.map((p) => `  <url><loc>${esc(base + p)}</loc></url>`).join("\n")}\n</urlset>\n`;
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${paths.map((p) => `  <url><loc>${esc(base + p)}</loc></url>`).join("\n")}\n</urlset>\n`;
 }
 
 // Insert a NATIVE-looking "Blog" item INTO the site's existing menu (clones a real menu item so
@@ -367,7 +399,7 @@ export async function publishArticle(projectId: number, isoDate: string, opts?: 
   const files = rows.map((f) => ({ path: f.path, content: f.content }));
   if (!files.some((f) => f.path.endsWith(".html"))) return null;
   const mode = opts?.mode ?? "manual";
-  const ctx = deriveContext(files);
+  const ctx = deriveContext(files, "nl", await resolvePublishedDomain(projectId));
 
   const past = await db.select().from(seoArticles).where(eq(seoArticles.projectId, projectId));
   const publishedPast = past.filter((p) => p.status === "published");
@@ -440,7 +472,7 @@ export async function publishDraft(projectId: number, articleId: number, isoDate
   const payload = parseJson<PipelineResult>(row.payload, null as unknown as PipelineResult);
   if (!payload) return false;
   const rows = await db.select().from(projectFiles).where(eq(projectFiles.projectId, projectId));
-  const ctx = deriveContext(rows.map((f) => ({ path: f.path, content: f.content })));
+  const ctx = deriveContext(rows.map((f) => ({ path: f.path, content: f.content })), "nl", await resolvePublishedDomain(projectId));
   const brief = briefFromPayload(payload, ctx);
   const related = (await db.select().from(seoArticles).where(and(eq(seoArticles.projectId, projectId), eq(seoArticles.status, "published")))).slice(-5).map((p) => ({ title: p.title, slug: p.slug }));
   await db.update(seoArticles).set({ status: "published", updatedAt: new Date() }).where(eq(seoArticles.id, articleId));
@@ -453,7 +485,7 @@ export async function publishDraft(projectId: number, articleId: number, isoDate
 /** Publish a MANUAL blog post (no AI): the user provides a title + body text (+ optional image). */
 export async function publishManualArticle(projectId: number, input: { title: string; body: string; image?: string }, isoDate: string): Promise<{ slug: string }> {
   const rows = await db.select().from(projectFiles).where(eq(projectFiles.projectId, projectId));
-  const ctx = deriveContext(rows.map((f) => ({ path: f.path, content: f.content })));
+  const ctx = deriveContext(rows.map((f) => ({ path: f.path, content: f.content })), "nl", await resolvePublishedDomain(projectId));
   const title = String(input.title || "").trim() || "Nieuw artikel";
   const slug = slugify(title);
   const plain = String(input.body || "").trim();
@@ -489,7 +521,7 @@ export async function improveArticle(projectId: number, isoDate: string, article
   const target = articleId ? pub.find((a) => a.id === articleId) : pub.slice().sort((a, b) => new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime())[0];
   if (!target) return null;
   const rows = await db.select().from(projectFiles).where(eq(projectFiles.projectId, projectId));
-  const ctx = deriveContext(rows.map((f) => ({ path: f.path, content: f.content })));
+  const ctx = deriveContext(rows.map((f) => ({ path: f.path, content: f.content })), "nl", await resolvePublishedDomain(projectId));
   const payload = parseJson<PipelineResult>(target.payload, null as unknown as PipelineResult);
   const brief = payload ? briefFromPayload(payload, ctx) : briefFromPayload({ keyword: target.query, searchIntent: target.intent || "informatief", title: target.title, slug: target.slug, metaTitle: target.title, metaDescription: "", outline: [], articleHtml: "", faq: [], schemaJsonLd: {}, internalLinks: [], qualityScore: target.score, publishRecommendation: "publish", improvementNotes: [], status: "published", wordCount: 0 }, ctx);
   let body = await writeBody(ctx, brief);
