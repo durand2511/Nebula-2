@@ -57,6 +57,17 @@ export default defineConfig({
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,
+    // The app is a single big SPA chunk — raise the limit so the routine "chunk too large" note (and
+    // its sourcemap-resolution follow-up) stops showing up as a build "error" in the logs.
+    chunkSizeWarningLimit: 3000,
+    rollupOptions: {
+      onwarn(warning, warn) {
+        // shadcn/ui components carry a Next.js "use client" directive that is meaningless in this Vite
+        // app; rollup's warning about it (and the failed sourcemap lookup for that warning) is noise.
+        if (warning.code === "MODULE_LEVEL_DIRECTIVE" || /"use client"/.test(warning.message)) return;
+        warn(warning);
+      },
+    },
   },
   server: {
     port,
