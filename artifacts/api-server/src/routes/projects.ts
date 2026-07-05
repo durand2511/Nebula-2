@@ -4015,7 +4015,11 @@ export function injectImportedCss(html: string, cssBlob: string | undefined): st
 // Nebula, breaking every absolute asset URL). Stored PER FILE and served one at a time (see
 // serveProjectSite), never bundled into the site blob → no load-everything OOM. Capped to stay bounded.
 const ASSET_EXT_RE = /\.(png|jpe?g|gif|webp|avif|svg|ico|bmp|woff2?|ttf|otf|eot|mp4|webm|ogg|mp3|wav|pdf)$/i;
-const ASSET_MAX_COUNT = 400, ASSET_MAX_EACH = 8_000_000, ASSET_MAX_TOTAL = 150_000_000;
+// Caps high enough that a big multi-page site (e.g. senszenjoy: ~264 assets incl. srcset variants,
+// ~250MB) fully localises — otherwise the un-downloaded images stay on the ORIGINAL domain and 404
+// once the domain moves to Nebula. Downloads are sequential (one buffer at a time) so this is
+// memory-safe regardless of the total.
+const ASSET_MAX_COUNT = 800, ASSET_MAX_EACH = 8_000_000, ASSET_MAX_TOTAL = 400_000_000;
 function assetHash(s: string): string { let h = 5381; for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0; return h.toString(16).padStart(8, "0"); }
 function assetContentType(ext: string): string {
   return ({ png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", avif: "image/avif",
