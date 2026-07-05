@@ -4048,20 +4048,28 @@ async function downloadImportAssets(projectId: number): Promise<void> {
   if (!urls.size) return;
   const map = new Map<string, string>(); // original URL → local "/assets/…"
   let total = 0, count = 0;
-  for (const url of urls) {
-    if (count >= ASSET_MAX_COUNT || total > ASSET_MAX_TOTAL) break;
-    let buf: Buffer | null = null;
-    try { buf = await fetchImportAsset(url); } catch { /* skip */ }
-    if (!buf || !buf.length || buf.length > ASSET_MAX_EACH) continue;
-    const ext = (url.split(/[?#]/)[0].split(".").pop() || "bin").toLowerCase().slice(0, 5);
-    const local = `assets/${assetHash(url)}.${ext}`;
-    const data = buf.toString("base64");
-    const [existing] = await db.select({ id: importAssets.id }).from(importAssets)
-      .where(and(eq(importAssets.projectId, projectId), eq(importAssets.path, local)));
-    if (existing) await db.update(importAssets).set({ data, contentType: assetContentType(ext) }).where(eq(importAssets.id, existing.id));
-    else await db.insert(importAssets).values({ projectId, path: local, contentType: assetContentType(ext), data });
-    map.set(url, "/" + local);
-    total += buf.length; count++;
+  const urlList = [...urls];
+  // Download in PARALLEL batches — the proxy is slow (~1-2s/asset), so sequential fetching took minutes;
+  // 8 at a time finishes localisation in tens of seconds. Each batch's buffers are stored then released,
+  // so peak memory stays ~a handful of assets (not all of them).
+  const ASSET_CONCURRENCY = 8;
+  for (let i = 0; i < urlList.length && count < ASSET_MAX_COUNT && total <= ASSET_MAX_TOTAL; i += ASSET_CONCURRENCY) {
+    const fetched = await Promise.all(urlList.slice(i, i + ASSET_CONCURRENCY).map(async (url) => {
+      try { return { url, buf: await fetchImportAsset(url) }; } catch { return { url, buf: null as Buffer | null }; }
+    }));
+    for (const { url, buf } of fetched) {
+      if (count >= ASSET_MAX_COUNT || total > ASSET_MAX_TOTAL) break;
+      if (!buf || !buf.length || buf.length > ASSET_MAX_EACH) continue;
+      const ext = (url.split(/[?#]/)[0].split(".").pop() || "bin").toLowerCase().slice(0, 5);
+      const local = `assets/${assetHash(url)}.${ext}`;
+      const data = buf.toString("base64");
+      const [existing] = await db.select({ id: importAssets.id }).from(importAssets)
+        .where(and(eq(importAssets.projectId, projectId), eq(importAssets.path, local)));
+      if (existing) await db.update(importAssets).set({ data, contentType: assetContentType(ext) }).where(eq(importAssets.id, existing.id));
+      else await db.insert(importAssets).values({ projectId, path: local, contentType: assetContentType(ext), data });
+      map.set(url, "/" + local);
+      total += buf.length; count++;
+    }
   }
   if (!map.size) return;
   for (const f of files) {
