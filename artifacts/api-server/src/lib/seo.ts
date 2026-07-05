@@ -11,6 +11,7 @@
  */
 import { db, projectFiles, seoArticles, projectSeo } from "@workspace/db";
 import { republishMatching, isPublished } from "./site-publish.js";
+import { submitToIndexNow } from "./indexnow.js";
 import { listDomains, PLATFORM_HOST } from "./domains.js";
 import { eq, and } from "drizzle-orm";
 import { anthropic } from "@workspace/integrations-openai-ai-server";
@@ -376,6 +377,15 @@ async function syncPublishedAux(projectId: number, ctx: Ctx, rows: { path: strin
   // ONLY these files, so an unrelated draft edit elsewhere isn't pushed live by accident.
   try {
     await republishMatching(projectId, (p) => p === "blog.html" || /^blog\//i.test(p) || p === "robots.txt" || p === "llms.txt" || p === "sitemap.xml");
+  } catch { /* best-effort */ }
+  // Ping IndexNow (Bing/Yandex) so the new/updated blog URLs get picked up instantly. Google ignores
+  // IndexNow, but it's free extra reach and fully automatic. Only for a real served host.
+  try {
+    const host = ctx.domain;
+    if (host && !/localhost|127\.0\.0\.1|^$/.test(host)) {
+      const urls = ["/blog.html", ...pubList.map((a) => `/blog/${a.slug}.html`)].map((u) => `https://${host}${u}`);
+      await submitToIndexNow(host, urls);
+    }
   } catch { /* best-effort */ }
 }
 

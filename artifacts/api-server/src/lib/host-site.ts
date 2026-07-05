@@ -7,6 +7,7 @@ import { db, projectFiles, projects, platformUsers, importAssets } from "@worksp
 import { eq, and } from "drizzle-orm";
 import type { Request, Response } from "express";
 import { getPublishedFiles } from "./site-publish.js";
+import { INDEXNOW_KEY } from "./indexnow.js";
 
 // A large, non-removable Nebula branding badge (injected at serve time) for FREE (unsubscribed)
 // sites. Deliberately big and prominent in the corner so a free site can't be used commercially —
@@ -128,6 +129,9 @@ export async function serveProjectSite(projectId: number, req: Request, res: Res
     : await db.select().from(projectFiles).where(eq(projectFiles.projectId, projectId));
   if (!rows.length) { res.status(404).send("Site niet gevonden."); return; }
   let p = decodeURIComponent((req.path || "/").replace(/^\/+/, ""));
+  // IndexNow verification file — the same key on every domain we serve, proving host control so we can
+  // submit this site's URLs to Bing/Yandex. Answered before the normal file lookup.
+  if (p === `${INDEXNOW_KEY}.txt`) { res.setHeader("Content-Type", "text/plain; charset=utf-8"); res.send(INDEXNOW_KEY); return; }
   if (p === "" || p.endsWith("/")) p += "index.html";
   let file = rows.find((f) => f.path === p);
   if (!file && !/\.[a-z0-9]+$/i.test(p)) file = rows.find((f) => f.path === p + ".html"); // extensionless → .html
