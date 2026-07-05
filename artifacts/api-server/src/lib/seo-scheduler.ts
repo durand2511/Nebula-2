@@ -5,7 +5,7 @@
  */
 import { db, projectSeo } from "@workspace/db";
 import { eq } from "drizzle-orm";
-import { publishArticle, publishedToday } from "./seo.js";
+import { publishArticle, publishedToday, reconcileBlogPublishing } from "./seo.js";
 import { projectOwnerSubscribed } from "./billing.js";
 import { logger } from "./logger";
 
@@ -44,4 +44,7 @@ export function startSeoScheduler(): void {
   started = true;
   setInterval(() => void tick(), 30 * 60 * 1000); // every 30 min — catches each spacing window promptly
   setTimeout(() => void tick(), 30_000); // first run shortly after boot
+  // One-time self-heal on boot: push any already-published blog articles that never reached the live
+  // snapshot into it (so /blog/x.html stops falling back to the homepage and Google can index them).
+  setTimeout(() => void reconcileBlogPublishing(), 45_000);
 }

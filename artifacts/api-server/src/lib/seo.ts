@@ -10,7 +10,7 @@
  * Generation uses AI; publishing is deterministic (writes project files).
  */
 import { db, projectFiles, seoArticles, projectSeo } from "@workspace/db";
-import { republishMatching } from "./site-publish.js";
+import { republishMatching, isPublished } from "./site-publish.js";
 import { listDomains, PLATFORM_HOST } from "./domains.js";
 import { eq, and } from "drizzle-orm";
 import { anthropic } from "@workspace/integrations-openai-ai-server";
@@ -377,6 +377,47 @@ async function syncPublishedAux(projectId: number, ctx: Ctx, rows: { path: strin
   try {
     await republishMatching(projectId, (p) => p === "blog.html" || /^blog\//i.test(p) || p === "robots.txt" || p === "llms.txt" || p === "sitemap.xml");
   } catch { /* best-effort */ }
+}
+
+/**
+ * Self-heal already-published sites whose auto-generated blog articles landed in the draft but never
+ * reached the LIVE snapshot — so /blog/<slug>.html fell back to the homepage and Google couldn't index
+ * it. For every project with published articles that was fully published at least once, make sure each
+ * article page file exists (re-rendering from its stored payload if the draft file is gone), then push
+ * the blog/SEO files into the live snapshot. Blog-scoped and best-effort: never touches non-blog files,
+ * never throws. Safe to run on every boot (idempotent).
+ */
+export async function reconcileBlogPublishing(): Promise<void> {
+  try {
+    const projs = await db.selectDistinct({ projectId: seoArticles.projectId })
+      .from(seoArticles).where(eq(seoArticles.status, "published"));
+    let fixed = 0;
+    for (const { projectId } of projs) {
+      try {
+        if (!(await isPublished(projectId))) continue; // never fully published → don't push a partial site live
+        const rows = await db.select().from(projectFiles).where(eq(projectFiles.projectId, projectId));
+        if (!rows.some((f) => f.path.endsWith(".html"))) continue;
+        const ctx = deriveContext(rows.map((f) => ({ path: f.path, content: f.content })), "nl", await resolvePublishedDomain(projectId));
+        const arts = await db.select().from(seoArticles).where(and(eq(seoArticles.projectId, projectId), eq(seoArticles.status, "published")));
+        const byPath = new Map(rows.map((f) => [f.path, { id: f.id }]));
+        // Re-render any published article whose page file went missing from the draft.
+        for (const art of arts) {
+          const path = `blog/${art.slug}.html`;
+          if (byPath.has(path)) continue;
+          const payload = parseJson<PipelineResult>(art.payload, null as unknown as PipelineResult);
+          if (!payload?.articleHtml) continue;
+          const brief = briefFromPayload(payload, ctx);
+          const related = arts.filter((a) => a.id !== art.id).slice(-5).map((p) => ({ title: p.title, slug: p.slug }));
+          const iso = new Date(art.updatedAt || Date.now()).toISOString().slice(0, 10);
+          await writeFileFor(projectId, byPath, path, articleHtml(ctx, brief, payload.articleHtml, payload.faq || [], related, iso));
+        }
+        const fresh = await db.select().from(projectFiles).where(eq(projectFiles.projectId, projectId));
+        await syncPublishedAux(projectId, ctx, fresh.map((f) => ({ path: f.path, id: f.id, content: f.content })));
+        fixed++;
+      } catch (err) { logger.warn({ err, projectId }, "[seo] reconcile project failed"); }
+    }
+    logger.info({ projects: projs.length, fixed }, "[seo] blog reconcile done");
+  } catch (err) { logger.warn({ err }, "[seo] blog reconcile failed"); }
 }
 
 // Reconstruct a Brief from a stored pipeline payload (for re-rendering drafts/updates).
