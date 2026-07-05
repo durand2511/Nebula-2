@@ -3,6 +3,7 @@ import { logger } from "./lib/logger";
 import { startReminderScheduler } from "./lib/reminders";
 import { startNudgeScheduler } from "./lib/nudges";
 import { startSeoScheduler } from "./lib/seo-scheduler";
+import { startDomainHealthcheck } from "./lib/domain-healthcheck";
 import { anthropic } from "@workspace/integrations-openai-ai-server";
 import { instrumentAnthropic } from "./lib/ai-usage";
 
@@ -33,4 +34,5 @@ app.listen(port, (err) => {
   startReminderScheduler();
   startNudgeScheduler();
   startSeoScheduler();
+  startDomainHealthcheck();
 });
