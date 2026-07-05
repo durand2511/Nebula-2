@@ -120,15 +120,19 @@ export async function verifyDomain(projectId: number, id: number): Promise<{ ok:
   let targets: string[] = [];
   try { targets = (await resolveCname(row.domain)).map((t) => t.toLowerCase().replace(/\.$/, "")); }
   catch (err) { logger.warn({ err: (err as Error)?.message, domain: row.domain }, "[domains] cname lookup failed"); }
-  let ok = targets.some((t) => t === CUSTOMERS_TARGET || t.endsWith("." + CUSTOMERS_TARGET));
-  // Apex / A-record path: compare the domain's IPs to the platform's IPs.
+  let ok = targets.some((t) => t === CUSTOMERS_TARGET || t.endsWith("." + CUSTOMERS_TARGET) || t.endsWith(".onrender.com"));
+  // Apex / A-record path. Render serves every custom domain from its dedicated 216.24.57.x anycast block —
+  // that's exactly what the DNS instructions tell customers to set (A → 216.24.57.1 / 216.24.57.9). We
+  // accept ANY IP in that block, because the live IPs of CUSTOMERS_TARGET rotate through the block (behind
+  // Cloudflare's CDN) and a strict "must equal today's IP" check wrongly rejects a correctly-set apex.
   if (!ok) {
     try {
       const [domainIps, platformIps] = await Promise.all([
         resolve4(row.domain).catch(() => [] as string[]),
         resolve4(CUSTOMERS_TARGET).catch(() => [] as string[]),
       ]);
-      if (platformIps.length && domainIps.some((ip) => platformIps.includes(ip))) ok = true;
+      const isRenderIp = (ip: string) => ip.startsWith("216.24.57.");
+      if (domainIps.some((ip) => isRenderIp(ip) || platformIps.includes(ip))) ok = true;
     } catch (err) { logger.warn({ err: (err as Error)?.message, domain: row.domain }, "[domains] a lookup failed"); }
   }
   if (ok) {
