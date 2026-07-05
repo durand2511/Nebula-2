@@ -120,6 +120,13 @@ const MOBILE_MENU_SCRIPT = `<script>(function(){document.addEventListener("click
 // ourselves from data-settings so the videos actually play — on desktop AND mobile.
 const VIDEO_EMBED_SCRIPT = `<script>(function(){function embed(u){if(!u)return"";u=String(u);var m;if(m=u.match(/(?:youtu\\.be\\/|youtube(?:-nocookie)?\\.com\\/(?:watch\\?v=|embed\\/|v\\/|shorts\\/))([\\w-]{6,})/i))return"https://www.youtube.com/embed/"+m[1];if(m=u.match(/vimeo\\.com\\/(?:video\\/)?(\\d+)/i))return"https://player.vimeo.com/video/"+m[1];return"";}var ws=document.querySelectorAll(".elementor-widget-video");for(var i=0;i<ws.length;i++){var w=ws[i];if(w.querySelector("iframe"))continue;var s={};try{s=JSON.parse(w.getAttribute("data-settings")||"{}");}catch(e){}var src=embed(s.youtube_url||s.vimeo_url||s.link||s.url||"");if(!src)continue;var slot=w.querySelector(".elementor-video")||w.querySelector(".elementor-wrapper")||w;var f=document.createElement("iframe");f.src=src;f.setAttribute("frameborder","0");f.setAttribute("allowfullscreen","");f.setAttribute("allow","accelerometer;autoplay;clipboard-write;encrypted-media;gyroscope;picture-in-picture");f.setAttribute("loading","lazy");f.title="Video";slot.innerHTML="";slot.appendChild(f);}})();</script>`;
 
+// Short stable hash (djb2) for cache-busting externalized CSS — changes only when the content changes.
+function shortHash(s: string): string {
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0;
+  return h.toString(36);
+}
+
 export async function serveProjectSite(projectId: number, req: Request, res: Response): Promise<void> {
   // Serve the PUBLISHED snapshot when present (draft → publish). Fall back to live files for
   // projects that haven't used publish yet (back-compat — they stay live as before).
@@ -132,6 +139,15 @@ export async function serveProjectSite(projectId: number, req: Request, res: Res
   // IndexNow verification file — the same key on every domain we serve, proving host control so we can
   // submit this site's URLs to Bing/Yandex. Answered before the normal file lookup.
   if (p === `${INDEXNOW_KEY}.txt`) { res.setHeader("Content-Type", "text/plain; charset=utf-8"); res.send(INDEXNOW_KEY); return; }
+  // Externalized imported CSS / fonts — served as ONE cacheable file instead of being inlined into every
+  // page (that inlined blob was ~5 MB per page). The browser now downloads it once and reuses it across
+  // pages → big page-speed / Core Web Vitals win. Cache-busted via the ?v=<hash> the <link> carries.
+  if (p === "_nebula/imported.css" || p === "_nebula/fonts.css") {
+    const src = p === "_nebula/fonts.css" ? ".nebula-fonts.css" : ".nebula-imported.css";
+    const blob = rows.find((r) => r.path === src)?.content;
+    if (blob) { res.setHeader("Content-Type", "text/css; charset=utf-8"); res.setHeader("Cache-Control", "public, max-age=31536000, immutable"); res.send(blob); return; }
+    res.status(404).send("/* not found */"); return;
+  }
   if (p === "" || p.endsWith("/")) p += "index.html";
   let file = rows.find((f) => f.path === p);
   if (!file && !/\.[a-z0-9]+$/i.test(p)) file = rows.find((f) => f.path === p + ".html"); // extensionless → .html
@@ -179,16 +195,19 @@ export async function serveProjectSite(projectId: number, req: Request, res: Res
     const isBookingApp = file.path === "booking-app.html";
     // Self-contained fonts (survive edits): inject the stored @font-face blob (data: URIs) at serve
     // time, so imported icon-fonts render instead of "tofu" boxes.
+    // Reference the fonts/CSS as EXTERNAL cacheable files (served above at /_nebula/*.css) instead of
+    // inlining the (up to ~5 MB) blob into every page. One download, reused across pages → far lighter
+    // pages and much better Core Web Vitals. ?v=<hash> busts the cache whenever the blob changes.
     const fontBlob = isBookingApp ? undefined : rows.find((r) => r.path === ".nebula-fonts.css")?.content;
     if (fontBlob) {
-      const st = `<style data-nebula-fonts>${fontBlob}</style>`;
+      const st = `<link rel="stylesheet" data-nebula-fonts href="/_nebula/fonts.css?v=${shortHash(fontBlob)}">`;
       content = /<\/head>/i.test(content) ? content.replace(/<\/head>/i, st + "</head>") : content.replace(/<head[^>]*>/i, (m) => m + st);
     }
-    // Self-contained imported CSS (survives the domain move): inject after fonts so it wins over the
-    // original cross-origin <link> stylesheets (which 404 once the domain points at Nebula).
+    // Imported CSS: injected after fonts so it wins over the original cross-origin <link> stylesheets
+    // (which 404 once the domain points at Nebula).
     const cssBlob = isBookingApp ? undefined : rows.find((r) => r.path === ".nebula-imported.css")?.content;
     if (cssBlob) {
-      const st = `<style data-nebula-imported-css>${cssBlob}</style>`;
+      const st = `<link rel="stylesheet" data-nebula-imported-css href="/_nebula/imported.css?v=${shortHash(cssBlob)}">`;
       content = /<\/head>/i.test(content) ? content.replace(/<\/head>/i, st + "</head>") : content.replace(/<head[^>]*>/i, (m) => m + st);
     }
     // Site-wide restyle (after the imported CSS so it wins) — applies the "make it prettier" refinements
