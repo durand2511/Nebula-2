@@ -2863,11 +2863,24 @@ bookingUrls: extract any https:// URLs mentioned in the request`,
 // force category=new_page regardless of what the LLM classifier returned. This is
 // the fix for "add a bookings TAB with a booking TOOL" being mislabeled new_feature
 // (which writes into index.html) instead of new_page (which creates a new file).
+// A whole-site restyle / "make it prettier/modern" is styling only — it must NOT be classified as
+// new_page (the model sometimes does), because that hard-fails the build demanding a
+// pages/nieuwe-pagina.html that a restyle never needs, so nothing gets applied.
+const RESTYLE_INTENT_RE = /\b(mooier|moderner?|moderniseer|modernis[ae]|restyle|re-?styl\w*|transformatie|transform|opfriss\w*|frisser|strakker|prettier|redesign)\b/i;
+const NEWPAGE_WORD_RE = /\b(tab|tabblad|pagina|page|menu-?item|navigatie-?item)\b/i;
+
 function applyNewPageOverride(
   intent: IntentResult,
   content: string,
   existingPaths: string[],
 ): IntentResult {
+  // Restyle/modernise (no explicit "page"/"tab" word) → force visual_tweak, drop any new-page.
+  if (RESTYLE_INTENT_RE.test(content) && !NEWPAGE_WORD_RE.test(content)) {
+    if (intent.category !== "visual_tweak" || intent.newPages.length) {
+      logger.info({ llmCategory: intent.category, forced: "visual_tweak" }, "[IntentAgent] restyle override applied");
+    }
+    return { ...intent, category: "visual_tweak", newPages: [], needsNavUpdate: false };
+  }
   const detected = detectExplicitNewPage(content, existingPaths);
   if (!detected) return intent;
   if (intent.category === "new_page" && intent.newPages.length > 0) return intent;
