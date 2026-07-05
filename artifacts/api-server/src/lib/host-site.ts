@@ -94,7 +94,16 @@ export function unlazyImages(html: string): string {
 export const RENDER_FIX_STYLE = `<style data-nebula-render-fix>.elementor-invisible{visibility:visible !important;opacity:1 !important}
 /* Keep accessibility skip-links visually hidden (they became visible "Skip to main content" text on
    every page once the theme's own screen-reader CSS was out-competed). Still shown on keyboard focus. */
-.screen-reader-text:not(:focus):not(:focus-within),.skip-link:not(:focus),.ea11y-skip-to-content-link:not(:focus),a[href="#content"]:not(:focus):not([class*="button"]):not([class*="btn"]),[class*="skip-to-content"]:not(:focus){position:absolute !important;width:1px !important;height:1px !important;padding:0 !important;margin:-1px !important;overflow:hidden !important;clip:rect(0,0,0,0) !important;white-space:nowrap !important;border:0 !important}</style>`;
+.screen-reader-text:not(:focus):not(:focus-within),.skip-link:not(:focus),.ea11y-skip-to-content-link:not(:focus),a[href="#content"]:not(:focus):not([class*="button"]):not([class*="btn"]),[class*="skip-to-content"]:not(:focus){position:absolute !important;width:1px !important;height:1px !important;padding:0 !important;margin:-1px !important;overflow:hidden !important;clip:rect(0,0,0,0) !important;white-space:nowrap !important;border:0 !important}
+/* Imported Elementor video widgets ship WITHOUT an <iframe> (their frontend JS builds it on the
+   original domain, which never loads here). We inject the iframe (see VIDEO_EMBED_SCRIPT) and make the
+   embed fluid so it fills the column and renders correctly on mobile. */
+.elementor-widget-video .elementor-wrapper{position:relative;width:100%;aspect-ratio:16/9;height:auto;overflow:hidden}
+.elementor-widget-video .elementor-video{position:absolute;inset:0;width:100%;height:100%}
+.elementor-widget-video iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
+/* Stop the nav-menu widget (and its container) from clipping its own opened mobile dropdown — that was
+   cutting the hamburger menu off so you couldn't see all items. */
+.elementor-widget-nav-menu,.elementor-widget-nav-menu>.elementor-widget-container{overflow:visible !important}</style>`;
 
 // Site-wide restyle ("maak de site mooier"): one managed CSS file the AI writes, injected on EVERY
 // imported page (after the imported CSS so its !important refinements win) — a whole-site transformation
@@ -103,7 +112,12 @@ export const NEBULA_RESTYLE_PATH = ".nebula-restyle.css";
 
 // Self-contained mobile-menu toggle: makes the hamburger open the menu even though the theme's own JS
 // (on the original domain) never loads. Captures clicks on a *-menu-toggle and shows the nearest menu.
-const MOBILE_MENU_SCRIPT = `<script>(function(){document.addEventListener("click",function(e){var el=e.target;var t=el&&el.closest?el.closest('.elementor-menu-toggle,[class*="menu-toggle"]'):null;if(!t)return;e.preventDefault();var open=!t.classList.contains("elementor-active");t.classList.toggle("elementor-active",open);t.setAttribute("aria-expanded",open?"true":"false");var scope=t.closest("nav,.elementor-widget-nav-menu,.elementor-nav-menu--main,header")||document;var dd=scope.querySelector(".elementor-nav-menu--dropdown")||scope.querySelector(".elementor-nav-menu__container")||scope.querySelector("ul.elementor-nav-menu")||scope.querySelector(".sub-menu");if(dd){dd.style.display=open?"block":"";}},true);})();</script>`;
+const MOBILE_MENU_SCRIPT = `<script>(function(){document.addEventListener("click",function(e){var el=e.target;var t=el&&el.closest?el.closest('.elementor-menu-toggle,[class*="menu-toggle"]'):null;if(!t)return;e.preventDefault();var open=!t.classList.contains("elementor-active");t.classList.toggle("elementor-active",open);t.setAttribute("aria-expanded",open?"true":"false");var scope=t.closest("nav,.elementor-widget-nav-menu,.elementor-nav-menu--main,header")||document;var dd=scope.querySelector(".elementor-nav-menu--dropdown")||scope.querySelector(".elementor-nav-menu__container")||scope.querySelector("ul.elementor-nav-menu")||scope.querySelector(".sub-menu");if(dd){if(open){dd.style.display="block";dd.style.maxHeight="80vh";dd.style.overflowY="auto";dd.style.zIndex="9999";}else{dd.style.display="";dd.style.maxHeight="";dd.style.overflowY="";}}},true);})();</script>`;
+
+// Imported Elementor video widgets carry the YouTube/Vimeo URL in data-settings but no <iframe> (the
+// theme's frontend JS that builds it lives on the original domain and never loads). Build the iframe
+// ourselves from data-settings so the videos actually play — on desktop AND mobile.
+const VIDEO_EMBED_SCRIPT = `<script>(function(){function embed(u){if(!u)return"";u=String(u);var m;if(m=u.match(/(?:youtu\\.be\\/|youtube(?:-nocookie)?\\.com\\/(?:watch\\?v=|embed\\/|v\\/|shorts\\/))([\\w-]{6,})/i))return"https://www.youtube.com/embed/"+m[1];if(m=u.match(/vimeo\\.com\\/(?:video\\/)?(\\d+)/i))return"https://player.vimeo.com/video/"+m[1];return"";}var ws=document.querySelectorAll(".elementor-widget-video");for(var i=0;i<ws.length;i++){var w=ws[i];if(w.querySelector("iframe"))continue;var s={};try{s=JSON.parse(w.getAttribute("data-settings")||"{}");}catch(e){}var src=embed(s.youtube_url||s.vimeo_url||s.link||s.url||"");if(!src)continue;var slot=w.querySelector(".elementor-video")||w.querySelector(".elementor-wrapper")||w;var f=document.createElement("iframe");f.src=src;f.setAttribute("frameborder","0");f.setAttribute("allowfullscreen","");f.setAttribute("allow","accelerometer;autoplay;clipboard-write;encrypted-media;gyroscope;picture-in-picture");f.setAttribute("loading","lazy");f.title="Video";slot.innerHTML="";slot.appendChild(f);}})();</script>`;
 
 export async function serveProjectSite(projectId: number, req: Request, res: Response): Promise<void> {
   // Serve the PUBLISHED snapshot when present (draft → publish). Fall back to live files for
@@ -176,7 +190,8 @@ export async function serveProjectSite(projectId: number, req: Request, res: Res
     if (!isBookingApp) {
       content = unlazyImages(content);
       content = /<\/head>/i.test(content) ? content.replace(/<\/head>/i, RENDER_FIX_STYLE + "</head>") : RENDER_FIX_STYLE + content;
-      content = /<\/body>/i.test(content) ? content.replace(/<\/body>/i, MOBILE_MENU_SCRIPT + "</body>") : content + MOBILE_MENU_SCRIPT;
+      const tail = MOBILE_MENU_SCRIPT + VIDEO_EMBED_SCRIPT;
+      content = /<\/body>/i.test(content) ? content.replace(/<\/body>/i, tail + "</body>") : content + tail;
     }
     // Free (unsubscribed) sites carry a non-removable Nebula badge bottom-right.
     if (!(await ownerSubscribed(projectId))) {
