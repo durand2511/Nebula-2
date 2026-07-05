@@ -10,6 +10,7 @@ import domainsRouter from "./domains";
 import importRouter from "./import";
 import studioRouter from "./studio";
 import gcalRouter from "./gcal";
+import gscRouter from "./gsc";
 
 const router: IRouter = Router();
 
@@ -24,5 +25,6 @@ router.use(domainsRouter);
 router.use(importRouter);
 router.use(studioRouter);
 router.use(gcalRouter);
+router.use(gscRouter);
 
 export default router;

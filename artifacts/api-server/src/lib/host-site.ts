@@ -3,7 +3,7 @@
  * project_files (/ → index.html, /booking-app.html → that file, /blog/x.html → that file) and
  * return it. Simple MVP renderer — serves the stored files as-is.
  */
-import { db, projectFiles, projects, platformUsers, importAssets } from "@workspace/db";
+import { db, projectFiles, projects, platformUsers, importAssets, projectGsc } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
 import type { Request, Response } from "express";
 import { getPublishedFiles } from "./site-publish.js";
@@ -165,6 +165,15 @@ export async function serveProjectSite(projectId: number, req: Request, res: Res
     if (/<head[^>]*>/i.test(content)) content = content.replace(/<head[^>]*>/i, (m) => m + tag);
     else if (/<body[^>]*>/i.test(content)) content = content.replace(/<body[^>]*>/i, (m) => m + tag);
     else content = tag + content;
+    // Google Search Console verification: if this project connected GSC, keep its meta tag in the <head>
+    // on every page (Google re-checks it, so it must stay present, not just during initial verification).
+    try {
+      const [gsc] = await db.select().from(projectGsc).where(eq(projectGsc.projectId, projectId));
+      const vtag = gsc?.verifyTag || "";
+      if (vtag && !content.includes("google-site-verification")) {
+        content = /<head[^>]*>/i.test(content) ? content.replace(/<head[^>]*>/i, (m) => m + vtag) : vtag + content;
+      }
+    } catch { /* best-effort */ }
     // The GENERATED booking-app page is self-contained: injecting the imported site's fonts/CSS
     // would override its own nav/hero styling (nav-colour mismatch), so skip both for it.
     const isBookingApp = file.path === "booking-app.html";

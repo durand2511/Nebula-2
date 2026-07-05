@@ -220,6 +220,22 @@ export const projectGcal = pgTable("project_gcal", {
   eventMap: text("event_map").notNull().default("{}"),
   connectedAt: timestamp("connected_at", { withTimezone: true }).defaultNow().notNull(),
 });
+
+// Google Search Console OAuth per project — connect once, then auto-verify the site (via an injected
+// meta tag) and submit the sitemap. Separate from project_gcal so the calendar coupling stays untouched.
+export const projectGsc = pgTable("project_gsc", {
+  projectId: integer("project_id").primaryKey().references(() => projects.id, { onDelete: "cascade" }),
+  refreshToken: text("refresh_token").notNull().default(""),
+  accessToken: text("access_token").notNull().default(""),
+  tokenExpiry: timestamp("token_expiry", { withTimezone: true }),
+  email: text("email").notNull().default(""),
+  siteUrl: text("site_url").notNull().default(""),
+  verifyTag: text("verify_tag").notNull().default(""), // google-site-verification meta tag, injected on the live site
+  status: text("status").notNull().default("pending"), // pending | active | error
+  detail: text("detail").notNull().default(""),
+  nonce: text("nonce").notNull().default(""),           // CSRF state for the OAuth round-trip
+  connectedAt: timestamp("connected_at", { withTimezone: true }).defaultNow().notNull(),
+});
 export type ProjectGcal = typeof projectGcal.$inferSelect;
 
 // Custom domains a customer connects to their site. One domain → one project (unique).

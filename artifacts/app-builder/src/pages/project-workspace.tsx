@@ -1139,6 +1139,62 @@ function LiveCodeView({ content }: { content: string }) {
   );
 }
 
+// Self-contained "Koppel Google Search Console" card — own state/fetching, so the big workspace
+// component stays untouched. One click connects the owner's Google account; the server then verifies
+// the site + submits the sitemap automatically.
+function GscCard({ projectId }: { projectId: number }) {
+  const [st, setSt] = useState<any>(null);
+  const [busy, setBusy] = useState(false);
+  const load = useCallback(async () => {
+    try { const r = await fetch(`/api/projects/${projectId}/gsc/status`); setSt(await r.json()); } catch { /* ignore */ }
+  }, [projectId]);
+  useEffect(() => { void load(); }, [load]);
+  const connect = async () => {
+    setBusy(true);
+    try {
+      const r = await fetch(`/api/projects/${projectId}/gsc/connect`, { method: "POST" });
+      const j = await r.json();
+      if (j.url) {
+        const w = window.open(j.url, "_blank", "width=520,height=680");
+        // Re-check status when the popup closes (or after a while) so the card updates itself.
+        const iv = setInterval(() => { if (!w || w.closed) { clearInterval(iv); void load(); } }, 1200);
+        setTimeout(() => { clearInterval(iv); void load(); }, 120000);
+      } else { window.alert(j.error || "Koppelen mislukt."); }
+    } catch { window.alert("Koppelen mislukt."); } finally { setBusy(false); }
+  };
+  const sync = async () => { setBusy(true); try { const r = await fetch(`/api/projects/${projectId}/gsc/sync`, { method: "POST" }); const j = await r.json(); if (!j.ok) window.alert(j.detail || "Synchroniseren mislukt."); await load(); } catch { /* ignore */ } finally { setBusy(false); } };
+  const disconnect = async () => { if (!window.confirm("Google Search Console ontkoppelen?")) return; setBusy(true); try { await fetch(`/api/projects/${projectId}/gsc/disconnect`, { method: "POST" }); await load(); } catch { /* ignore */ } finally { setBusy(false); } };
+
+  if (st && st.configured === false) return null; // platform hasn't set up Google OAuth → hide entirely
+  const connected = !!st?.connected;
+  const active = st?.status === "active";
+  return (
+    <div className="rounded-lg border p-4 mt-4">
+      <div className="flex items-center gap-2 mb-1"><Globe className="h-4 w-4 text-muted-foreground" /><h4 className="font-medium text-sm">Google Search Console</h4></div>
+      <p className="text-xs text-muted-foreground mb-3">Koppel Google zodat je site automatisch geverifieerd wordt en je sitemap wordt ingediend — dan word je sneller in Google gevonden. Eén klik, geen DNS-gedoe.</p>
+      {!connected ? (
+        <Button size="sm" disabled={busy} onClick={() => void connect()} className="bg-emerald-600 hover:bg-emerald-500 text-white">
+          {busy ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Globe className="h-3.5 w-3.5 mr-1.5" />} Koppel Google Search Console
+        </Button>
+      ) : (
+        <div className="space-y-2">
+          <div className={`text-[11px] flex items-center gap-1 ${active ? "text-emerald-600" : "text-amber-600"}`}>
+            {active ? <Check className="h-3 w-3" /> : <AlertTriangle className="h-3 w-3" />}
+            {active ? "Geverifieerd — sitemap ingediend" : (st?.detail || "Gekoppeld — verificatie nog niet gelukt")}
+          </div>
+          {st?.email && <div className="text-[11px] text-muted-foreground">Account: {st.email}</div>}
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="outline" disabled={busy} onClick={() => void sync()}>
+              {busy ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5 mr-1.5" />} {active ? "Opnieuw indienen" : "Opnieuw proberen"}
+            </Button>
+            <Button size="sm" variant="ghost" className="text-muted-foreground hover:text-destructive" disabled={busy} onClick={() => void disconnect()}><X className="h-3.5 w-3.5" /></Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function ProjectWorkspace() {
   const [, params] = useRoute("/projects/:id");
   const projectId = Number(params?.id);
@@ -2448,6 +2504,7 @@ export function ProjectWorkspace() {
                 </div>
               )}
             </div>
+            <GscCard projectId={projectId} />
           </div>
         </div>
       )}
