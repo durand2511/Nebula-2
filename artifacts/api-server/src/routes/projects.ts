@@ -8,6 +8,7 @@ import { db, projects, projectMessages, projectFiles, projectSnapshots, importAs
 import { getSessionUser, tokenFrom } from "../lib/platform-auth.js";
 import { isSubscribed, isBookingRequest, chargeTrackedUsage } from "../lib/billing.js";
 import { runWithUsage } from "../lib/ai-usage.js";
+import { unlazyImages } from "../lib/host-site.js";
 import {
   CreateProjectBody,
   GetProjectParams,
@@ -1067,6 +1068,12 @@ document.addEventListener("submit",function(e){
     html = injectSelfContainedFonts(html, fileRows.find((f) => f.path === NEBULA_FONTS_PATH)?.content);
     html = injectImportedCss(html, fileRows.find((f) => f.path === NEBULA_CSS_PATH)?.content);
   }
+
+  // Show lazy-loaded images WITHOUT the site's JS (which 404s here): promote the real image (data-src/
+  // srcset) to src. Before background localisation finishes the real URL is still the original domain
+  // (loads via the base href); after, it is /assets/… (rewritten to the asset route just below). Either
+  // way images appear immediately instead of blank placeholders while localisation is still running.
+  if (page !== "booking-app.html") html = unlazyImages(html);
 
   // Localised assets live at /assets/… (served directly by the published site). In the EDITOR PREVIEW
   // point them at the project-scoped asset route so images + CSS url() load here too (base href only

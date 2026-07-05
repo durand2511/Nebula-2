@@ -69,7 +69,7 @@ export function rewriteInternalLinks(html: string, paths: string[]): string {
 // and 404s once the domain points at Nebula, so on a phone the images stay blank and the menu won't
 // open. Fix without shipping the fragile WordPress JS: promote the real image to src (shows without
 // JS) and inject a tiny self-contained menu toggle.
-function unlazyImages(html: string): string {
+export function unlazyImages(html: string): string {
   return html.replace(/<img\b[^>]*>/gi, (tag) => {
     const cur = (tag.match(/\bsrc=["']([^"']+)["']/i) ?? [])[1] ?? "";
     if (cur && !/^data:/i.test(cur)) return tag; // already has a real src
