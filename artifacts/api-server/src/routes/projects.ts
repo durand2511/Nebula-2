@@ -8,7 +8,7 @@ import { db, projects, projectMessages, projectFiles, projectSnapshots, importAs
 import { getSessionUser, tokenFrom } from "../lib/platform-auth.js";
 import { isSubscribed, isBookingRequest, chargeTrackedUsage } from "../lib/billing.js";
 import { runWithUsage } from "../lib/ai-usage.js";
-import { unlazyImages } from "../lib/host-site.js";
+import { unlazyImages, RENDER_FIX_STYLE } from "../lib/host-site.js";
 import {
   CreateProjectBody,
   GetProjectParams,
@@ -1073,7 +1073,11 @@ document.addEventListener("submit",function(e){
   // srcset) to src. Before background localisation finishes the real URL is still the original domain
   // (loads via the base href); after, it is /assets/… (rewritten to the asset route just below). Either
   // way images appear immediately instead of blank placeholders while localisation is still running.
-  if (page !== "booking-app.html") html = unlazyImages(html);
+  if (page !== "booking-app.html") {
+    html = unlazyImages(html);
+    // Reveal entrance-animated elements that would stay hidden without the theme's scroll JS.
+    html = /<\/head>/i.test(html) ? html.replace(/<\/head>/i, RENDER_FIX_STYLE + "</head>") : RENDER_FIX_STYLE + html;
+  }
 
   // Localised assets live at /assets/… (served directly by the published site). In the EDITOR PREVIEW
   // point them at the project-scoped asset route so images + CSS url() load here too (base href only

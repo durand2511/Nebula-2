@@ -88,6 +88,11 @@ export function unlazyImages(html: string): string {
   });
 }
 
+// Imported sites hide entrance-animated elements with `.elementor-invisible{visibility:hidden}` and rely
+// on the theme JS (which 404s here) to reveal them on scroll — so without it those elements/images
+// "flash then disappear". Force them visible (no animation, but shown).
+export const RENDER_FIX_STYLE = `<style data-nebula-render-fix>.elementor-invisible{visibility:visible !important;opacity:1 !important}</style>`;
+
 // Self-contained mobile-menu toggle: makes the hamburger open the menu even though the theme's own JS
 // (on the original domain) never loads. Captures clicks on a *-menu-toggle and shows the nearest menu.
 const MOBILE_MENU_SCRIPT = `<script>(function(){document.addEventListener("click",function(e){var el=e.target;var t=el&&el.closest?el.closest('.elementor-menu-toggle,[class*="menu-toggle"]'):null;if(!t)return;e.preventDefault();var open=!t.classList.contains("elementor-active");t.classList.toggle("elementor-active",open);t.setAttribute("aria-expanded",open?"true":"false");var scope=t.closest("nav,.elementor-widget-nav-menu,.elementor-nav-menu--main,header")||document;var dd=scope.querySelector(".elementor-nav-menu--dropdown")||scope.querySelector(".elementor-nav-menu__container")||scope.querySelector("ul.elementor-nav-menu")||scope.querySelector(".sub-menu");if(dd){dd.style.display=open?"block":"";}},true);})();</script>`;
@@ -155,6 +160,7 @@ export async function serveProjectSite(projectId: number, req: Request, res: Res
     // the hamburger a working toggle. Skip the self-contained booking-app page.
     if (!isBookingApp) {
       content = unlazyImages(content);
+      content = /<\/head>/i.test(content) ? content.replace(/<\/head>/i, RENDER_FIX_STYLE + "</head>") : RENDER_FIX_STYLE + content;
       content = /<\/body>/i.test(content) ? content.replace(/<\/body>/i, MOBILE_MENU_SCRIPT + "</body>") : content + MOBILE_MENU_SCRIPT;
     }
     // Free (unsubscribed) sites carry a non-removable Nebula badge bottom-right.
