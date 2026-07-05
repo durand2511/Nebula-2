@@ -3979,10 +3979,14 @@ function absolutizeCssUrls(css: string, cssUrl: string): string {
   });
 }
 async function inlineCssForProject(projectId: number): Promise<void> {
-  const files = await db.select().from(projectFiles)
+  // Scan file content ONE AT A TIME (IDs first) so we never hold all HTML (~150MB on a big site) in
+  // memory at once — that could OOM the background job on a small container before it even starts.
+  const fileRows = await db.select({ id: projectFiles.id }).from(projectFiles)
     .where(and(eq(projectFiles.projectId, projectId), sql`${projectFiles.path} LIKE '%.html'`));
   const hrefs = new Set<string>();
-  for (const f of files) {
+  for (const fr of fileRows) {
+    const [f] = await db.select({ content: projectFiles.content }).from(projectFiles).where(eq(projectFiles.id, fr.id));
+    if (!f) continue;
     for (const tag of f.content.match(/<link\b[^>]*>/gi) || []) {
       if (!/\brel=["']?stylesheet/i.test(tag) || /\bmedia=["']?print/i.test(tag)) continue;
       const hm = tag.match(/\bhref=["']([^"']+)["']/i);
@@ -4039,11 +4043,16 @@ function assetContentType(ext: string): string {
     mp3: "audio/mpeg", wav: "audio/wav", pdf: "application/pdf" } as Record<string, string>)[ext] || "application/octet-stream";
 }
 async function downloadImportAssets(projectId: number): Promise<void> {
-  const files = await db.select().from(projectFiles)
+  // Load only the file IDs, then scan each file's content ONE AT A TIME. A big multi-page site
+  // (30×~5MB) would otherwise hold all HTML (~150MB) in memory at once here — enough to OOM the
+  // background job on a small (Render) container, so the images never localise and stay broken.
+  const fileRows = await db.select({ id: projectFiles.id }).from(projectFiles)
     .where(and(eq(projectFiles.projectId, projectId), sql`(${projectFiles.path} LIKE '%.html' OR ${projectFiles.path} = ${NEBULA_CSS_PATH})`));
   const urls = new Set<string>();
   const URL_RE = /https?:\/\/[^"'()\s\\<>]+/gi;
-  for (const f of files) {
+  for (const fr of fileRows) {
+    const [f] = await db.select({ content: projectFiles.content }).from(projectFiles).where(eq(projectFiles.id, fr.id));
+    if (!f) continue;
     for (const m of f.content.match(URL_RE) || []) {
       const clean = m.replace(/[.,;:)]+$/, "");
       if (ASSET_EXT_RE.test(clean.split(/[?#]/)[0])) urls.add(clean);
@@ -4076,7 +4085,7 @@ async function downloadImportAssets(projectId: number): Promise<void> {
     }
   }
   if (!map.size) return;
-  for (const f of files) {
+  for (const f of fileRows) {
     // Re-read the CURRENT content: a concurrent edit (e.g. "voeg bookings toe" adding a nav link) may
     // have run during the ~minute of downloading. Rewriting asset URLs on the FRESH content preserves
     // that edit instead of clobbering it with the stale copy we read at the start.
