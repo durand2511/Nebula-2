@@ -7,7 +7,7 @@ import { load as cheerioLoad } from "cheerio";
 import { db, projects, projectMessages, projectFiles, projectSnapshots, importAssets, learnings, emailReminders, studioClasses, studioUsers, studioBookings, type PlatformUser } from "@workspace/db";
 import { getSessionUser, tokenFrom } from "../lib/platform-auth.js";
 import { isSubscribed, isBookingRequest, chargeTrackedUsage } from "../lib/billing.js";
-import { runWithUsage } from "../lib/ai-usage.js";
+import { runWithUsage, recordUsage } from "../lib/ai-usage.js";
 import { unlazyImages, RENDER_FIX_STYLE } from "../lib/host-site.js";
 import {
   CreateProjectBody,
@@ -1120,7 +1120,8 @@ function buildSystemPrompt(
 - The new page must be fully functional with realistic content visible on first load — never "coming soon".`
       : importMode === "edit"
       ? `INCREMENTAL EDIT: Apply ONLY the specific change asked. Use edit_file for targeted changes — keep all existing layout, sections, nav, copy, and styling exactly as-is. Existing image URLs in the files are fine to keep. Only call write_file or edit_file for files you actually change.
-SURGICAL TARGETING — edit the file that OWNS the thing being changed: styling → the CSS file, script behaviour → the JS file, copy on a page → that page's file. Do NOT funnel every change into index.html; touch index.html only when the change is genuinely about index.html (its own markup or its nav).`
+SURGICAL TARGETING — edit the file that OWNS the thing being changed: styling → the CSS file, script behaviour → the JS file, copy on a page → that page's file. Do NOT funnel every change into index.html; touch index.html only when the change is genuinely about index.html (its own markup or its nav).
+VISUAL / "MAKE IT PRETTIER" REQUESTS on this imported site: index.html is a large minified page you must NOT rewrite (write_file on it is rejected). To restyle it VISIBLY and reliably, ADD a scoped style block just before </head> with a single edit_file: old_string="</head>", new_string="<style data-nebula-restyle>/* your refinements */ ...</style></head>". Refine the LOOK with the site's OWN colours/fonts — better spacing/whitespace, softer shadows/rounded corners, clearer button styles, section rhythm, heading sizes. Use !important on each rule so it wins over the site's existing CSS (which is injected after this block). This produces a real, visible improvement without touching any content, nav, or images. Never claim you changed something without actually calling edit_file.`
       : `SURGICAL AUGMENTATION — the imported HTML is the LIVE SITE. Do NOT rebuild or replace it. Use edit_file or write_file to add the requested feature to the existing index.html.
 
 RULES:
@@ -5202,6 +5203,7 @@ async function runBuild(
       let stopReason: string | null = null;
       let firstToken = true;
 
+      let turnInput = 0, turnOutput = 0; // token usage for THIS streamed turn (charged after the loop)
       try {
         for await (const event of stream) {
           if (session.cancelled) break;
@@ -5255,13 +5257,22 @@ async function runBuild(
               } catch { /* malformed JSON — skip this tool call */ }
               currentTU = null;
             }
+          } else if (event.type === "message_start") {
+            // Streamed calls are NOT captured by instrumentAnthropic (no .usage on the immediate
+            // return), so we record token usage manually here — otherwise the build (the biggest cost)
+            // is charged €0 and the AI-credit never reflects real usage.
+            const u = (event.message as { usage?: { input_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number } })?.usage;
+            if (u) turnInput = (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0);
           } else if (event.type === "message_delta") {
             stopReason = event.delta.stop_reason ?? stopReason;
+            const o = (event as { usage?: { output_tokens?: number } }).usage?.output_tokens;
+            if (o != null) turnOutput = o; // cumulative — the last value is the turn's total output
           }
         }
       } catch (streamErr) {
         if (!session.cancelled) throw streamErr;
       }
+      recordUsage("claude-sonnet-4-5", { input_tokens: turnInput, output_tokens: turnOutput });
 
       if (session.cancelled) break outer;
 
