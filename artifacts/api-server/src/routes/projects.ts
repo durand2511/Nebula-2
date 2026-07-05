@@ -8,7 +8,7 @@ import { db, projects, projectMessages, projectFiles, projectSnapshots, importAs
 import { getSessionUser, tokenFrom } from "../lib/platform-auth.js";
 import { isSubscribed, isBookingRequest, chargeTrackedUsage } from "../lib/billing.js";
 import { runWithUsage, recordUsage } from "../lib/ai-usage.js";
-import { unlazyImages, RENDER_FIX_STYLE } from "../lib/host-site.js";
+import { unlazyImages, RENDER_FIX_STYLE, NEBULA_RESTYLE_PATH } from "../lib/host-site.js";
 import {
   CreateProjectBody,
   GetProjectParams,
@@ -1067,6 +1067,10 @@ document.addEventListener("submit",function(e){
   if (page !== "booking-app.html") {
     html = injectSelfContainedFonts(html, fileRows.find((f) => f.path === NEBULA_FONTS_PATH)?.content);
     html = injectImportedCss(html, fileRows.find((f) => f.path === NEBULA_CSS_PATH)?.content);
+    // Site-wide restyle ("maak de site mooier") — injected AFTER the imported CSS so it wins. Same file
+    // is applied on every published page too (host-site), so the editor preview matches the live site.
+    const restyle = fileRows.find((f) => f.path === NEBULA_RESTYLE_PATH)?.content;
+    if (restyle) html = /<\/head>/i.test(html) ? html.replace(/<\/head>/i, `<style data-nebula-restyle>${restyle}</style></head>`) : html.replace(/<head[^>]*>/i, (m) => m + `<style data-nebula-restyle>${restyle}</style>`);
   }
 
   // Show lazy-loaded images WITHOUT the site's JS (which 404s here): promote the real image (data-src/
@@ -1121,7 +1125,7 @@ function buildSystemPrompt(
       : importMode === "edit"
       ? `INCREMENTAL EDIT: Apply ONLY the specific change asked. Use edit_file for targeted changes — keep all existing layout, sections, nav, copy, and styling exactly as-is. Existing image URLs in the files are fine to keep. Only call write_file or edit_file for files you actually change.
 SURGICAL TARGETING — edit the file that OWNS the thing being changed: styling → the CSS file, script behaviour → the JS file, copy on a page → that page's file. Do NOT funnel every change into index.html; touch index.html only when the change is genuinely about index.html (its own markup or its nav).
-VISUAL / "MAKE IT PRETTIER" REQUESTS on this imported site: index.html is a large minified page you must NOT rewrite (write_file on it is rejected). To restyle it VISIBLY and reliably, ADD a scoped style block just before </head> with a single edit_file: old_string="</head>", new_string="<style data-nebula-restyle>/* your refinements */ ...</style></head>". Refine the LOOK with the site's OWN colours/fonts — better spacing/whitespace, softer shadows/rounded corners, clearer button styles, section rhythm, heading sizes. Use !important on each rule so it wins over the site's existing CSS (which is injected after this block). This produces a real, visible improvement without touching any content, nav, or images. Never claim you changed something without actually calling edit_file.`
+VISUAL / "MAKE IT PRETTIER" REQUESTS on this imported site — do a WHOLE-SITE transformation, not just index.html/the hero: the pages are large minified files you must NOT rewrite (write_file on them is rejected). Instead call write_file(".nebula-restyle.css", <comprehensive CSS>) — that ONE file is auto-injected on EVERY page (after the site's own CSS, so it wins), so your refinements apply site-wide. First read index.html to learn the site's OWN palette, fonts and class names, then write a thorough restyle that targets the real selectors across the site: body/section backgrounds & rhythm, headings & typography scale, buttons & links, cards/boxes, nav/header, spacing/whitespace, softer shadows and rounded corners, images. Keep the brand colours; make it feel modern and polished. Put !important on each rule. Do NOT edit page HTML, content, nav, or images. If a .nebula-restyle.css already exists, read it first and improve on it. Never claim you changed something without actually calling write_file.`
       : `SURGICAL AUGMENTATION — the imported HTML is the LIVE SITE. Do NOT rebuild or replace it. Use edit_file or write_file to add the requested feature to the existing index.html.
 
 RULES:

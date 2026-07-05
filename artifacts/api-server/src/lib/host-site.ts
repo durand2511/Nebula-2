@@ -93,6 +93,11 @@ export function unlazyImages(html: string): string {
 // "flash then disappear". Force them visible (no animation, but shown).
 export const RENDER_FIX_STYLE = `<style data-nebula-render-fix>.elementor-invisible{visibility:visible !important;opacity:1 !important}</style>`;
 
+// Site-wide restyle ("maak de site mooier"): one managed CSS file the AI writes, injected on EVERY
+// imported page (after the imported CSS so its !important refinements win) — a whole-site transformation
+// instead of only index.html/the hero.
+export const NEBULA_RESTYLE_PATH = ".nebula-restyle.css";
+
 // Self-contained mobile-menu toggle: makes the hamburger open the menu even though the theme's own JS
 // (on the original domain) never loads. Captures clicks on a *-menu-toggle and shows the nearest menu.
 const MOBILE_MENU_SCRIPT = `<script>(function(){document.addEventListener("click",function(e){var el=e.target;var t=el&&el.closest?el.closest('.elementor-menu-toggle,[class*="menu-toggle"]'):null;if(!t)return;e.preventDefault();var open=!t.classList.contains("elementor-active");t.classList.toggle("elementor-active",open);t.setAttribute("aria-expanded",open?"true":"false");var scope=t.closest("nav,.elementor-widget-nav-menu,.elementor-nav-menu--main,header")||document;var dd=scope.querySelector(".elementor-nav-menu--dropdown")||scope.querySelector(".elementor-nav-menu__container")||scope.querySelector("ul.elementor-nav-menu")||scope.querySelector(".sub-menu");if(dd){dd.style.display=open?"block":"";}},true);})();</script>`;
@@ -154,6 +159,13 @@ export async function serveProjectSite(projectId: number, req: Request, res: Res
     const cssBlob = isBookingApp ? undefined : rows.find((r) => r.path === ".nebula-imported.css")?.content;
     if (cssBlob) {
       const st = `<style data-nebula-imported-css>${cssBlob}</style>`;
+      content = /<\/head>/i.test(content) ? content.replace(/<\/head>/i, st + "</head>") : content.replace(/<head[^>]*>/i, (m) => m + st);
+    }
+    // Site-wide restyle (after the imported CSS so it wins) — applies the "make it prettier" refinements
+    // to EVERY page, not just index.html.
+    const restyleBlob = isBookingApp ? undefined : rows.find((r) => r.path === NEBULA_RESTYLE_PATH)?.content;
+    if (restyleBlob) {
+      const st = `<style data-nebula-restyle>${restyleBlob}</style>`;
       content = /<\/head>/i.test(content) ? content.replace(/<\/head>/i, st + "</head>") : content.replace(/<head[^>]*>/i, (m) => m + st);
     }
     // Mobile fixes for imported pages: show lazy-loaded images without the (404'ing) theme JS, and give
