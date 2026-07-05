@@ -1165,6 +1165,31 @@ export function ProjectWorkspace() {
   const [pubSlug, setPubSlug] = useState("");
   const [newDomain, setNewDomain] = useState("");
   const reloadPublish = () => fetch(`/api/projects/${projectId}/publish`).then((r) => r.json()).then(setPubData).catch(() => {});
+  // A 3-minute countdown before publishing so background image-localisation can finish (skippable with a
+  // warning). Shared by the subdomain-publish and the own-domain republish buttons.
+  const [pubCountdown, setPubCountdown] = useState<number | null>(null);
+  const doPublishRef = useRef<() => Promise<void>>(() => Promise.resolve());
+  doPublishRef.current = async () => {
+    setPubBusy(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/publish`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ slug: pubSlug }) });
+      const d = await res.json();
+      if (res.ok && d.ok) { await reloadPublish(); } else window.alert(d.error || "Publiceren mislukt.");
+    } catch { window.alert("Publiceren mislukt."); }
+    finally { setPubBusy(false); }
+  };
+  useEffect(() => {
+    if (pubCountdown === null) return;
+    if (pubCountdown <= 0) { setPubCountdown(null); void doPublishRef.current(); return; }
+    const t = setTimeout(() => setPubCountdown((c) => (c === null ? null : c - 1)), 1000);
+    return () => clearTimeout(t);
+  }, [pubCountdown]);
+  const skipPublishWait = () => {
+    if (window.confirm("De afbeeldingen zijn mogelijk nog niet allemaal lokaal opgeslagen — nu publiceren kan gebroken afbeeldingen op je live site geven. Toch nu publiceren?")) {
+      setPubCountdown(null);
+      void doPublishRef.current();
+    }
+  };
   const [blogOpen, setBlogOpen] = useState(false);
   const [blogTitle, setBlogTitle] = useState("");
   const [blogBody, setBlogBody] = useState("");
@@ -2342,6 +2367,16 @@ export function ProjectWorkspace() {
               <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setPublishOpen(false)}><X className="h-4 w-4" /></Button>
             </div>
 
+            {pubCountdown !== null && (
+              <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 p-3">
+                <div className="text-sm text-amber-900">⏳ Even geduld — je afbeeldingen worden lokaal opgeslagen zodat ze 1-op-1 meegaan. Publiceren start automatisch over <span className="font-semibold tabular-nums">{Math.floor(pubCountdown / 60)}:{String(pubCountdown % 60).padStart(2, "0")}</span>.</div>
+                <div className="flex gap-2 mt-2">
+                  <Button size="sm" variant="outline" disabled={pubBusy} onClick={skipPublishWait}>Toch nu publiceren</Button>
+                  <Button size="sm" variant="ghost" disabled={pubBusy} onClick={() => setPubCountdown(null)}>Annuleren</Button>
+                </div>
+              </div>
+            )}
+
             {/* 1. Free Nebula subdomain */}
             <div className="rounded-lg border p-4 mb-4">
               <div className="flex items-center gap-2 mb-1"><Globe className="h-4 w-4 text-muted-foreground" /><h4 className="font-medium text-sm">Gratis Nebula-adres</h4></div>
@@ -2362,17 +2397,9 @@ export function ProjectWorkspace() {
                 <span className="text-sm text-muted-foreground">.{pubData?.platformHost || "nebulabookings.com"}</span>
               </div>
               <div className="mt-3">
-                <Button size="sm" disabled={pubBusy} data-testid="button-do-publish" className="bg-emerald-600 hover:bg-emerald-500 text-white"
-                  onClick={async () => {
-                    setPubBusy(true);
-                    try {
-                      const res = await fetch(`/api/projects/${projectId}/publish`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ slug: pubSlug }) });
-                      const d = await res.json();
-                      if (res.ok && d.ok) { await reloadPublish(); } else window.alert(d.error || "Publiceren mislukt.");
-                    } catch { window.alert("Publiceren mislukt."); }
-                    finally { setPubBusy(false); }
-                  }}>
-                  {pubBusy ? "Bezig…" : pubData?.subdomain ? "Opnieuw publiceren" : "Publiceren"}
+                <Button size="sm" disabled={pubBusy || pubCountdown !== null} data-testid="button-do-publish" className="bg-emerald-600 hover:bg-emerald-500 text-white"
+                  onClick={() => setPubCountdown(180)}>
+                  {pubBusy ? "Bezig…" : pubCountdown !== null ? "Wachten…" : pubData?.subdomain ? "Opnieuw publiceren" : "Publiceren"}
                 </Button>
               </div>
             </div>
@@ -2432,6 +2459,18 @@ export function ProjectWorkspace() {
                   finally { setPubBusy(false); }
                 }}>Koppelen</Button>
               </div>
+              {(pubData?.domains || []).length > 0 && (
+                <div className="mt-4 pt-3 border-t">
+                  <p className="text-xs text-muted-foreground mb-2">
+                    {pubData?.hasChanges
+                      ? "Je hebt wijzigingen gemaakt sinds de laatste publicatie — republiceer om ze live te zetten op je gekoppelde domein."
+                      : "Iets aangepast? Republiceer om het live te zetten op je gekoppelde domein."}
+                  </p>
+                  <Button size="sm" variant={pubData?.hasChanges ? "default" : "outline"} disabled={pubBusy || pubCountdown !== null} onClick={() => setPubCountdown(180)}>
+                    <Rocket className="h-3.5 w-3.5 mr-1.5" /> Republiceren
+                  </Button>
+                </div>
+              )}
             </div>
           </div>
         </div>
