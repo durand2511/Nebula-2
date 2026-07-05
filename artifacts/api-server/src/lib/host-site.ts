@@ -91,7 +91,10 @@ export function unlazyImages(html: string): string {
 // Imported sites hide entrance-animated elements with `.elementor-invisible{visibility:hidden}` and rely
 // on the theme JS (which 404s here) to reveal them on scroll — so without it those elements/images
 // "flash then disappear". Force them visible (no animation, but shown).
-export const RENDER_FIX_STYLE = `<style data-nebula-render-fix>.elementor-invisible{visibility:visible !important;opacity:1 !important}</style>`;
+export const RENDER_FIX_STYLE = `<style data-nebula-render-fix>.elementor-invisible{visibility:visible !important;opacity:1 !important}
+/* Keep accessibility skip-links visually hidden (they became visible "Skip to main content" text on
+   every page once the theme's own screen-reader CSS was out-competed). Still shown on keyboard focus. */
+.screen-reader-text:not(:focus):not(:focus-within),.skip-link:not(:focus),.ea11y-skip-to-content-link:not(:focus),a[href="#content"]:not(:focus):not([class*="button"]):not([class*="btn"]),[class*="skip-to-content"]:not(:focus){position:absolute !important;width:1px !important;height:1px !important;padding:0 !important;margin:-1px !important;overflow:hidden !important;clip:rect(0,0,0,0) !important;white-space:nowrap !important;border:0 !important}</style>`;
 
 // Site-wide restyle ("maak de site mooier"): one managed CSS file the AI writes, injected on EVERY
 // imported page (after the imported CSS so its !important refinements win) — a whole-site transformation
