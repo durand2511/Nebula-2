@@ -7,6 +7,7 @@ import { db, projectFiles } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
 import { anthropic } from "@workspace/integrations-openai-ai-server";
 import { emailBrandSeed, type ProjectFile } from "./actions.js";
+import { resolvePublishedDomain } from "./seo.js";
 import { logger } from "./logger";
 import { BRAND_KINDS as KINDS, fallbackCopy, type BrandCopy, type EmailBrand } from "./email-brand-copy.js";
 
@@ -63,6 +64,13 @@ export async function loadEmailBrand(projectId: number): Promise<EmailBrand | nu
   try {
     const [row] = await db.select().from(projectFiles).where(and(eq(projectFiles.projectId, projectId), eq(projectFiles.path, BRAND_PATH)));
     if (!row) return null;
-    return JSON.parse(row.content) as EmailBrand;
+    const brand = JSON.parse(row.content) as EmailBrand;
+    // E-mail clients (Gmail etc.) can't resolve a ROOT-RELATIVE logo like /assets/x.png — that shows a
+    // broken-image icon. Make it absolute using the studio's live domain; drop it if there's no domain.
+    if (brand.logo && brand.logo.startsWith("/") && !brand.logo.startsWith("//")) {
+      const domain = await resolvePublishedDomain(projectId).catch(() => "");
+      brand.logo = domain && !/localhost|127\.0\.0\.1/.test(domain) ? `https://${domain}${brand.logo}` : "";
+    }
+    return brand;
   } catch { return null; }
 }
