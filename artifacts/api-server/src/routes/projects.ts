@@ -5591,19 +5591,31 @@ async function handleDeterministicAction(session: BuildSession, projectId: numbe
 // The ONLY AI call here maps free text to one fixed action (no HTML/CSS generation). The
 // action is then carried out by the deterministic functions in lib/actions.ts.
 async function classifyCommand(text: string): Promise<BuilderAction> {
-  // Deterministic shortcut: "remove links/widgets to EXTERNAL booking platforms". Must come BEFORE the
-  // booking-app shortcut below (whose regex also matches "booking"). Requires a removal verb PLUS an
-  // external/other-platform/widget signal (or a known platform name) so it can't fire on a plain
-  // "voeg booking toe".
-  if (/\b(verwijder|verwijderen|weghal|haal\s+weg|weg\s+met|remove|delete|strip|wis)\b/i.test(text)
-      && /(extern|andere?\s*(booking|boeking|reserv|platform|systeem|widget)|booking[\s-]?platform|boekings?[\s-]?platform|widgets?|bsport|momoyoga|eversports?|mindbody|arketa|gymly|virtuagym|glofox|wellnessliving|fitmanager|eversport)/i.test(text)) {
-    return { action: "remove_external_bookings" };
-  }
-  // Deterministic shortcut: a "booking app" request needs NO AI at all — the app is hard-coded. Match
-  // broadly (EN + NL, singular/plural, "system"/"app") so it's caught reliably and never falls through
-  // to the full AI rebuild (which would rewrite/break an imported site).
-  if (/\b(bookings?|boeking|boekingen|booking[\s-]?(app|system|systeem)|boekings?[\s-]?(app|systeem)|boekings?systeem|reserverings?(?:systeem|app)|reservatie[\s-]?systeem|reservation[\s-]?system)\b/i.test(text)) {
-    return { action: "add_booking_app" };
+  // Honour an explicit "gebruik ai" and recognise "change/link THIS existing element" (an EDIT, not an
+  // ADD). Neither should be hijacked by the hard-coded booking-app shortcut below — that was rewriting
+  // the whole booking app when the user only wanted the AI to point a selected button at it. When either
+  // holds, skip the deterministic shortcuts and let the AI handle it.
+  const asksForAi = /\b(gebruik|met|via|use|d\.?m\.?v\.?|door)\s+(de\s+|het\s+)?a\.?i\b/i.test(text);
+  const editsExistingEl =
+    /\b(deze|dit|die)\b[\s\S]{0,40}\b(knop|button|link|tekst|element|afbeelding|widget)\b/i.test(text)
+    || /\b(knop|button|link|widget)\b[\s\S]{0,40}\b(naar|wijs|wijzen|verwijs|verwijzen|koppel|linken?|point)\b/i.test(text)
+    || /\b(verander|wijzig|link|koppel|point|change|make)\b[\s\S]{0,40}\b(knop|button|link|widget)\b/i.test(text);
+  if (!asksForAi) {
+    // Deterministic shortcut: "remove links/widgets to EXTERNAL booking platforms". Must come BEFORE the
+    // booking-app shortcut below (whose regex also matches "booking"). Requires a removal verb PLUS an
+    // external/other-platform/widget signal (or a known platform name) so it can't fire on a plain
+    // "voeg booking toe".
+    if (/\b(verwijder|verwijderen|weghal|haal\s+weg|weg\s+met|remove|delete|strip|wis)\b/i.test(text)
+        && /(extern|andere?\s*(booking|boeking|reserv|platform|systeem|widget)|booking[\s-]?platform|boekings?[\s-]?platform|widgets?|bsport|momoyoga|eversports?|mindbody|arketa|gymly|virtuagym|glofox|wellnessliving|fitmanager|eversport)/i.test(text)) {
+      return { action: "remove_external_bookings" };
+    }
+    // Deterministic shortcut: a "booking app" request needs NO AI at all — the app is hard-coded. Match
+    // broadly (EN + NL, singular/plural, "system"/"app") so it's caught reliably and never falls through
+    // to the full AI rebuild (which would rewrite/break an imported site). But NOT when the user is
+    // editing/linking an existing element ("laat deze knop naar mijn booking app wijzen") — that's an AI edit.
+    if (!editsExistingEl && /\b(bookings?|boeking|boekingen|booking[\s-]?(app|system|systeem)|boekings?[\s-]?(app|systeem)|boekings?systeem|reserverings?(?:systeem|app)|reservatie[\s-]?systeem|reservation[\s-]?system)\b/i.test(text)) {
+      return { action: "add_booking_app" };
+    }
   }
   const catalogue = ACTION_CATALOGUE
     .map((a) => `- "${a.action}" (params: ${a.params.join(", ") || "—"}) → ${a.when}`)
