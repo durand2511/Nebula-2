@@ -358,32 +358,101 @@ async function writeFileFor(projectId: number, byPath: Map<string, { id: number 
   else await db.insert(projectFiles).values({ projectId, path, content, language });
 }
 
-// Recompute blog index + robots/llms/sitemap from the PUBLISHED set, and ensure a Blog nav link.
+// Find the site's OWN blog page from the nav (an <a> labelled "Blog" pointing to a real page, e.g.
+// /blog-vlog) so we can publish articles INTO it instead of a separate blog.html. Null if none.
+function findBlogHostPath(rows: { path: string; content: string }[]): string | null {
+  const htmlPaths = new Set(rows.filter((r) => /\.html$/i.test(r.path)).map((r) => r.path));
+  const ok = (p: string) => htmlPaths.has(p) && p !== "blog.html" && p !== "index.html" && !/^blog\//i.test(p) && !/booking/i.test(p);
+  for (const r of rows) {
+    if (!/\.html$/i.test(r.path)) continue;
+    const re = /<a\b[^>]*\bhref=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(r.content))) {
+      const label = m[2].replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().toLowerCase();
+      if (label !== "blog" && !/^blog\b/.test(label)) continue;
+      const slug = m[1].trim().replace(/^https?:\/\/[^/]+/i, "").replace(/[?#].*$/, "").replace(/^\//, "").replace(/\/$/, "");
+      if (!slug || /^blog\.html$/i.test(slug)) continue;
+      const cand = slug.endsWith(".html") ? slug : slug + ".html";
+      if (ok(cand)) return cand;
+      if (ok(slug)) return slug;
+    }
+  }
+  return null;
+}
+
+// A clean, self-contained article-list section injected into the studio's own blog page (marker so it
+// gets REPLACED, not duplicated, on each run).
+function blogListSection(ctx: Ctx, items: { title: string; slug: string }[]): string {
+  const accent = ctx.accent || "#7a00df", base = ctx.domain ? `https://${ctx.domain}` : "";
+  const cards = items.map((a) => `<a href="${esc(base)}/blog/${esc(a.slug)}.html" style="display:block;background:#fff;border:1px solid #e6e8ec;border-radius:12px;padding:16px 18px;margin:0 0 12px;text-decoration:none;color:#1f2937"><span style="display:block;font-size:18px;font-weight:600;color:${accent}">${esc(a.title)}</span></a>`).join("");
+  return `<section data-nebula-blog-list style="max-width:760px;margin:40px auto;padding:0 20px;font-family:system-ui,-apple-system,'Segoe UI',Roboto,Arial,sans-serif"><h2 style="font-size:26px;margin:0 0 16px;color:#1f2937">Blog</h2>${cards || "<p>Nog geen artikelen.</p>"}</section>`;
+}
+
+// Insert/replace the article list inside the host page — before the footer (safe: appends at the end of
+// the content, never touches the existing layout above it).
+function injectBlogList(html: string, section: string): string {
+  if (/data-nebula-blog-list/i.test(html)) return html.replace(/<section\b[^>]*data-nebula-blog-list[\s\S]*?<\/section>/i, section);
+  if (/<footer\b/i.test(html)) return html.replace(/<footer\b/i, section + "\n<footer");
+  if (/<\/body>/i.test(html)) return html.replace(/<\/body>/i, section + "</body>");
+  return html + section;
+}
+
+// Turn the old separate hub into a redirect to the studio's real blog page (avoids a duplicate hub).
+function blogRedirectHtml(hostPath: string): string {
+  const url = "/" + hostPath.replace(/\.html$/i, "");
+  return `<!DOCTYPE html><html lang="nl"><head><meta charset="UTF-8"><meta http-equiv="refresh" content="0;url=${esc(url)}"><link rel="canonical" href="${esc(url)}"><title>Blog</title></head><body><p>De blog staat op <a href="${esc(url)}">${esc(url)}</a>.</p></body></html>`;
+}
+
+// Remove a duplicate "Blog" nav item that points to blog.html (precise: one <li>, or a bare <a>).
+function stripDupBlogNav(html: string): string {
+  let out = html.replace(/<li\b(?:(?!<\/li>)[\s\S])*?\bhref=["']blog\.html["'](?:(?!<\/li>)[\s\S])*?<\/li>/gi, "");
+  out = out.replace(/<a\b[^>]*\bhref=["']blog\.html["'][\s\S]*?<\/a>/gi, "");
+  return out;
+}
+
+// Recompute the blog hub + robots/llms/sitemap. If the site already has its OWN blog page (from the
+// nav), publish the article list INTO that page and redirect blog.html to it; otherwise fall back to
+// generating a standalone blog.html + a Blog nav link (original behaviour — nothing breaks).
 async function syncPublishedAux(projectId: number, ctx: Ctx, rows: { path: string; id: number; content: string }[]) {
   const pub = await db.select().from(seoArticles).where(and(eq(seoArticles.projectId, projectId), eq(seoArticles.status, "published")));
   const pubList = pub.map((p) => ({ title: p.title, slug: p.slug }));
   const byPath = new Map(rows.map((f) => [f.path, { id: f.id }]));
-  await writeFileFor(projectId, byPath, "blog.html", blogIndexHtml(ctx, pubList));
+  const hostPath = findBlogHostPath(rows);
+  const hubUrl = hostPath ? "/" + hostPath.replace(/\.html$/i, "") : "/blog.html";
   await writeFileFor(projectId, byPath, "robots.txt", robotsTxt(ctx.domain), "plaintext");
   await writeFileFor(projectId, byPath, "llms.txt", llmsTxt(ctx, pubList), "plaintext");
-  await writeFileFor(projectId, byPath, "sitemap.xml", sitemapXml(ctx.domain, ["/index.html", "/blog.html", ...pubList.map((a) => `/blog/${a.slug}.html`)]), "xml");
-  for (const f of rows) {
-    if (!f.path.toLowerCase().endsWith(".html")) continue;
-    if (/^blog\//i.test(f.path) || f.path === "blog.html" || /booking/i.test(f.path)) continue;
-    const updated = ensureBlogLink(f.content);
-    if (updated !== f.content) await db.update(projectFiles).set({ content: updated, updatedAt: new Date() }).where(eq(projectFiles.id, f.id));
+  await writeFileFor(projectId, byPath, "sitemap.xml", sitemapXml(ctx.domain, ["/index.html", hubUrl, ...pubList.map((a) => `/blog/${a.slug}.html`)]), "xml");
+
+  const changed = new Set<string>();
+  if (hostPath) {
+    await writeFileFor(projectId, byPath, "blog.html", blogRedirectHtml(hostPath));
+    const section = blogListSection(ctx, pubList);
+    for (const f of rows) {
+      if (!f.path.toLowerCase().endsWith(".html")) continue;
+      if (/^blog\//i.test(f.path) || f.path === "blog.html" || /booking/i.test(f.path)) continue;
+      let c = stripDupBlogNav(f.content);
+      if (f.path === hostPath) c = injectBlogList(c, section);
+      if (c !== f.content) { await db.update(projectFiles).set({ content: c, updatedAt: new Date() }).where(eq(projectFiles.id, f.id)); changed.add(f.path); }
+    }
+  } else {
+    await writeFileFor(projectId, byPath, "blog.html", blogIndexHtml(ctx, pubList));
+    for (const f of rows) {
+      if (!f.path.toLowerCase().endsWith(".html")) continue;
+      if (/^blog\//i.test(f.path) || f.path === "blog.html" || /booking/i.test(f.path)) continue;
+      const updated = ensureBlogLink(f.content);
+      if (updated !== f.content) await db.update(projectFiles).set({ content: updated, updatedAt: new Date() }).where(eq(projectFiles.id, f.id));
+    }
   }
-  // Auto re-publish the blog/SEO files so new articles go live without a manual re-publish — but
-  // ONLY these files, so an unrelated draft edit elsewhere isn't pushed live by accident.
+  // Auto re-publish ONLY the blog/SEO files + the specific pages we deliberately edited (host branch),
+  // so an unrelated draft edit elsewhere isn't pushed live by accident.
   try {
-    await republishMatching(projectId, (p) => p === "blog.html" || /^blog\//i.test(p) || p === "robots.txt" || p === "llms.txt" || p === "sitemap.xml");
+    await republishMatching(projectId, (p) => p === "blog.html" || /^blog\//i.test(p) || p === "robots.txt" || p === "llms.txt" || p === "sitemap.xml" || changed.has(p));
   } catch { /* best-effort */ }
-  // Ping IndexNow (Bing/Yandex) so the new/updated blog URLs get picked up instantly. Google ignores
-  // IndexNow, but it's free extra reach and fully automatic. Only for a real served host.
+  // Ping IndexNow (Bing/Yandex) so the new/updated blog URLs get picked up instantly.
   try {
     const host = ctx.domain;
     if (host && !/localhost|127\.0\.0\.1|^$/.test(host)) {
-      const urls = ["/blog.html", ...pubList.map((a) => `/blog/${a.slug}.html`)].map((u) => `https://${host}${u}`);
+      const urls = [hubUrl, ...pubList.map((a) => `/blog/${a.slug}.html`)].map((u) => `https://${host}${u}`);
       await submitToIndexNow(host, urls);
     }
   } catch { /* best-effort */ }
