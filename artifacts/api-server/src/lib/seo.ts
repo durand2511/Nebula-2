@@ -133,6 +133,16 @@ function pickFreshTopic(candidates: { title: string; keyword: string }[], past: 
   const fresh = ranked.find((r) => r.o < 0.4);
   return (fresh || ranked[0])?.t ?? null;
 }
+// Same ranking, but return ALL candidates freshest-first (for the AUTO retry loop).
+function pickFreshTopics(candidates: { title: string; keyword: string }[], past: { title: string; query: string }[]): { title: string; keyword: string }[] {
+  const overlapOf = (t: { title: string; keyword: string }) =>
+    Math.max(0, ...past.map((p) => Math.max(jaccard(t.title, p.title), jaccard(t.keyword || t.title, p.query || p.title))), 0);
+  return candidates
+    .map((t) => ({ t, o: overlapOf(t) }))
+    .sort((a, b) => a.o - b.o)
+    .filter((r) => r.o < 0.6) // drop near-duplicates of existing articles
+    .map((r) => r.t);
+}
 
 // ── Pipeline step 2: content brief (SMALL JSON — reliable, includes FAQ with answers) ──
 async function buildBrief(ctx: Ctx, topic: { title: string; keyword: string }): Promise<Brief> {
@@ -526,33 +536,45 @@ export async function publishArticle(projectId: number, isoDate: string, opts?: 
   const pastTopics = past.map((p) => ({ title: p.title, query: p.query }));
   const used = past.map((p) => p.title).concat(past.map((p) => p.query).filter(Boolean));
   const newWebsite = publishedPast.length < 3;
+  const threshold = (await getSettings(projectId)).autoPublishMin;
 
-  // 1. topic — must NOT duplicate an existing one (checks titles + keywords)
-  let topic = opts?.topic;
-  if (!topic) {
+  // Candidate topics. In AUTO mode we try several (freshest first) so we can keep going until one
+  // article clears the publish threshold; MANUAL uses a single topic.
+  let topicQueue: { title: string; keyword: string }[] = [];
+  if (opts?.topic) topicQueue = [opts.topic];
+  else {
     let ts = await suggestTopics(ctx, used);
     if (!ts.length) ts = await suggestTopics(ctx, used);
-    const pick = pickFreshTopic(ts, pastTopics);
-    if (pick) topic = { title: pick.title, keyword: pick.keyword };
+    topicQueue = pickFreshTopics(ts, pastTopics).map((t) => ({ title: t.title, keyword: t.keyword }));
   }
-  if (!topic) topic = { title: `Tips en informatie van ${ctx.studio}`, keyword: ctx.studio };
+  if (!topicQueue.length) topicQueue = [{ title: `Tips en informatie van ${ctx.studio}`, keyword: ctx.studio }];
 
-  // 2. brief (small JSON)  3. body (raw HTML)
-  const brief = await buildBrief(ctx, topic);
-  const bodyHtml = await writeBodyHtml(ctx, brief);
-  if (!bodyHtml || wordCount(bodyHtml) < 120) { logger.warn({ projectId, topic: topic.title }, "[seo] body generation failed"); return null; }
-  const body = { bodyHtml, faq: brief.faq || [] };
-  const wc = wordCount(body.bodyHtml);
-  // overlap vs existing (keyword + title)
-  const overlap = Math.max(0, ...past.map((p) => Math.max(jaccard(brief.keyword, p.query), jaccard(brief.title, p.title))), 0);
+  // AUTO retries up to a cap to LAND a publishable (>= threshold) article — "keep making one each run
+  // until it hits the bar". The score<70 reject floor still protects against weak/duplicate content.
+  const MAX_AUTO_ATTEMPTS = 5;
+  const maxAttempts = opts?.topic || mode === "manual" ? 1 : Math.min(MAX_AUTO_ATTEMPTS, topicQueue.length);
 
-  // 4. quality score (deterministic, no extra AI call)
-  const j = scoreArticle(brief, body.bodyHtml, body.faq, overlap);
-
-  // 5. decision. AUTO mode is quality-gated; MANUAL (explicit click) always publishes so the
-  // user immediately sees the blog + nav link (the score is still shown for info).
-  let decision = decide(j.score, overlap, wc, newWebsite, mode, (await getSettings(projectId)).autoPublishMin);
-  if (mode === "manual") decision = "publish";
+  let chosen: { brief: Brief; body: { bodyHtml: string; faq: { q: string; a: string }[] }; wc: number; j: Judged; decision: "publish" | "draft" | "reject" } | null = null;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const topic = topicQueue[attempt];
+    // 2. brief (small JSON)  3. body (raw HTML)
+    const brief = await buildBrief(ctx, topic);
+    const bodyHtml = await writeBodyHtml(ctx, brief);
+    if (!bodyHtml || wordCount(bodyHtml) < 120) { logger.warn({ projectId, topic: topic.title }, "[seo] body generation failed"); continue; }
+    const body = { bodyHtml, faq: brief.faq || [] };
+    const wc = wordCount(body.bodyHtml);
+    const overlap = Math.max(0, ...past.map((p) => Math.max(jaccard(brief.keyword, p.query), jaccard(brief.title, p.title))), 0);
+    // 4. quality score (deterministic, no extra AI call)
+    const j = scoreArticle(brief, body.bodyHtml, body.faq, overlap);
+    // 5. decision. AUTO is quality-gated; MANUAL always publishes.
+    let decision = decide(j.score, overlap, wc, newWebsite, mode, threshold);
+    if (mode === "manual") decision = "publish";
+    if (decision === "publish") { chosen = { brief, body, wc, j, decision }; break; }
+    if (decision !== "reject" && (!chosen || j.score > chosen.j.score)) chosen = { brief, body, wc, j, decision }; // best draft as fallback
+    logger.info({ projectId, attempt: attempt + 1, score: j.score, decision, threshold }, "[seo] attempt below bar, retrying");
+  }
+  if (!chosen) return null; // every attempt failed/rejected this run
+  const { brief, body, wc, j, decision } = chosen;
 
   // slug (unique)
   let slug = slugify(brief.title);
