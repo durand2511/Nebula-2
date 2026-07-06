@@ -8,7 +8,7 @@ export function Home() {
       <img
         src={whereStarsUrl}
         alt="Where stars are born and develop"
-        className="w-full max-w-lg rounded-3xl shadow-xl"
+        className="w-full max-w-md"
       />
 
       {/* Purpose */}
