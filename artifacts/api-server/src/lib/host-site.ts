@@ -3,7 +3,7 @@
  * project_files (/ → index.html, /booking-app.html → that file, /blog/x.html → that file) and
  * return it. Simple MVP renderer — serves the stored files as-is.
  */
-import { db, projectFiles, projects, platformUsers, importAssets, projectGsc } from "@workspace/db";
+import { db, projectFiles, projects, platformUsers, importAssets, projectGsc, seoArticles } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
 import type { Request, Response } from "express";
 import { getPublishedFiles } from "./site-publish.js";
@@ -233,6 +233,27 @@ export async function serveProjectSite(projectId: number, req: Request, res: Res
       content = /<\/head>/i.test(content) ? content.replace(/<\/head>/i, RENDER_FIX_STYLE + "</head>") : RENDER_FIX_STYLE + content;
       const tail = MOBILE_MENU_SCRIPT + VIDEO_EMBED_SCRIPT;
       content = /<\/body>/i.test(content) ? content.replace(/<\/body>/i, tail + "</body>") : content + tail;
+      // Strip a leftover duplicate "blog.html" nav link (the old SEO engine added one next to the site's
+      // own Blog link) — server-side, so it disappears regardless of any re-publish state.
+      content = content
+        .replace(/<li\b(?:(?!<\/li>)[\s\S])*?\bhref=["']blog\.html["'](?:(?!<\/li>)[\s\S])*?<\/li>/gi, "")
+        .replace(/<a\b[^>]*\bhref=["']blog\.html["'][\s\S]*?<\/a>/gi, "");
+      // On the studio's OWN blog page, list the published SEO articles — built server-side from the DB,
+      // so it's always current and never depends on the re-publish/snapshot mechanism. Identify the blog
+      // page by its filename ("blog…"), excluding the article pages (blog/…) and the redirect stub.
+      if (/(^|\/)blog[\w-]*\.html$/i.test(file.path) && file.path !== "blog.html" && !/^blog\//i.test(file.path)) {
+        try {
+          const arts = await db.select().from(seoArticles).where(and(eq(seoArticles.projectId, projectId), eq(seoArticles.status, "published")));
+          if (arts.length) {
+            const e = (s: string) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c] as string));
+            const cards = arts.map((a) => `<a href="/blog/${e(a.slug)}.html" style="display:block;background:#fff;border:1px solid #e6e8ec;border-radius:12px;padding:16px 18px;margin:0 0 12px;text-decoration:none;color:#1f2937"><span style="display:block;font-size:18px;font-weight:600;color:#7a00df">${e(a.title)}</span></a>`).join("");
+            const section = `<section data-nebula-blog-list style="max-width:760px;margin:40px auto;padding:0 20px;font-family:system-ui,-apple-system,'Segoe UI',Roboto,Arial,sans-serif"><h2 style="font-size:26px;margin:0 0 16px;color:#1f2937">Blog</h2>${cards}</section>`;
+            content = /data-nebula-blog-list/i.test(content)
+              ? content.replace(/<section\b[^>]*data-nebula-blog-list[\s\S]*?<\/section>/i, section)
+              : (/<footer\b/i.test(content) ? content.replace(/<footer\b/i, section + "\n<footer") : content.replace(/<\/body>/i, section + "</body>"));
+          }
+        } catch { /* best-effort */ }
+      }
     }
     // Free (unsubscribed) sites carry a non-removable Nebula badge bottom-right.
     if (!(await ownerSubscribed(projectId))) {
