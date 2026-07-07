@@ -109,11 +109,7 @@ export const RENDER_FIX_STYLE = `<style data-nebula-render-fix>.elementor-invisi
    the side as a clipped "island". Scoped to the mobile dropdown <nav>, so desktop flyout menus are
    untouched. The whole nav is hidden when the menu is closed, so this only shows while it's open. */
 nav.elementor-nav-menu--dropdown .sub-menu{position:static !important;left:auto !important;right:auto !important;top:auto !important;width:100% !important;min-width:0 !important;max-width:100% !important;max-height:none !important;display:block !important;visibility:visible !important;opacity:1 !important;box-shadow:none !important;transform:none !important;padding-left:1.2em}
-/* Imported "ticker"/marquee bars scroll via the site's OWN JS (which doesn't load here), so they sat
-   still. The scrolling content is already duplicated in the markup, so a pure-CSS animation moves it —
-   translateX(-50%) loops seamlessly because every repeat looks identical. Targets common ticker hooks. */
-@keyframes nebula-ticker{from{transform:translateX(0)}to{transform:translateX(-50%)}}
-[data-hero-ticker-text],[data-ticker-text],[data-ticker] .swiper-wrapper,.marquee__inner,.marquee-content{animation:nebula-ticker 30s linear infinite;will-change:transform}</style>`;
+</style>`;
 
 // Floating "Boek nu" pill shown on every page of a site that has a booking system — an always-present
 // booking CTA in addition to the nav link. Links to the booking app; hidden on the booking page itself.
@@ -147,6 +143,11 @@ document.addEventListener("click",function(e){var t=e.target&&e.target.closest?e
 // theme's frontend JS that builds it lives on the original domain and never loads). Build the iframe
 // ourselves from data-settings so the videos actually play — on desktop AND mobile.
 const VIDEO_EMBED_SCRIPT = `<script>(function(){function embed(u){if(!u)return"";u=String(u);var m;if(m=u.match(/(?:youtu\\.be\\/|youtube(?:-nocookie)?\\.com\\/(?:watch\\?v=|embed\\/|v\\/|shorts\\/))([\\w-]{6,})/i))return"https://www.youtube.com/embed/"+m[1];if(m=u.match(/vimeo\\.com\\/(?:video\\/)?(\\d+)/i))return"https://player.vimeo.com/video/"+m[1];return"";}var ws=document.querySelectorAll(".elementor-widget-video");for(var i=0;i<ws.length;i++){var w=ws[i];if(w.querySelector("iframe"))continue;var s={};try{s=JSON.parse(w.getAttribute("data-settings")||"{}");}catch(e){}var src=embed(s.youtube_url||s.vimeo_url||s.link||s.url||"");if(!src)continue;var slot=w.querySelector(".elementor-video")||w.querySelector(".elementor-wrapper")||w;var f=document.createElement("iframe");f.src=src;f.setAttribute("frameborder","0");f.setAttribute("allowfullscreen","");f.setAttribute("allow","accelerometer;autoplay;clipboard-write;encrypted-media;gyroscope;picture-in-picture");f.setAttribute("loading","lazy");f.title="Video";slot.innerHTML="";slot.appendChild(f);}})();</script>`;
+
+// Imported "ticker"/marquee bars scroll via the site's OWN JS (which doesn't load here), so they sat
+// still. Drive the moving track ourselves: scroll it left every frame and, because the items are
+// identical repeats, reset by exactly one item-width when it passes — a seamless loop (no jump/"bug").
+export const TICKER_SCRIPT = `<script>(function(){function run(tr){if(!tr||tr.__nebTick)return;tr.__nebTick=1;var x=0;var cs=getComputedStyle(tr);var gap=parseFloat(cs.columnGap||cs.gap||"0")||0;function step(){x-=0.7;var f=tr.firstElementChild;if(f){var iw=f.getBoundingClientRect().width+gap;if(iw>0){while(x<=-iw)x+=iw;}}tr.style.transform="translateX("+x.toFixed(2)+"px)";requestAnimationFrame(step);}requestAnimationFrame(step);}function init(){var sel="[data-hero-ticker]>a,[data-hero-ticker]>div,[data-ticker]>*,.marquee__inner,.marquee-content,.ticker__track";document.querySelectorAll(sel).forEach(run);}if(document.readyState!=="loading")init();else document.addEventListener("DOMContentLoaded",init);})();</script>`;
 
 // Short stable hash (djb2) for cache-busting externalized CSS — changes only when the content changes.
 function shortHash(s: string): string {
@@ -250,7 +251,7 @@ export async function serveProjectSite(projectId: number, req: Request, res: Res
     if (!isBookingApp) {
       content = unlazyImages(content);
       content = /<\/head>/i.test(content) ? content.replace(/<\/head>/i, RENDER_FIX_STYLE + "</head>") : RENDER_FIX_STYLE + content;
-      const tail = MOBILE_MENU_SCRIPT + VIDEO_EMBED_SCRIPT;
+      const tail = MOBILE_MENU_SCRIPT + VIDEO_EMBED_SCRIPT + TICKER_SCRIPT;
       content = /<\/body>/i.test(content) ? content.replace(/<\/body>/i, tail + "</body>") : content + tail;
       // Strip a leftover duplicate "blog.html" nav link (the old SEO engine added one next to the site's
       // own Blog link) — server-side, so it disappears regardless of any re-publish state.
