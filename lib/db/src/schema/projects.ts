@@ -138,7 +138,7 @@ export const projectSeo = pgTable("project_seo", {
   lastRunAt: timestamp("last_run_at", { withTimezone: true }),
   // Quality-gated publishing: max articles/day, and the minimum qualityScore for AUTO publish.
   maxPerDay: integer("max_per_day").notNull().default(1),
-  autoPublishMin: integer("auto_publish_min").notNull().default(85),
+  autoPublishMin: integer("auto_publish_min").notNull().default(70),
   gscRefreshEnc: text("gsc_refresh_enc").notNull().default(""),
   gscSiteUrl: text("gsc_site_url").notNull().default(""),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),

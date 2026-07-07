@@ -680,7 +680,7 @@ export async function improveArticle(projectId: number, isoDate: string, article
 
 async function getSettings(projectId: number): Promise<{ maxPerDay: number; autoPublishMin: number }> {
   const [row] = await db.select().from(projectSeo).where(eq(projectSeo.projectId, projectId));
-  return { maxPerDay: row?.maxPerDay ?? 2, autoPublishMin: row?.autoPublishMin ?? 85 };
+  return { maxPerDay: row?.maxPerDay ?? 2, autoPublishMin: row?.autoPublishMin ?? 70 };
 }
 
 /** Articles published today (for the per-day rate limit). */

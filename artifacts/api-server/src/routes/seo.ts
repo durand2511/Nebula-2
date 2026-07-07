@@ -99,7 +99,7 @@ router.post("/projects/:id/seo/auto", json({ limit: "16kb" }), async (req, res) 
   if (enabled && !(await projectOwnerSubscribed(projectId))) { res.status(402).json({ error: SEO_PAYWALL }); return; }
   const cadenceDays = Math.max(1, Math.min(30, Number(req.body?.cadenceDays) || 7));
   const maxPerDay = Math.max(1, Math.min(10, Number(req.body?.maxPerDay) || 2));
-  const autoPublishMin = Math.max(50, Math.min(100, Number(req.body?.autoPublishMin) || 85));
+  const autoPublishMin = Math.max(50, Math.min(100, Number(req.body?.autoPublishMin) || 70));
   try {
     const set = { autoEnabled: enabled ? "true" : "false", cadenceDays, maxPerDay, autoPublishMin, updatedAt: new Date() };
     await db.insert(projectSeo).values({ projectId, ...set }).onConflictDoUpdate({ target: projectSeo.projectId, set });
