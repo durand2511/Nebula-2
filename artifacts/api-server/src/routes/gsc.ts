@@ -8,7 +8,7 @@
 import { Router } from "express";
 import { logger } from "../lib/logger";
 import { reqBaseUrl } from "../lib/req-url.js";
-import { startConnect, verifyNonce, exchangeCode, setupSearchConsole, gscStatus, disconnectGsc, gscConfigured } from "../lib/gsc.js";
+import { startConnect, verifyNonce, exchangeCode, setupSearchConsole, gscStatus, disconnectGsc, gscConfigured, getSitemapStatus } from "../lib/gsc.js";
 
 const router = Router();
 const gscBase = (req: { headers: Record<string, unknown> }) => process.env.PUBLIC_API_URL || reqBaseUrl(req as any);
@@ -46,6 +46,14 @@ router.get("/gsc/callback", async (req, res) => {
     if (result.ok) res.send(page("Google Search Console gekoppeld ✓", "Je site is geverifieerd en je sitemap is ingediend. Google gaat je pagina's nu vanzelf indexeren. Je kunt dit venster sluiten."));
     else res.send(page("Gekoppeld — verificatie nog niet gelukt", (result.detail || "Probeer het opnieuw.") + " (Je account is wel gekoppeld; zodra je site live staat lukt de verificatie.)"));
   } catch (e) { logger.error({ err: e }, "[gsc] callback failed"); res.status(500).send(page("Er ging iets mis", "Probeer de koppeling opnieuw.")); }
+});
+
+// What does Google actually know about our sitemap (submitted / downloaded / URL count / errors)?
+router.get("/projects/:id/gsc/sitemap-status", async (req, res) => {
+  const projectId = Number(req.params.id);
+  if (isNaN(projectId)) { res.status(400).json({ error: "Invalid project ID" }); return; }
+  try { res.json(await getSitemapStatus(projectId)); }
+  catch (err) { logger.error({ err, projectId }, "[gsc] sitemap-status failed"); res.status(500).json({ error: "Status mislukt." }); }
 });
 
 // Re-run verification + sitemap submit (e.g. after publishing) without re-doing OAuth.

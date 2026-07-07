@@ -157,6 +157,34 @@ export async function gscStatus(projectId: number): Promise<{ configured: boolea
   return { configured: gscConfigured(), connected: !!row?.refreshToken, email: row?.email || "", status: row?.status || "pending", detail: row?.detail || "", siteUrl: row?.siteUrl || "" };
 }
 
+// Ask the Search Console API what Google actually knows about our sitemap: was it submitted, has Google
+// downloaded it, how many URLs, any errors. Proof that the automatic indexing pipeline reaches Google.
+export async function getSitemapStatus(projectId: number): Promise<{ ok: boolean; detail: string; sitemaps: unknown[] }> {
+  const at = await getAccessToken(projectId);
+  if (!at) return { ok: false, detail: "Niet gekoppeld met Google.", sitemaps: [] };
+  const domain = await resolvePublishedDomain(projectId);
+  if (!domain) return { ok: false, detail: "Geen gepubliceerd domein.", sitemaps: [] };
+  const siteUrl = `https://${domain}/`;
+  try {
+    const res = await fetch(`https://www.googleapis.com/webmasters/v3/sites/${encodeURIComponent(siteUrl)}/sitemaps`, { headers: { Authorization: `Bearer ${at}` } });
+    const j: any = await res.json().catch(() => ({}));
+    if (!res.ok) return { ok: false, detail: j?.error?.message || `Google API ${res.status}`, sitemaps: [] };
+    const sitemaps = (j.sitemap || []).map((s: any) => ({
+      path: s.path,
+      lastSubmitted: s.lastSubmitted || null,
+      lastDownloaded: s.lastDownloaded || null,
+      isPending: !!s.isPending,
+      errors: Number(s.errors || 0),
+      warnings: Number(s.warnings || 0),
+      submittedUrls: (s.contents || []).reduce((n: number, c: any) => n + Number(c.submitted || 0), 0),
+    }));
+    return { ok: true, detail: sitemaps.length ? "Google kent je sitemap." : "Nog geen sitemap bij Google.", sitemaps };
+  } catch (err) {
+    logger.warn({ err, projectId }, "[gsc] sitemap status failed");
+    return { ok: false, detail: "Kon de status niet ophalen.", sitemaps: [] };
+  }
+}
+
 export async function disconnectGsc(projectId: number): Promise<void> {
   const [row] = await db.select().from(projectGsc).where(eq(projectGsc.projectId, projectId));
   if (row?.refreshToken) { try { await fetch("https://oauth2.googleapis.com/revoke?token=" + encodeURIComponent(row.refreshToken), { method: "POST" }); } catch { /* ignore */ } }
