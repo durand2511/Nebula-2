@@ -30,6 +30,7 @@ export type BuilderAction =
   | { action: "add_booking_app"; accounts?: BookingAccount[] }
   | { action: "set_booking_logins"; accounts: BookingAccount[] }
   | { action: "remove_external_bookings" }
+  | { action: "set_book_button"; scope: string }
   | { action: "undo"; reason: string }
   | { action: "none"; reason: string };
 
@@ -47,6 +48,7 @@ export const ACTION_CATALOGUE = [
   { action: "add_booking_app", params: [], when: "the user wants a booking/reservation app or system added (e.g. 'maak een booking app', 'voeg een boekingssysteem toe', 'reserveringssysteem', 'agenda waar klanten lessen kunnen boeken')" },
   { action: "set_booking_logins", params: ["accounts"], when: "the user provides login credentials (e-mail + password, optionally names) for the booking app — the admin login and/or teacher logins — so they can log in (e.g. 'de admin login is ...', 'docent Lisa: lisa@x.nl wachtwoord ...')" },
   { action: "remove_external_bookings", params: [], when: "remove all links/buttons/widgets that point to OTHER (external) booking/scheduling platforms (bsport, Momoyoga, Eversports, Mindbody, etc.) from the site — e.g. 'verwijder alle links naar andere boekingsplatformen', 'haal de rooster/reserveer-knoppen naar bsport weg', 'weg met de externe booking widgets'" },
+  { action: "set_book_button", params: ["scope"], when: "control WHERE the floating 'Boek nu' booking button shows: scope='all' (every page), 'off' (hide it everywhere), or a page filename like 'index.html' to show it ONLY there. E.g. 'zet de boek knop alleen op de homepage' → scope='index.html'; 'haal de zwevende boek knop weg' → scope='off'; 'boek knop op alle pagina's' → scope='all'. Homepage/startpagina/voorpagina = index.html" },
   { action: "undo", params: ["reason"], when: "undo/revert/reverse the previous change, take it back, remove the last edit (e.g. 'draai dit terug', 'maak ongedaan', 'toch niet', 'haal die wijziging weg', 'undo')" },
   { action: "none", params: ["reason"], when: "the request is none of the above / unclear / needs custom layout or content" },
 ] as const;
@@ -740,6 +742,20 @@ export function applyAction(action: BuilderAction, files: ProjectFile[]): Action
       return { changed, created, summary: changed.length
         ? `Links, knoppen en widgets naar externe boekingsplatformen verwijderd op ${changed.length} pagina's.`
         : "Geen links naar externe boekingsplatformen gevonden." };
+
+    case "set_book_button": {
+      // Store the scope in a small managed file; the serve/preview layer reads it to decide where the
+      // floating "Boek nu" button shows (all / off / a specific page).
+      const path = ".nebula-book-scope";
+      const scope = String(action.scope || "all").trim().toLowerCase() || "all";
+      const existing = files.find((f) => f.path === path);
+      if (existing) { if (existing.content !== scope) changed.push({ path, content: scope }); }
+      else created.push({ path, content: scope });
+      const human = scope === "off" || scope === "none" ? "verborgen (op geen enkele pagina)"
+        : scope === "all" ? "op alle pagina's gezet"
+        : `alleen op ${scope} gezet`;
+      return { changed, created, summary: `De zwevende "Boek nu"-knop is ${human}. (Republiceer om het live te zetten.)` };
+    }
 
     case "change_text":
       mapHtml((h) => changeText(h, action.from, action.to));

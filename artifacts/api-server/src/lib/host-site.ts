@@ -119,6 +119,16 @@ nav.elementor-nav-menu--dropdown .sub-menu{position:static !important;left:auto 
 // booking CTA in addition to the nav link. Links to the booking app; hidden on the booking page itself.
 export const BOOK_FLOAT_BUTTON = `<a href="/booking-app.html" data-nebula-book aria-label="Boek nu" style="position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:99998;display:inline-flex;align-items:center;gap:8px;background:#111827;color:#fff;font:600 15px/1.1 system-ui,-apple-system,'Segoe UI',Roboto,Arial,sans-serif;padding:14px 24px;border-radius:999px;text-decoration:none;box-shadow:0 10px 28px rgba(17,24,39,.28)">📅 Boek nu</a>`;
 
+// Whether the floating booking button shows on this page, per the .nebula-book-scope setting:
+// empty/"all" → every page; "off"/"none" → nowhere; otherwise a comma/space list of page paths.
+export function showBookButtonOn(pagePath: string, scopeRaw?: string): boolean {
+  const scope = (scopeRaw || "all").trim().toLowerCase();
+  if (scope === "" || scope === "all") return true;
+  if (scope === "off" || scope === "none" || scope === "geen") return false;
+  const page = pagePath.toLowerCase().replace(/\.html$/, "");
+  return scope.split(/[\s,]+/).filter(Boolean).some((s) => s.replace(/\.html$/, "") === page);
+}
+
 // Site-wide restyle ("maak de site mooier"): one managed CSS file the AI writes, injected on EVERY
 // imported page (after the imported CSS so its !important refinements win) — a whole-site transformation
 // instead of only index.html/the hero.
@@ -264,8 +274,10 @@ export async function serveProjectSite(projectId: number, req: Request, res: Res
         } catch { /* best-effort */ }
       }
     }
-    // Floating "Boek nu" CTA on every page of a site that has a booking system (except the booking page).
-    if (!isBookingApp && rows.some((r) => r.path === "booking-app.html")) {
+    // Floating "Boek nu" CTA on a site that has a booking system (except the booking page). Scope is
+    // controlled by an optional .nebula-book-scope file the AI writes: "all" (default) | "off" | a
+    // page path (or comma list) to limit it to specific page(s).
+    if (!isBookingApp && rows.some((r) => r.path === "booking-app.html") && showBookButtonOn(file.path, rows.find((r) => r.path === ".nebula-book-scope")?.content)) {
       content = /<\/body>/i.test(content) ? content.replace(/<\/body>/i, BOOK_FLOAT_BUTTON + "</body>") : content + BOOK_FLOAT_BUTTON;
     }
     // Free (unsubscribed) sites carry a non-removable Nebula badge bottom-right.
