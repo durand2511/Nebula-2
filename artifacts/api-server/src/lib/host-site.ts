@@ -115,6 +115,10 @@ nav.elementor-nav-menu--dropdown .sub-menu{position:static !important;left:auto 
 @keyframes nebula-ticker{from{transform:translateX(0)}to{transform:translateX(-50%)}}
 [data-hero-ticker-text],[data-ticker-text],[data-ticker] .swiper-wrapper,.marquee__inner,.marquee-content{animation:nebula-ticker 30s linear infinite;will-change:transform}</style>`;
 
+// Floating "Boek nu" pill shown on every page of a site that has a booking system — an always-present
+// booking CTA in addition to the nav link. Links to the booking app; hidden on the booking page itself.
+export const BOOK_FLOAT_BUTTON = `<a href="/booking-app.html" data-nebula-book aria-label="Boek nu" style="position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:99998;display:inline-flex;align-items:center;gap:8px;background:#111827;color:#fff;font:600 15px/1.1 system-ui,-apple-system,'Segoe UI',Roboto,Arial,sans-serif;padding:14px 24px;border-radius:999px;text-decoration:none;box-shadow:0 10px 28px rgba(17,24,39,.28)">📅 Boek nu</a>`;
+
 // Site-wide restyle ("maak de site mooier"): one managed CSS file the AI writes, injected on EVERY
 // imported page (after the imported CSS so its !important refinements win) — a whole-site transformation
 // instead of only index.html/the hero.
@@ -259,6 +263,10 @@ export async function serveProjectSite(projectId: number, req: Request, res: Res
           }
         } catch { /* best-effort */ }
       }
+    }
+    // Floating "Boek nu" CTA on every page of a site that has a booking system (except the booking page).
+    if (!isBookingApp && rows.some((r) => r.path === "booking-app.html")) {
+      content = /<\/body>/i.test(content) ? content.replace(/<\/body>/i, BOOK_FLOAT_BUTTON + "</body>") : content + BOOK_FLOAT_BUTTON;
     }
     // Free (unsubscribed) sites carry a non-removable Nebula badge bottom-right.
     if (!(await ownerSubscribed(projectId))) {

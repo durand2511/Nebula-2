@@ -8,7 +8,7 @@ import { db, projects, projectMessages, projectFiles, projectSnapshots, importAs
 import { getSessionUser, tokenFrom } from "../lib/platform-auth.js";
 import { isSubscribed, isBookingRequest, chargeTrackedUsage } from "../lib/billing.js";
 import { runWithUsage, recordUsage } from "../lib/ai-usage.js";
-import { unlazyImages, RENDER_FIX_STYLE, NEBULA_RESTYLE_PATH } from "../lib/host-site.js";
+import { unlazyImages, RENDER_FIX_STYLE, NEBULA_RESTYLE_PATH, BOOK_FLOAT_BUTTON } from "../lib/host-site.js";
 import {
   CreateProjectBody,
   GetProjectParams,
@@ -1081,6 +1081,10 @@ document.addEventListener("submit",function(e){
     html = unlazyImages(html);
     // Reveal entrance-animated elements that would stay hidden without the theme's scroll JS.
     html = /<\/head>/i.test(html) ? html.replace(/<\/head>/i, RENDER_FIX_STYLE + "</head>") : RENDER_FIX_STYLE + html;
+    // Floating "Boek nu" CTA when the site has a booking system — so the preview matches the live site.
+    if (fileRows.some((f) => f.path === "booking-app.html")) {
+      html = /<\/body>/i.test(html) ? html.replace(/<\/body>/i, BOOK_FLOAT_BUTTON + "</body>") : html + BOOK_FLOAT_BUTTON;
+    }
   }
 
   // Localised assets live at /assets/… (served directly by the published site). In the EDITOR PREVIEW
