@@ -108,7 +108,12 @@ export const RENDER_FIX_STYLE = `<style data-nebula-render-fix>.elementor-invisi
 /* Mobile menu submenus: render INLINE within the list (full width, indented) instead of floating off to
    the side as a clipped "island". Scoped to the mobile dropdown <nav>, so desktop flyout menus are
    untouched. The whole nav is hidden when the menu is closed, so this only shows while it's open. */
-nav.elementor-nav-menu--dropdown .sub-menu{position:static !important;left:auto !important;right:auto !important;top:auto !important;width:100% !important;min-width:0 !important;max-width:100% !important;max-height:none !important;display:block !important;visibility:visible !important;opacity:1 !important;box-shadow:none !important;transform:none !important;padding-left:1.2em}</style>`;
+nav.elementor-nav-menu--dropdown .sub-menu{position:static !important;left:auto !important;right:auto !important;top:auto !important;width:100% !important;min-width:0 !important;max-width:100% !important;max-height:none !important;display:block !important;visibility:visible !important;opacity:1 !important;box-shadow:none !important;transform:none !important;padding-left:1.2em}
+/* Imported "ticker"/marquee bars scroll via the site's OWN JS (which doesn't load here), so they sat
+   still. The scrolling content is already duplicated in the markup, so a pure-CSS animation moves it —
+   translateX(-50%) loops seamlessly because every repeat looks identical. Targets common ticker hooks. */
+@keyframes nebula-ticker{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+[data-hero-ticker-text],[data-ticker-text],[data-ticker] .swiper-wrapper,.marquee__inner,.marquee-content{animation:nebula-ticker 30s linear infinite;will-change:transform}</style>`;
 
 // Site-wide restyle ("maak de site mooier"): one managed CSS file the AI writes, injected on EVERY
 // imported page (after the imported CSS so its !important refinements win) — a whole-site transformation
