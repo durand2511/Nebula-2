@@ -1195,6 +1195,42 @@ function GscCard({ projectId }: { projectId: number }) {
   );
 }
 
+// "Professionele restyle aanvragen" — mails the Nebula owner (server-side, no mail app) with the project
+// + the studio's request when they want a full website makeover, bigger than the inline AI edits.
+function RedesignRequestButton({ projectId }: { projectId: number }) {
+  const [open, setOpen] = useState(false);
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [sent, setSent] = useState(false);
+  const send = async () => {
+    setBusy(true);
+    try {
+      const r = await fetch(`/api/projects/${projectId}/request-redesign`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ note }) });
+      const j = await r.json();
+      if (j.ok) { setSent(true); setOpen(false); } else window.alert(j.error || "Versturen mislukt.");
+    } catch { window.alert("Versturen mislukt."); } finally { setBusy(false); }
+  };
+  return (
+    <div className="rounded-lg border p-4 mt-4">
+      <div className="flex items-center gap-2 mb-1"><Wand2 className="h-4 w-4 text-primary" /><h4 className="font-medium text-sm">Professionele restyle</h4></div>
+      <p className="text-xs text-muted-foreground mb-3">Wil je dat Nebula je hele website professioneel moderniseert in de Nebula-stijl? Vraag het aan — we krijgen je verzoek binnen en pakken het voor je op.</p>
+      {sent ? (
+        <div className="text-[11px] text-emerald-600 flex items-center gap-1"><Check className="h-3 w-3" /> Aanvraag verstuurd — we nemen het op.</div>
+      ) : open ? (
+        <div className="space-y-2">
+          <textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder="Wat wil je moderner / aangepast? (optioneel)" className="w-full rounded-md border bg-background px-3 py-2 text-sm h-20" />
+          <div className="flex gap-2">
+            <Button size="sm" disabled={busy} onClick={() => void send()} className="bg-primary text-white">{busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Aanvraag versturen"}</Button>
+            <Button size="sm" variant="ghost" onClick={() => { setOpen(false); setNote(""); }}>Annuleren</Button>
+          </div>
+        </div>
+      ) : (
+        <Button size="sm" variant="outline" onClick={() => setOpen(true)}><Wand2 className="h-3.5 w-3.5 mr-1.5" /> Professionele restyle aanvragen</Button>
+      )}
+    </div>
+  );
+}
+
 export function ProjectWorkspace() {
   const [, params] = useRoute("/projects/:id");
   const projectId = Number(params?.id);
@@ -2505,6 +2541,7 @@ export function ProjectWorkspace() {
               )}
             </div>
             <GscCard projectId={projectId} />
+            <RedesignRequestButton projectId={projectId} />
           </div>
         </div>
       )}

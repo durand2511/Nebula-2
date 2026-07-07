@@ -9,6 +9,8 @@ import { getSessionUser, tokenFrom } from "../lib/platform-auth.js";
 import { isSubscribed, isBookingRequest, chargeTrackedUsage } from "../lib/billing.js";
 import { runWithUsage, recordUsage } from "../lib/ai-usage.js";
 import { unlazyImages, RENDER_FIX_STYLE, NEBULA_RESTYLE_PATH, BOOK_FLOAT_BUTTON, showBookButtonOn, TICKER_SCRIPT } from "../lib/host-site.js";
+import { smtpConfigFromEnv, sendMail } from "../lib/smtp.js";
+import { resolvePublishedDomain } from "../lib/seo.js";
 import {
   CreateProjectBody,
   GetProjectParams,
@@ -6671,6 +6673,40 @@ router.delete("/projects/:projectId/files/:filePath", async (req, res) => {
     req.log.error({ err }, "Failed to delete file");
     res.status(500).json({ error: "Internal server error" });
   }
+});
+
+// A studio asks the Nebula owner to professionally restyle/modernise their whole site. Sends an e-mail
+// to the platform owner (server-side — no mail app needed) with the project, its live URL, and the
+// studio's request. Used by the "Professionele restyle aanvragen" button when someone wants a full
+// website makeover (bigger than what the AI editor does inline).
+router.post("/projects/:id/request-redesign", json({ limit: "16kb" }), async (req, res) => {
+  const projectId = Number(req.params.id);
+  if (isNaN(projectId)) { res.status(400).json({ error: "Invalid project ID" }); return; }
+  const note = String((req.body as { note?: string })?.note || "").trim().slice(0, 2000);
+  try {
+    const [proj] = await db.select().from(projects).where(eq(projects.id, projectId));
+    if (!proj) { res.status(404).json({ error: "Project niet gevonden" }); return; }
+    const cfg = smtpConfigFromEnv();
+    if (!cfg) { res.status(503).json({ error: "E-mail is nog niet ingesteld op het platform." }); return; }
+    let domain = ""; try { domain = await resolvePublishedDomain(projectId); } catch { /* ignore */ }
+    const owner = process.env.OWNER_EMAIL || "durand2511@gmail.com";
+    const site = domain && !/localhost/.test(domain) ? `https://${domain}` : "(nog niet gepubliceerd)";
+    const esc = (s: string) => String(s || "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c] as string));
+    const html = `<div style="font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;max-width:560px;margin:0 auto;color:#1f2937">
+<h2 style="color:#7a00df;margin:0 0 8px">🎨 Restyle-aanvraag — een klant wil dat je hun site mooi maakt</h2>
+<p style="color:#374151">Een studio vraagt om een <b>volledige website-restyle/modernisering</b> in de Nebula-stijl.</p>
+<table style="border-collapse:collapse;font-size:15px;margin:8px 0">
+<tr><td style="padding:4px 14px 4px 0;color:#6b7280">Project</td><td><b>${esc(proj.name)}</b> (#${projectId})</td></tr>
+<tr><td style="padding:4px 14px 4px 0;color:#6b7280">Website</td><td><a href="${esc(site)}" style="color:#7a00df">${esc(site)}</a></td></tr>
+</table>
+<p style="margin:14px 0 4px;color:#6b7280">Verzoek van de klant:</p>
+<blockquote style="border-left:3px solid #7a00df;margin:0;padding:10px 16px;background:#faf7ff;border-radius:6px">${esc(note) || "(geen extra toelichting gegeven)"}</blockquote>
+<p style="margin-top:20px;font-size:13px;color:#9ca3af">Verstuurd via de "Professionele restyle aanvragen"-knop in Nebula.</p>
+</div>`;
+    const text = `Restyle-aanvraag\n\nProject: ${proj.name} (#${projectId})\nWebsite: ${site}\n\nVerzoek van de klant:\n${note || "(geen toelichting)"}\n`;
+    await sendMail(cfg, { to: owner, subject: `🎨 Restyle-aanvraag: ${proj.name}`, html, text, fromName: "Nebula" });
+    res.json({ ok: true });
+  } catch (err) { logger.error({ err, projectId }, "[redesign] request failed"); res.status(500).json({ error: "Versturen mislukt. Probeer het later opnieuw." }); }
 });
 
 export default router;

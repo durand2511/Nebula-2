@@ -185,6 +185,24 @@ export async function getSitemapStatus(projectId: number): Promise<{ ok: boolean
   }
 }
 
+// Re-submit the sitemap to Google whenever the blog changes (best-effort; only if GSC is connected).
+// Google also re-fetches registered sitemaps on its own, but this prompts a fresh fetch so new articles
+// are discovered faster. No-op when the studio hasn't connected Google.
+export async function submitSitemapToGoogle(projectId: number): Promise<void> {
+  try {
+    const [row] = await db.select().from(projectGsc).where(eq(projectGsc.projectId, projectId));
+    if (!row?.refreshToken) return;
+    const at = await getAccessToken(projectId);
+    if (!at) return;
+    const domain = await resolvePublishedDomain(projectId);
+    if (!domain || /localhost|127\.0\.0\.1/.test(domain)) return;
+    const siteUrl = `https://${domain}/`;
+    const sitemap = encodeURIComponent(`https://${domain}/sitemap.xml`);
+    await fetch(`https://www.googleapis.com/webmasters/v3/sites/${encodeURIComponent(siteUrl)}/sitemaps/${sitemap}`, { method: "PUT", headers: { Authorization: `Bearer ${at}` } });
+    logger.info({ projectId, domain }, "[gsc] sitemap re-submitted to Google");
+  } catch (err) { logger.warn({ err, projectId }, "[gsc] auto sitemap resubmit failed"); }
+}
+
 export async function disconnectGsc(projectId: number): Promise<void> {
   const [row] = await db.select().from(projectGsc).where(eq(projectGsc.projectId, projectId));
   if (row?.refreshToken) { try { await fetch("https://oauth2.googleapis.com/revoke?token=" + encodeURIComponent(row.refreshToken), { method: "POST" }); } catch { /* ignore */ } }

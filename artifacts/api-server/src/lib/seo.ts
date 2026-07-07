@@ -466,6 +466,9 @@ async function syncPublishedAux(projectId: number, ctx: Ctx, rows: { path: strin
       await submitToIndexNow(host, urls);
     }
   } catch { /* best-effort */ }
+  // Also re-submit the sitemap to GOOGLE (if the studio connected Search Console) so new articles get
+  // picked up fast. Dynamic import avoids a static seo↔gsc import cycle.
+  try { const { submitSitemapToGoogle } = await import("./gsc.js"); await submitSitemapToGoogle(projectId); } catch { /* best-effort */ }
 }
 
 /**
