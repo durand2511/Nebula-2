@@ -1278,6 +1278,12 @@ export function ProjectWorkspace() {
   const [selection, setSelection] = useState<Selection | null>(null);
   const [editValue, setEditValue] = useState("");
   const [applyingEdit, setApplyingEdit] = useState(false);
+  const imageUploadRef = useRef<HTMLInputElement | null>(null);
+  const [uploadingImage, setUploadingImage] = useState(false);
+  // After a visual edit the preview <iframe> remounts (key changes) and would reset to the
+  // top — so you can't see the element you just changed. Remember the scroll position before
+  // the reload and restore it after (works for imported sites: the iframe is same-origin).
+  const savedScrollRef = useRef<number | null>(null);
   // For imported multi-page sites: which page the preview currently shows (null = index).
   const [previewPage, setPreviewPage] = useState<string | null>(null);
   // Stable session ID for the reverse-proxy cookie jar — one per component mount.
@@ -1575,11 +1581,49 @@ export function ProjectWorkspace() {
   const refreshAfterEdit = async () => {
     await queryClient.invalidateQueries({ queryKey: getListFilesQueryKey(projectId) });
     await queryClient.invalidateQueries({ queryKey: getListMessagesQueryKey(projectId) });
+    // Capture the current preview scroll so we can restore it after the iframe reloads
+    // (otherwise the edit jumps you back to the top and you don't see what changed).
+    try { savedScrollRef.current = previewIframeRef.current?.contentWindow?.scrollY ?? null; } catch { savedScrollRef.current = null; }
     setPreviewKey((k) => k + 1);
     void reloadPublish(); // refresh "unpublished changes" indicator after an edit
   };
 
   const currentPagePath = () => previewPage ?? "index.html";
+
+  // Upload an image file straight from the computer: downscale (max 1600px) in a canvas
+  // so it stays lightweight, then use it as the new image src (a self-contained data-URI —
+  // no hosting/URL needed). PNG keeps transparency; everything else becomes JPEG for size.
+  const handleImageUpload = (file: File) => {
+    if (!file || !file.type.startsWith("image/")) return;
+    setUploadingImage(true);
+    const reader = new FileReader();
+    reader.onerror = () => setUploadingImage(false);
+    reader.onload = () => {
+      const dataUrl = String(reader.result || "");
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const MAX = 1600;
+          let w = img.naturalWidth || img.width, h = img.naturalHeight || img.height;
+          if (w > MAX || h > MAX) { const r = Math.min(MAX / w, MAX / h); w = Math.round(w * r); h = Math.round(h * r); }
+          const canvas = document.createElement("canvas");
+          canvas.width = w; canvas.height = h;
+          const ctx = canvas.getContext("2d");
+          if (ctx) {
+            ctx.drawImage(img, 0, 0, w, h);
+            const isPng = file.type === "image/png";
+            setEditValue(canvas.toDataURL(isPng ? "image/png" : "image/jpeg", 0.85));
+          } else {
+            setEditValue(dataUrl);
+          }
+        } catch { setEditValue(dataUrl); }
+        setUploadingImage(false);
+      };
+      img.onerror = () => { setEditValue(dataUrl); setUploadingImage(false); };
+      img.src = dataUrl;
+    };
+    reader.readAsDataURL(file);
+  };
 
   // Apply a per-element edit (this element only) via edit_element. No AI.
   const applyVisualEdit = async () => {
@@ -3534,6 +3578,18 @@ export function ProjectWorkspace() {
                     onLoad={() => {
                       // Re-sync select mode after every (re)load of the preview document.
                       try { previewIframeRef.current?.contentWindow?.postMessage({ __buildlySelectMode: selectModeRef.current }, "*"); } catch { /* ignore */ }
+                      // Restore the scroll position captured before an edit-triggered reload, so
+                      // you keep looking at the element you just changed. Retry a few times because
+                      // the page grows taller as images/fonts finish loading.
+                      const y = savedScrollRef.current;
+                      if (y != null) {
+                        savedScrollRef.current = null;
+                        const restore = () => { try { previewIframeRef.current?.contentWindow?.scrollTo(0, y); } catch { /* ignore */ } };
+                        restore();
+                        setTimeout(restore, 120);
+                        setTimeout(restore, 400);
+                        setTimeout(restore, 900);
+                      }
                     }}
                   />
                   {previewFullscreen && (
@@ -3661,11 +3717,31 @@ export function ProjectWorkspace() {
                               <p className="text-xs text-muted-foreground truncate">Huidig: {selection.file}</p>
                             )}
                             <input
-                              value={editValue}
+                              ref={imageUploadRef}
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              onChange={(e) => { const fl = e.target.files?.[0]; if (fl) handleImageUpload(fl); e.target.value = ""; }}
+                            />
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="w-full"
+                              onClick={() => imageUploadRef.current?.click()}
+                              disabled={uploadingImage}
+                            >
+                              {uploadingImage ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <ImagePlus className="h-3.5 w-3.5 mr-1.5" />}
+                              Afbeelding uploaden van je computer
+                            </Button>
+                            {editValue.startsWith("data:image") && (
+                              <img src={editValue} alt="Voorbeeld" className="mx-auto max-h-32 rounded border object-contain" />
+                            )}
+                            <div className="text-center text-[11px] text-muted-foreground">of plak een afbeeldings-URL</div>
+                            <input
+                              value={editValue.startsWith("data:image") ? "" : editValue}
                               onChange={(e) => setEditValue(e.target.value)}
                               placeholder="https://… nieuwe afbeeldings-URL"
                               className="w-full rounded-md border bg-transparent px-3 py-2 text-sm"
-                              autoFocus
                             />
                           </div>
                         )}
