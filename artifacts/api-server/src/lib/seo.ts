@@ -315,42 +315,69 @@ function articleHtml(ctx: Ctx, brief: Brief, bodyHtml: string, faq: { q: string;
 ${faqLd ? `<script type="application/ld+json">${JSON.stringify(faqLd)}</script>` : ""}
 <script type="application/ld+json">${JSON.stringify(crumbLd)}</script>
 <style>
-:root{--ac:${accent}}
-body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,Arial,sans-serif;color:#1f2937;background:#f7f8fa;line-height:1.7}
-.wrap{max-width:760px;margin:0 auto;padding:20px 20px 64px}
-header{display:flex;align-items:center;justify-content:space-between;padding:14px 0;border-bottom:1px solid #e6e8ec;margin-bottom:18px}
-header a{color:var(--ac);font-weight:700;text-decoration:none;font-size:14px}
-.crumbs{font-size:13px;color:#9ca3af;margin:0 0 14px}.crumbs a{color:#9ca3af;text-decoration:none}
-h1{font-size:34px;line-height:1.2;margin:0 0 10px}
-.byline{color:#6b7280;font-size:14px;margin:0 0 20px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-.tldr{background:#fff;border:1px solid #e6e8ec;border-left:4px solid var(--ac);border-radius:12px;padding:16px 18px;margin:0 0 26px;font-size:17px}
-.tldr b{display:block;font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--ac);margin-bottom:4px}
-h2{font-size:23px;margin:30px 0 10px}h3{font-size:19px;margin:22px 0 8px}p,li{font-size:17px}
-.faq details{background:#fff;border:1px solid #e6e8ec;border-radius:10px;padding:12px 16px;margin:10px 0}.faq summary{font-weight:600;cursor:pointer}
-.cta{background:var(--ac);color:#fff;border-radius:14px;padding:22px;margin:30px 0;text-align:center}.cta a{display:inline-block;margin-top:10px;background:#fff;color:var(--ac);font-weight:700;text-decoration:none;padding:10px 20px;border-radius:10px}
-.related ul,.sources ul{padding-left:18px}.disclaimer{background:#fffbeb;border:1px solid #fde68a;color:#92400e;border-radius:10px;padding:12px 14px;font-size:14px}
-.author{display:flex;gap:12px;align-items:center;background:#fff;border:1px solid #e6e8ec;border-radius:12px;padding:14px 16px;margin:28px 0}
-.author .av{width:42px;height:42px;border-radius:50%;background:var(--ac);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800}
-footer{margin-top:36px;padding-top:18px;border-top:1px solid #e6e8ec;color:#9ca3af;font-size:13px}
+:root{--ink:#20211f;--body:#4f5049;--soft:#8a8b83;--line:#e7e5de;--bg:#fbfaf7;--ac:${accent}}
+*{box-sizing:border-box}
+body{margin:0;font-family:'Segoe UI',system-ui,-apple-system,Roboto,Arial,sans-serif;color:var(--body);background:var(--bg);line-height:1.72;font-size:17px;-webkit-font-smoothing:antialiased}
+img{max-width:100%;display:block}a{color:inherit}
+.top{display:flex;align-items:center;justify-content:space-between;max-width:1180px;margin:0 auto;padding:18px 40px;border-bottom:1px solid var(--line)}
+.top .logo{display:flex;align-items:center;gap:10px;color:var(--ink);text-decoration:none;font-weight:300}
+.top .back{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink);text-decoration:none;border:1px solid var(--ink);border-radius:100px;padding:11px 20px;transition:all .25s}
+.top .back:hover{background:var(--ink);color:#fff}
+.hero{max-width:820px;margin:0 auto;padding:58px 40px 6px}
+.eyebrow{font-size:12px;letter-spacing:.24em;text-transform:uppercase;color:var(--ac);font-weight:600}
+h1{font-weight:300;color:var(--ink);font-size:clamp(30px,5vw,50px);line-height:1.12;letter-spacing:-.015em;margin:18px 0 14px}
+.byline{color:var(--soft);font-size:14px;margin:0;display:flex;gap:10px;flex-wrap:wrap}
+.lead{font-size:20px;color:var(--body);margin:18px 0 0;line-height:1.55}
+.article{max-width:760px;margin:0 auto;padding:26px 40px 20px}
+.article h2{font-weight:300;color:var(--ink);font-size:clamp(24px,3vw,34px);margin:48px 0 14px;letter-spacing:-.01em}
+.article h3{color:var(--ink);font-weight:600;font-size:21px;margin:34px 0 10px}
+.article p{margin:0 0 20px}.article ul,.article ol{padding-left:22px;margin:0 0 20px}.article li{margin:7px 0}
+.article a{color:var(--ac);text-decoration:underline;text-underline-offset:2px}
+.article blockquote{border-left:3px solid var(--ac);margin:26px 0;padding:4px 0 4px 22px;color:var(--ink);font-size:21px;font-style:italic;line-height:1.4}
+.disclaimer{background:#fbf6ec;border:1px solid #ecdcc0;color:#7a5a2a;border-radius:12px;padding:14px 16px;font-size:15px;margin:0 0 26px}
+.faq{max-width:760px;margin:0 auto;padding:0 40px}
+.faq h2{font-weight:300;color:var(--ink);font-size:28px;margin:44px 0 8px}
+.faq details{border-top:1px solid var(--line);padding:18px 0}.faq details:last-child{border-bottom:1px solid var(--line)}
+.faq summary{font-weight:600;color:var(--ink);cursor:pointer;list-style:none}.faq summary::-webkit-details-marker{display:none}
+.faq p{margin:12px 0 0;color:var(--body)}
+.cta{max-width:760px;margin:46px auto;padding:0 40px}
+.cta .box{background:var(--ink);color:#fff;border-radius:18px;padding:44px 40px;text-align:center}
+.cta .box strong{font-weight:300;font-size:26px;display:block;margin-bottom:20px}
+.cta .box a{display:inline-block;background:var(--ac);color:#fff;text-decoration:none;font-weight:600;padding:14px 28px;border-radius:100px;letter-spacing:.03em}
+.related,.sources{max-width:760px;margin:0 auto;padding:0 40px}
+.related h2,.sources h2{font-weight:300;color:var(--ink);font-size:24px;margin:38px 0 10px}
+.related ul{list-style:none;padding:0}.related li{border-top:1px solid var(--line);padding:14px 0}
+.related a{color:var(--ink);text-decoration:none;font-size:18px}.related a:hover{color:var(--ac)}
+.sources ul{padding-left:20px}.sources a{color:var(--ac)}.sources li{margin:6px 0}
+.author{max-width:760px;margin:36px auto;padding:0 40px}
+.author .box{display:flex;gap:14px;align-items:center;background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px 20px}
+.author .av{width:46px;height:46px;border-radius:50%;background:var(--ac);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;flex-shrink:0}
+footer{max-width:1180px;margin:24px auto 0;padding:40px;border-top:1px solid var(--line);color:var(--soft);font-size:13px}
+@media(max-width:900px){.top,.hero,.article,.faq,.cta,.related,.sources,.author,footer{padding-left:22px;padding-right:22px}}
 </style>
 </head>
-<body><div class="wrap">
-<header>${logo}<a href="${esc(base)}/index.html">← ${esc(ctx.studio)}</a></header>
-<nav class="crumbs"><a href="${esc(base)}/index.html">Home</a> › <a href="${esc(base)}/blog.html">Blog</a> › ${esc(brief.title)}</nav>
-<article>
+<body>
+<header class="top">
+<a class="logo" href="${esc(base)}/index.html">${logo}</a>
+<a class="back" href="${esc(base)}/index.html">← Terug naar de site</a>
+</header>
+<div class="hero">
+<span class="eyebrow">Blog</span>
 <h1>${esc(brief.title)}</h1>
-<p class="byline"><span>Door <strong>${esc(brief.authorName || ctx.studio)}</strong></span> · <span>Bijgewerkt op ${esc(updated)}</span></p>
-<div class="tldr"><b>Kort antwoord</b>${esc(brief.metaDescription)}</div>
+<p class="byline"><span>Door ${esc(brief.authorName || ctx.studio)}</span> · <span>${esc(updated)}</span></p>
+<p class="lead">${esc(brief.metaDescription)}</p>
+</div>
+<article class="article">
 ${disclaimer}
 ${bodyHtml}
+</article>
 ${faqHtml}
-<div class="cta"><strong>Klaar om te starten bij ${esc(ctx.studio)}?</strong><br><a href="${esc(base)}/index.html">Bekijk het aanbod →</a></div>
+<div class="cta"><div class="box"><strong>Klaar om te starten bij ${esc(ctx.studio)}?</strong><a href="${esc(base)}/index.html">Bekijk het aanbod →</a></div></div>
 ${relatedHtml}
 ${sourcesHtml}
-<div class="author"><div class="av">${esc((ctx.studio[0] || "S").toUpperCase())}</div><div><strong>${esc(brief.authorName || ctx.studio)}</strong><div style="color:#6b7280;font-size:14px">${esc(brief.authorBio || `Het team van ${ctx.studio}.`)}</div></div></div>
+<div class="author"><div class="box"><div class="av">${esc((ctx.studio[0] || "S").toUpperCase())}</div><div><strong style="color:var(--ink)">${esc(brief.authorName || ctx.studio)}</strong><div style="color:var(--soft);font-size:14px">${esc(brief.authorBio || `Het team van ${ctx.studio}.`)}</div></div></div></div>
 <footer>Geschreven voor ${esc(ctx.studio)} · Laatst bijgewerkt ${esc(updated)}.</footer>
-</article>
-</div></body>
+</body>
 </html>`;
 }
 
