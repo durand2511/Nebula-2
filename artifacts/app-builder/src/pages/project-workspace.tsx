@@ -3543,7 +3543,7 @@ export function ProjectWorkspace() {
             </TabsContent>
 
             {/* Preview Tab */}
-            <TabsContent value="preview" className="flex-1 flex flex-col m-0 border-none p-0 outline-none">
+            <TabsContent value="preview" className="flex-1 flex flex-col min-h-0 overflow-hidden m-0 border-none p-0 outline-none">
               {previewHtml ? (
                 <div
                   className={
