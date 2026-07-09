@@ -319,6 +319,9 @@ ${faqLd ? `<script type="application/ld+json">${JSON.stringify(faqLd)}</script>`
 *{box-sizing:border-box}
 body{margin:0;font-family:'Segoe UI',system-ui,-apple-system,Roboto,Arial,sans-serif;color:var(--body);background:var(--bg);line-height:1.72;font-size:17px;-webkit-font-smoothing:antialiased}
 img{max-width:100%;display:block}a{color:inherit}
+[data-nebula-book]{display:none!important}
+.top .home{font-size:12px;letter-spacing:.06em;color:var(--soft);text-decoration:none;margin-right:auto;padding-left:14px}
+.top .home:hover{color:var(--ink)}
 .top{display:flex;align-items:center;justify-content:space-between;max-width:1180px;margin:0 auto;padding:18px 40px;border-bottom:1px solid var(--line)}
 .top .logo{display:flex;align-items:center;gap:10px;color:var(--ink);text-decoration:none;font-weight:300}
 .top .back{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink);text-decoration:none;border:1px solid var(--ink);border-radius:100px;padding:11px 20px;transition:all .25s}
@@ -359,7 +362,8 @@ footer{max-width:1180px;margin:24px auto 0;padding:40px;border-top:1px solid var
 <body>
 <header class="top">
 <a class="logo" href="${esc(base)}/index.html">${logo}</a>
-<a class="back" href="${esc(base)}/index.html">← Terug naar de site</a>
+<a class="home" href="${esc(base)}/index.html">Home</a>
+<a class="back" href="${esc(base)}/blog.html">← Terug naar blog</a>
 </header>
 <div class="hero">
 <span class="eyebrow">Blog</span>
