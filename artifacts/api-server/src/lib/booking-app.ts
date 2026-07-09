@@ -1345,7 +1345,17 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
       else if(d.connected){b.textContent='onboarding afronden';b.className='ba-badge';}
       else{b.textContent='niet gekoppeld';b.className='ba-badge';}
       // Gekoppeld → toon een 1-klik-link naar het eigen Stripe-dashboard (saldo, uitbetalingen, betalingen).
-      if(ex&&d.connected){ex.innerHTML='<button class="ba-btn sm" data-act="stripe-dashboard">Open Stripe-dashboard ↗</button> <span class="ba-note" style="margin:0">— bekijk je saldo &amp; uitbetalingen</span>';}
+      if(ex&&d.connected){
+        var h='<button class="ba-btn sm" data-act="stripe-dashboard">Open Stripe-dashboard ↗</button> <span class="ba-note" style="margin:0">— bekijk je saldo &amp; uitbetalingen</span>';
+        if(d.requirementsDue&&d.requirementsDue.length){
+          h+='<div class="ba-note" style="margin-top:8px;color:#b45309">⚠ Uitbetalingen zijn geblokkeerd: Stripe mist nog gegevens (bijv. verificatie of bankrekening). Open je Stripe-dashboard en vul dit aan — daarna wordt je saldo uitbetaald.</div>';
+        } else if(!d.payoutsEnabled){
+          h+='<div class="ba-note" style="margin-top:8px;color:#b45309">⚠ Uitbetalingen staan nog niet aan. Rond de verificatie af in je Stripe-dashboard.</div>';
+        } else {
+          h+='<div class="ba-note" style="margin-top:8px;color:#15803d">✓ Uitbetalingen staan aan. Let op: Stripe houdt de <b>allereerste</b> uitbetaling van een nieuw account standaard ~7 werkdagen vast; daarna gaat het automatisch (dagelijks/rolling).</div>';
+        }
+        ex.innerHTML=h;
+      }
     }).catch(function(){b.textContent='—';});}
   function refreshGcalStatus(){var b=root.querySelector('#ba-gcal-status');if(!b||!projId())return;
     var ex=root.querySelector('#ba-gcal-extra');

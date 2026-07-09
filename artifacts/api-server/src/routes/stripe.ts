@@ -221,7 +221,20 @@ router.get("/projects/:id/stripe/status", async (req, res) => {
     if (String(enabled) !== row.chargesEnabled) {
       await db.update(projectStripe).set({ chargesEnabled: String(enabled) }).where(eq(projectStripe.projectId, projectId));
     }
-    res.json({ connected: true, chargesEnabled: enabled, accountId: row.accountId, detailsSubmitted: !!acct.details_submitted });
+    // Also surface PAYOUT readiness — a studio can accept charges but still have payouts held
+    // (Stripe holds a new account's first payout ~7 days, and blocks payouts entirely when
+    // verification info is still missing). Without this the studio can't tell WHY €X isn't arriving.
+    const req0 = acct.requirements || {};
+    res.json({
+      connected: true,
+      chargesEnabled: enabled,
+      payoutsEnabled: !!acct.payouts_enabled,
+      requirementsDue: (req0.currently_due || []).concat(req0.past_due || []),
+      disabledReason: req0.disabled_reason || null,
+      payoutSchedule: acct.settings?.payouts?.schedule || null,
+      accountId: row.accountId,
+      detailsSubmitted: !!acct.details_submitted,
+    });
   } catch (err) {
     logger.error({ err, projectId }, "[stripe] status failed");
     res.status(500).json({ error: "Status ophalen mislukt" });
