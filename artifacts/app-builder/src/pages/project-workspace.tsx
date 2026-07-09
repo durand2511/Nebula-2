@@ -1393,6 +1393,11 @@ export function ProjectWorkspace() {
   });
 
   useEffect(() => {
+    // When the user just sent a message (pendingUser set), always jump to the bottom.
+    // Otherwise (messages updating while the AI works), respect a manual scroll-up so the
+    // chat doesn't keep yanking you back down while you're reading/scrolling.
+    if (pendingUser) { userScrolledUpRef.current = false; }
+    else if (userScrolledUpRef.current) { return; }
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, pendingUser]);
 
@@ -2044,11 +2049,17 @@ export function ProjectWorkspace() {
       setPreviewErrors([]);
       setElapsedSec(0);
       setActiveTab("code"); // show the live code panel while building; switch back to preview when done
+      // Tell the AI which page the user is currently looking at, so "pas deze tekst aan" edits
+      // THAT page instead of defaulting to index.html. Only added when it's not already index.
+      const pg = previewPage && previewPage !== "index.html" ? previewPage : "";
+      const aiContent = pg
+        ? `${messageContent}\n\n(Belangrijk: ik bekijk nu de pagina "${pg}" — pas de gevraagde wijziging op DEZE pagina toe, niet op index.html, tenzij ik iets anders vraag.)`
+        : messageContent;
       await drive(
-        images.length > 0 ? { content: messageContent, images } : { content: messageContent }
+        images.length > 0 ? { content: aiContent, images } : { content: aiContent }
       );
     },
-    [projectId, drive]
+    [projectId, drive, previewPage]
   );
 
   // On (re)load, if a build is already running on the server for this project,
@@ -2301,6 +2312,10 @@ export function ProjectWorkspace() {
         }
       }
       await queryClient.invalidateQueries({ queryKey: getListFilesQueryKey(projectId) });
+      // Refresh the preview + publish indicator so you actually SEE the restore (files were
+      // reverted in the DB but the iframe still showed the changed version otherwise).
+      setPreviewKey((k) => k + 1);
+      void reloadPublish();
     } finally {
       setIsRestoring(false);
     }
