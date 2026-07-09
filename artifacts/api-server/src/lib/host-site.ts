@@ -261,7 +261,7 @@ export async function serveProjectSite(projectId: number, req: Request, res: Res
       // On the studio's OWN blog page, list the published SEO articles — built server-side from the DB,
       // so it's always current and never depends on the re-publish/snapshot mechanism. Identify the blog
       // page by its filename ("blog…"), excluding the article pages (blog/…) and the redirect stub.
-      if (/(^|\/)blog[\w-]*\.html$/i.test(file.path) && file.path !== "blog.html" && !/^blog\//i.test(file.path)) {
+      if (/(^|\/)blog[\w-]*(\.html$|\/index\.html$)/i.test(file.path) && file.path !== "blog.html" && !/^blog\//i.test(file.path)) {
         try {
           const arts = await db.select().from(seoArticles).where(and(eq(seoArticles.projectId, projectId), eq(seoArticles.status, "published")));
           if (arts.length) {
