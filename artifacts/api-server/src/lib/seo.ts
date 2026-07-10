@@ -29,7 +29,7 @@ function jaccard(a: string, b: string): number {
   return inter / (ta.size + tb.size - inter);
 }
 
-type Ctx = { studio: string; logo: string; accent: string; domain: string; description: string; language: string };
+type Ctx = { studio: string; logo: string; accent: string; domain: string; description: string; language: string; author: string };
 type Brief = {
   keyword: string; searchIntent: string; secondaryKeywords: string[]; audience: string;
   title: string; metaTitle: string; metaDescription: string;
@@ -81,7 +81,10 @@ export function deriveContext(files: ProjectFile[], language = "nl", domainOverr
   const html = refHtml(files);
   const domain = (domainOverride && domainOverride.trim()) || guessDomainFromLinks(html);
   const description = (html.match(/<meta[^>]+name=["']description["'][^>]*content=["']([^"']+)/i) ?? [])[1] ?? "";
-  return { studio: seed.studio, logo: seed.logo, accent: seed.accent, domain, description, language };
+  // Fixed byline author: an optional ".nebula-author" file overrides it (so every article carries the
+  // SAME real name instead of a per-article invention by the AI); falls back to the studio name.
+  const author = (files.find((f) => f.path === ".nebula-author")?.content || "").trim() || seed.studio;
+  return { studio: seed.studio, logo: seed.logo, accent: seed.accent, domain, description, language, author };
 }
 
 async function ai(prompt: string, maxTokens: number, timeoutMs = 120000): Promise<string> {
@@ -299,7 +302,7 @@ function articleHtml(ctx: Ctx, brief: Brief, bodyHtml: string, faq: { q: string;
   const disclaimer = brief.needsDisclaimer && brief.disclaimerText ? `<p class="disclaimer"><strong>Let op:</strong> ${esc(brief.disclaimerText)}</p>` : "";
   const sources = (brief.externalSources || []).filter((s) => s.url).slice(0, 5);
   const sourcesHtml = sources.length ? `<section class="sources"><h2>Bronnen</h2><ul>${sources.map((s) => `<li><a href="${esc(s.url)}" rel="nofollow noopener" target="_blank">${esc(s.title || s.url)}</a></li>`).join("")}</ul></section>` : "";
-  const ld = { "@context": "https://schema.org", "@type": brief.schemaType || "Article", headline: brief.title, description: brief.metaDescription, datePublished: isoDate, dateModified: isoDate, inLanguage: ctx.language, author: { "@type": "Organization", name: brief.authorName || ctx.studio }, publisher: { "@type": "Organization", name: ctx.studio }, mainEntityOfPage: url };
+  const ld = { "@context": "https://schema.org", "@type": brief.schemaType || "Article", headline: brief.title, description: brief.metaDescription, datePublished: isoDate, dateModified: isoDate, inLanguage: ctx.language, author: { "@type": "Person", name: ctx.author }, publisher: { "@type": "Organization", name: ctx.studio }, mainEntityOfPage: url };
   const faqLd = faq.length ? { "@context": "https://schema.org", "@type": "FAQPage", mainEntity: faq.map((f) => ({ "@type": "Question", name: f.q, acceptedAnswer: { "@type": "Answer", text: f.a } })) } : null;
   const crumbLd = { "@context": "https://schema.org", "@type": "BreadcrumbList", itemListElement: [{ "@type": "ListItem", position: 1, name: ctx.studio, item: `${base}/index.html` }, { "@type": "ListItem", position: 2, name: "Blog", item: `${base}/blog.html` }, { "@type": "ListItem", position: 3, name: brief.title, item: url }] };
   return `<!DOCTYPE html>
@@ -368,7 +371,7 @@ footer{max-width:1180px;margin:24px auto 0;padding:40px;border-top:1px solid var
 <div class="hero">
 <span class="eyebrow">Blog</span>
 <h1>${esc(brief.title)}</h1>
-<p class="byline"><span>Door ${esc(brief.authorName || ctx.studio)}</span> · <span>${esc(updated)}</span></p>
+<p class="byline"><span>Door ${esc(ctx.author)}</span> · <span>${esc(updated)}</span></p>
 <p class="lead">${esc(brief.metaDescription)}</p>
 </div>
 <article class="article">
@@ -379,7 +382,7 @@ ${faqHtml}
 <div class="cta"><div class="box"><strong>Klaar om te starten bij ${esc(ctx.studio)}?</strong><a href="${esc(base)}/index.html">Bekijk het aanbod →</a></div></div>
 ${relatedHtml}
 ${sourcesHtml}
-<div class="author"><div class="box"><div class="av">${esc((ctx.studio[0] || "S").toUpperCase())}</div><div><strong style="color:var(--ink)">${esc(brief.authorName || ctx.studio)}</strong><div style="color:var(--soft);font-size:14px">${esc(brief.authorBio || `Het team van ${ctx.studio}.`)}</div></div></div></div>
+<div class="author"><div class="box"><div class="av">${esc((ctx.author[0] || "S").toUpperCase())}</div><div><strong style="color:var(--ink)">${esc(ctx.author)}</strong><div style="color:var(--soft);font-size:14px">${esc(brief.authorBio || `${ctx.author} · ${ctx.studio}`)}</div></div></div></div>
 <footer>Geschreven voor ${esc(ctx.studio)} · Laatst bijgewerkt ${esc(updated)}.</footer>
 </body>
 </html>`;
@@ -451,6 +454,41 @@ function stripDupBlogNav(html: string): string {
   return out;
 }
 
+// Pick related articles for internal linking: topically closest first (shared keywords in title+query),
+// then newest. More/relevant internal links = better crawl paths + topical authority.
+function pickRelated(all: { id: number; title: string; slug: string; query?: string }[], current: { id: number; title: string; slug: string; query?: string }, max = 6): { title: string; slug: string }[] {
+  const words = (s: string) => new Set((s || "").toLowerCase().match(/[a-zà-ÿ]{4,}/g) || []);
+  const cw = words(`${current.title} ${current.query || ""}`);
+  return all.filter((a) => a.id !== current.id)
+    .map((a) => { const aw = words(`${a.title} ${a.query || ""}`); let o = 0; aw.forEach((w) => { if (cw.has(w)) o++; }); return { a, o }; })
+    .sort((x, y) => y.o - x.o || y.a.id - x.a.id)
+    .slice(0, max).map((s) => ({ title: s.a.title, slug: s.a.slug }));
+}
+
+// Re-render every already-published article page from its stored payload, so (a) the byline author stays
+// consistent (ctx.author) and (b) each article cross-links to the current best set of related articles
+// (bidirectional internal linking — older articles link to newer ones too). Idempotent: writes only on
+// change. Runs automatically on every publish + on boot (via syncPublishedAux). Returns changed paths.
+async function reRenderArticles(projectId: number, ctx: Ctx, rows: { path: string; id: number; content: string }[], byPath: Map<string, { id: number }>): Promise<Set<string>> {
+  const changed = new Set<string>();
+  try {
+    const arts = await db.select().from(seoArticles).where(and(eq(seoArticles.projectId, projectId), eq(seoArticles.status, "published")));
+    for (const art of arts) {
+      const path = `blog/${art.slug}.html`;
+      const existing = rows.find((f) => f.path === path);
+      if (!existing) continue; // missing files are handled by the reconcile/create paths
+      const payload = parseJson<PipelineResult>(art.payload, null as unknown as PipelineResult);
+      if (!payload?.articleHtml) continue;
+      const brief = briefFromPayload(payload, ctx);
+      const related = pickRelated(arts, art, 6);
+      const iso = new Date(art.updatedAt || Date.now()).toISOString().slice(0, 10);
+      const html = articleHtml(ctx, brief, payload.articleHtml, payload.faq || [], related, iso);
+      if (html !== existing.content) { await writeFileFor(projectId, byPath, path, html); changed.add(path); }
+    }
+  } catch (err) { logger.warn({ err, projectId }, "[seo] reRenderArticles failed"); }
+  return changed;
+}
+
 // Recompute the blog hub + robots/llms/sitemap. If the site already has its OWN blog page (from the
 // nav), publish the article list INTO that page and redirect blog.html to it; otherwise fall back to
 // generating a standalone blog.html + a Blog nav link (original behaviour — nothing breaks).
@@ -484,6 +522,9 @@ async function syncPublishedAux(projectId: number, ctx: Ctx, rows: { path: strin
       if (updated !== f.content) await db.update(projectFiles).set({ content: updated, updatedAt: new Date() }).where(eq(projectFiles.id, f.id));
     }
   }
+  // Reinforce internal links + keep the byline author consistent across ALL published articles
+  // (older articles get relinked to newer ones, and any stale/AI-invented author is corrected).
+  try { (await reRenderArticles(projectId, ctx, rows, byPath)).forEach((p) => changed.add(p)); } catch { /* best-effort */ }
   // Auto re-publish ONLY the blog/SEO files + the specific pages we deliberately edited (host branch),
   // so an unrelated draft edit elsewhere isn't pushed live by accident.
   try {
