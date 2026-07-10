@@ -11,8 +11,26 @@ import { logger } from "./logger";
 
 let started = false;
 
-// After a failed/rejected auto-run, retry this soon (instead of waiting a full day).
-const RETRY_AFTER_MS = 3 * 60 * 60 * 1000; // 3 hours
+// On an AI hiccup (rejected/failed run) retry ~30 min later — the tick runs every 30 min, so a
+// retry gap just under 30 min guarantees the very next tick picks it up. Give up after MAX_ATTEMPTS
+// failed tries in a single day, then wait for the next day.
+const RETRY_AFTER_MS = 25 * 60 * 1000; // ~25 min → retried on the next 30-min tick
+const MAX_ATTEMPTS = 5;
+const DAY_MS = 86400000;
+
+// In-memory per-project failure counter for the current day. Not persisted: a server restart resets
+// it (acceptable — restarts are rare and the boot tick just tries again). Keyed by projectId.
+const failCounts = new Map<number, { day: string; count: number }>();
+const dayKey = () => new Date().toISOString().slice(0, 10);
+
+// Bump today's failure count for a project and return the new total (resetting on a new day).
+function bumpFail(projectId: number): number {
+  const day = dayKey();
+  const rec = failCounts.get(projectId);
+  const next = rec && rec.day === day ? { day, count: rec.count + 1 } : { day, count: 1 };
+  failCounts.set(projectId, next);
+  return next.count;
+}
 
 async function tick(): Promise<void> {
   try {
@@ -24,24 +42,38 @@ async function tick(): Promise<void> {
         if (!(await projectOwnerSubscribed(row.projectId))) continue;
         // HARD CAP: never publish more than 1 article per day per website.
         const perDay = 1;
-        // Already published today?
-        if ((await publishedToday(row.projectId)) >= perDay) continue;
+        // Already published today? Then we're done for the day — clear any failure count.
+        if ((await publishedToday(row.projectId)) >= perDay) { failCounts.delete(row.projectId); continue; }
         // At most one per 24h.
-        const minGapMs = Math.floor(86400000 / perDay);
+        const minGapMs = Math.floor(DAY_MS / perDay);
         if (row.lastRunAt && now - new Date(row.lastRunAt).getTime() < minGapMs) continue;
+        // Give up for the day once we've already failed MAX_ATTEMPTS times today.
+        const already = failCounts.get(row.projectId);
+        if (already && already.day === dayKey() && already.count >= MAX_ATTEMPTS) continue;
         const result = await publishArticle(row.projectId, new Date().toISOString(), { mode: "auto" });
         // Only claim the full 24h slot when an article was actually PUBLISHED. If it was rejected
-        // (quality gate) or generation hiccuped, schedule a retry in ~3h instead of skipping the
-        // whole day — otherwise a single transient failure means "no article today".
+        // (quality gate) or generation hiccuped, retry ~30 min later — up to MAX_ATTEMPTS times —
+        // instead of skipping the whole day. After the last attempt, stop until tomorrow.
         const published = result?.status === "published";
-        const nextRun = published ? new Date() : new Date(now - minGapMs + RETRY_AFTER_MS);
+        let attempt = 0;
+        let nextRun: Date;
+        if (published) {
+          failCounts.delete(row.projectId);
+          nextRun = new Date();
+        } else {
+          attempt = bumpFail(row.projectId);
+          const stop = attempt >= MAX_ATTEMPTS;
+          nextRun = stop ? new Date() : new Date(now - minGapMs + RETRY_AFTER_MS);
+        }
         await db.update(projectSeo).set({ lastRunAt: nextRun, updatedAt: new Date() }).where(eq(projectSeo.projectId, row.projectId));
-        logger.info({ projectId: row.projectId, perDay, published, status: result?.status, score: result?.qualityScore, slug: result?.slug }, "[seo-scheduler] run");
+        logger.info({ projectId: row.projectId, perDay, published, attempt, maxAttempts: MAX_ATTEMPTS, status: result?.status, score: result?.qualityScore, slug: result?.slug }, "[seo-scheduler] run");
       } catch (err) {
-        logger.warn({ err, projectId: row.projectId }, "[seo-scheduler] project failed");
-        // Transient error — retry in ~3h, not tomorrow. (86400000 = the 24h per-day gap;
-        // inlined because minGapMs is scoped to the try block above and isn't visible here.)
-        await db.update(projectSeo).set({ lastRunAt: new Date(now - 86400000 + RETRY_AFTER_MS) }).where(eq(projectSeo.projectId, row.projectId)).catch(() => {});
+        // A thrown error is also an AI hiccup: count it and retry ~30 min later, up to MAX_ATTEMPTS.
+        const attempt = bumpFail(row.projectId);
+        const stop = attempt >= MAX_ATTEMPTS;
+        logger.warn({ err, projectId: row.projectId, attempt, maxAttempts: MAX_ATTEMPTS, stop }, "[seo-scheduler] project failed");
+        const nextRun = stop ? new Date() : new Date(now - DAY_MS + RETRY_AFTER_MS);
+        await db.update(projectSeo).set({ lastRunAt: nextRun }).where(eq(projectSeo.projectId, row.projectId)).catch(() => {});
       }
     }
   } catch (err) {
