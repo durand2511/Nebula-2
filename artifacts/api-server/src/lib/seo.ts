@@ -541,59 +541,118 @@ async function locationBodyHtml(ctx: Ctx, service: string, loc: Loc): Promise<st
     : `<h2>Online ${esc(service)} in ${esc(loc.city)}</h2><p>Vanuit ${esc(loc.city)} volg je bij ${esc(ctx.studio)} eenvoudig online een ${esc(service)} — live en vanuit je eigen vertrouwde omgeving, zonder reistijd. Persoonlijke begeleiding, in kleine groepen, op momenten die bij jou passen.</p>`;
 }
 
-function locationPageHtml(ctx: Ctx, service: string, loc: Loc, bodyHtml: string): string {
-  const accent = ctx.accent || "#7a00df", base = ctx.domain ? `https://${ctx.domain}` : "";
+// The site's own hero background <video> (extracted from the homepage) so location pages/hub use the
+// exact same video and feel. Empty string if the homepage has none.
+function siteHeroVideo(rows: { path: string; content: string }[]): string {
+  const idx = rows.find((r) => r.path === "index.html") || rows.find((r) => /(^|\/)index\.html$/i.test(r.path)) || rows.find((r) => r.path === "makeover-index.html");
+  const m = idx?.content.match(/<video\b[\s\S]*?<\/video>/i);
+  return m ? m[0] : "";
+}
+
+// Shared <head>/CSS/JS for the location pages + hub: a fixed background video hero, elegant serif
+// (Cormorant Garamond) + Inter body, warm palette, a clickable "scroll omlaag" cue, and scroll-reveal
+// sections (IntersectionObserver, with a safety timer so content always shows). Matches the homepage feel.
+function locHead(ctx: Ctx, title: string, desc: string, canonical: string, extraLd: object[] = []): string {
+  const accent = ctx.accent || "#8a7a63";
+  return `<!DOCTYPE html><html lang="${esc(ctx.language)}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${esc(title)}</title><meta name="description" content="${esc(desc)}"><link rel="canonical" href="${esc(canonical)}">
+<meta property="og:title" content="${esc(title)}"><meta property="og:description" content="${esc(desc)}"><meta property="og:type" content="website">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=Inter:wght@300;400;500&display=swap" rel="stylesheet">
+${extraLd.map((o) => `<script type="application/ld+json">${JSON.stringify(o)}</script>`).join("")}
+<style>:root{--ac:${accent};--ink:#4a3f33;--soft:#8a7f70;--cream:#f6f2ec;--line:rgba(74,63,51,.14)}*{box-sizing:border-box}
+html{scroll-behavior:smooth}body{margin:0;font-family:'Inter',system-ui,-apple-system,'Segoe UI',Roboto,Arial,sans-serif;color:var(--ink);line-height:1.8;background:var(--cream)}
+a{color:inherit}
+.lnav{position:absolute;top:0;left:0;right:0;z-index:5;display:flex;align-items:center;justify-content:space-between;padding:22px clamp(20px,5vw,54px)}
+.lnav .brand{font-family:'Cormorant Garamond',serif;font-size:23px;font-weight:600;color:#fff;text-decoration:none;letter-spacing:.3px}
+.lnav .brand img{max-height:42px;max-width:170px;object-fit:contain;display:block}
+.lnav nav a{color:#fff;text-decoration:none;font-size:14px;letter-spacing:.4px;margin-left:22px;opacity:.9}.lnav nav a:hover{opacity:1}
+@media(max-width:720px){.lnav nav a{margin-left:13px;font-size:12.5px}}
+.hero{position:relative;min-height:100vh;display:flex;align-items:center;justify-content:center;text-align:center;overflow:hidden}
+.hero .vid{position:absolute;inset:0;z-index:0;overflow:hidden;background:#2a2420}
+.hero .vid video{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);min-width:100%;min-height:100%;width:auto;height:auto;object-fit:cover}
+.hero::after{content:"";position:absolute;inset:0;z-index:1;background:linear-gradient(rgba(35,28,22,.42),rgba(35,28,22,.62))}
+.hero .in{position:relative;z-index:2;color:#fff;max-width:900px;padding:40px clamp(20px,5vw,40px)}
+.hero .eyebrow{font-size:13px;letter-spacing:3px;text-transform:uppercase;opacity:.85;margin:0 0 18px}
+.hero h1{font-family:'Cormorant Garamond',serif;font-weight:500;font-size:clamp(34px,6.5vw,74px);line-height:1.04;margin:0 0 18px;text-shadow:0 2px 30px rgba(0,0,0,.25)}
+.hero p.lead{font-size:clamp(15px,2vw,19px);font-weight:300;max-width:640px;margin:0 auto 30px;opacity:.95}
+.scrolldown{display:inline-flex;flex-direction:column;align-items:center;gap:8px;color:#fff;text-decoration:none;font-size:12px;letter-spacing:2px;text-transform:uppercase;opacity:.85;cursor:pointer;background:none;border:0}
+.scrolldown .arrow{width:26px;height:26px;border:1px solid rgba(255,255,255,.7);border-radius:50%;display:flex;align-items:center;justify-content:center;animation:bob 1.8s ease-in-out infinite}
+@keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(6px)}}
+.reveal{opacity:0;transform:translateY(26px);transition:opacity 1s ease,transform 1s ease}.reveal.on{opacity:1;transform:none}
+.sec{max-width:780px;margin:0 auto;padding:clamp(46px,8vw,88px) clamp(20px,5vw,40px)}
+.sec h2{font-family:'Cormorant Garamond',serif;font-weight:600;font-size:clamp(26px,4vw,38px);color:#3a3025;margin:38px 0 14px;line-height:1.15}
+.sec h3{font-family:'Cormorant Garamond',serif;font-weight:600;font-size:23px;margin:26px 0 8px}
+.sec p{margin:0 0 17px}.sec ul{margin:0 0 17px;padding-left:22px}.sec li{margin:0 0 7px}
+.cta{text-align:center;padding:0 20px clamp(40px,8vw,80px)}.cta a{display:inline-block;background:var(--ink);color:#fff;text-decoration:none;font-size:15px;letter-spacing:.4px;padding:16px 38px;border-radius:999px;transition:background .2s}.cta a:hover{background:#2f271e}
+.faq{max-width:780px;margin:0 auto;padding:0 clamp(20px,5vw,40px) clamp(46px,8vw,80px)}.faq h2{font-family:'Cormorant Garamond',serif;font-weight:600;font-size:clamp(24px,4vw,34px);margin:0 0 14px}
+.faq details{border-top:1px solid var(--line);padding:16px 0}.faq summary{cursor:pointer;font-weight:500;list-style:none}.faq summary::-webkit-details-marker{display:none}.faq summary::before{content:"+ ";color:var(--ac)}.faq details[open] summary::before{content:"– "}
+footer{background:#efe8de;border-top:1px solid var(--line);color:var(--soft);font-size:14px;text-align:center;padding:34px 24px}footer a{color:var(--ink);text-decoration:none}footer a:hover{color:var(--ac)}
+.cols{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:26px;max-width:1040px;margin:0 auto;padding:0 clamp(20px,5vw,40px) clamp(46px,8vw,80px)}
+.col h3{font-family:'Cormorant Garamond',serif;font-size:19px;color:#3a3025;margin:0 0 10px;border-bottom:1px solid var(--line);padding-bottom:6px}
+.col ul{list-style:none;padding:0;margin:0}.col li{margin:0 0 7px}.col a{text-decoration:none;color:var(--soft);font-size:15px}.col a:hover{color:var(--ac)}</style>
+</head>`;
+}
+const LOC_REVEAL_JS = `<script>(function(){var io=new IntersectionObserver(function(es){es.forEach(function(e){if(e.isIntersecting){e.target.classList.add('on');io.unobserve(e.target);}});},{threshold:.1});function bind(){document.querySelectorAll('.reveal:not(.on)').forEach(function(el){io.observe(el);});}bind();var sc=document.querySelector('[data-scroll]');if(sc)sc.addEventListener('click',function(ev){ev.preventDefault();var t=document.getElementById('start');if(t)t.scrollIntoView({behavior:'smooth'});});setTimeout(function(){document.querySelectorAll('.reveal').forEach(function(el){el.classList.add('on');});},2200);})();</script>`;
+
+function locNav(ctx: Ctx, base: string): string {
+  const brand = ctx.logo ? `<img src="${esc(ctx.logo)}" alt="${esc(ctx.studio)}">` : esc(ctx.studio);
+  return `<div class="lnav"><a class="brand" href="${esc(base)}/index.html">${brand}</a><nav><a href="${esc(base)}/index.html">Home</a><a href="${esc(base)}/locaties.html">Locaties</a><a href="${esc(base)}/blog.html">Blog</a><a href="${esc(base)}/booking-app.html">Aanmelden</a></nav></div>`;
+}
+function locHeroVid(video: string): string {
+  return `<div class="vid">${video || ""}</div>`;
+}
+function locFooter(ctx: Ctx, base: string): string {
+  return `<footer><p><a href="${esc(base)}/locaties.html">Alle locaties</a> &nbsp;·&nbsp; <a href="${esc(base)}/index.html">${esc(ctx.studio)}</a> &nbsp;·&nbsp; <a href="${esc(base)}/booking-app.html">Aanmelden</a></p><p style="opacity:.7;margin-top:8px">Powered by Nebula</p></footer>`;
+}
+
+function locationPageHtml(ctx: Ctx, service: string, loc: Loc, bodyHtml: string, video: string): string {
+  const base = ctx.domain ? `https://${ctx.domain}` : "";
   const url = `${base}/locaties/${locSlug(loc.city)}.html`;
   const title = `Online ${service} in ${loc.city}`;
   const desc = `Volg online ${service} vanuit ${loc.city} bij ${ctx.studio} — live vanuit huis, persoonlijke begeleiding, flexibel en toegankelijk.`.slice(0, 160);
-  const logo = ctx.logo ? `<img src="${esc(ctx.logo)}" alt="Logo ${esc(ctx.studio)}" style="max-height:44px;max-width:170px;object-fit:contain">` : `<b>${esc(ctx.studio)}</b>`;
   const faq = [
     { q: `Is de ${service} in ${loc.city} online?`, a: `Ja. Je volgt de training volledig online, live via videobellen, vanuit je eigen huis in ${loc.city}. Geen reistijd, wel persoonlijk contact.` },
     { q: `Kan ik meedoen vanuit ${loc.city}?`, a: `Zeker. Omdat alles online is, doe je vanuit heel ${loc.province} — en dus ook vanuit ${loc.city} — gewoon mee.` },
     { q: `Wat heb ik nodig?`, a: `Een laptop, tablet of telefoon met internet en een rustig plekje. Vooraf ontvang je een deelnamelink per e-mail.` },
     { q: `Hoe meld ik me aan?`, a: `Bekijk de agenda, kies een moment en schrijf je online in. Daarna krijg je alle informatie toegestuurd.` },
   ];
-  const faqHtml = `<section class="faq"><h2>Veelgestelde vragen — ${esc(loc.city)}</h2>${faq.map((f) => `<details><summary>${esc(f.q)}</summary><p>${esc(f.a)}</p></details>`).join("")}</section>`;
+  const faqHtml = `<section class="faq reveal"><h2>Veelgestelde vragen — ${esc(loc.city)}</h2>${faq.map((f) => `<details><summary>${esc(f.q)}</summary><p>${esc(f.a)}</p></details>`).join("")}</section>`;
   const ld = [
     { "@context": "https://schema.org", "@type": "Service", name: title, serviceType: service, areaServed: { "@type": "City", name: loc.city }, provider: { "@type": "Organization", name: ctx.studio }, url, description: desc },
     { "@context": "https://schema.org", "@type": "FAQPage", mainEntity: faq.map((f) => ({ "@type": "Question", name: f.q, acceptedAnswer: { "@type": "Answer", text: f.a } })) },
     { "@context": "https://schema.org", "@type": "BreadcrumbList", itemListElement: [{ "@type": "ListItem", position: 1, name: ctx.studio, item: `${base}/index.html` }, { "@type": "ListItem", position: 2, name: "Locaties", item: `${base}/locaties.html` }, { "@type": "ListItem", position: 3, name: loc.city, item: url }] },
   ];
-  return `<!DOCTYPE html><html lang="${esc(ctx.language)}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${esc(title)} — ${esc(ctx.studio)}</title><meta name="description" content="${esc(desc)}"><link rel="canonical" href="${esc(url)}">
-<meta property="og:title" content="${esc(title)}"><meta property="og:description" content="${esc(desc)}"><meta property="og:type" content="website">
-${ld.map((o) => `<script type="application/ld+json">${JSON.stringify(o)}</script>`).join("")}
-<style>:root{--ac:${accent};--ink:#1f2937;--soft:#6b7280;--line:#e6e8ec}*{box-sizing:border-box}body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,Arial,sans-serif;color:var(--ink);line-height:1.7;background:#fff}
-.top{display:flex;align-items:center;justify-content:space-between;gap:16px;max-width:900px;margin:0 auto;padding:18px 40px;border-bottom:1px solid var(--line)}
-.top nav a{color:var(--ink);text-decoration:none;font-size:15px;margin-left:18px}.top nav a:hover{color:var(--ac)}
-.hero{max-width:760px;margin:0 auto;padding:40px 40px 8px}.hero h1{font-size:34px;line-height:1.2;margin:0 0 10px}.byline{color:var(--soft);font-size:14px;margin:0}
-.article{max-width:760px;margin:0 auto;padding:8px 40px 10px}.article h2{font-size:25px;margin:34px 0 10px}.article h3{font-size:20px;margin:24px 0 8px}.article p{margin:0 0 15px}.article ul{margin:0 0 15px;padding-left:22px}
-.cta{max-width:760px;margin:26px auto;padding:0 40px}.cta a{display:inline-block;background:var(--ac);color:#fff;text-decoration:none;font-weight:600;padding:14px 26px;border-radius:999px}
-.faq{max-width:760px;margin:0 auto;padding:0 40px}.faq h2{font-size:24px;margin:34px 0 10px}.faq details{border-top:1px solid var(--line);padding:14px 0}.faq summary{cursor:pointer;font-weight:600}
-footer{max-width:900px;margin:40px auto 0;padding:26px 40px;border-top:1px solid var(--line);color:var(--soft);font-size:14px}
-@media(max-width:900px){.top,.hero,.article,.cta,.faq,footer{padding-left:22px;padding-right:22px}}</style>
-</head><body>
-<div class="top">${logo}<nav><a href="${esc(base)}/index.html">Home</a><a href="${esc(base)}/locaties.html">Locaties</a><a href="${esc(base)}/blog.html">Blog</a><a href="${esc(base)}/booking-app.html">Aanmelden</a></nav></div>
-<div class="hero"><h1>${esc(title)}</h1><p class="byline">Online training vanuit ${esc(loc.city)} · ${esc(ctx.studio)}</p></div>
-<article class="article">${bodyHtml}</article>
-<div class="cta"><a href="${esc(base)}/booking-app.html">Bekijk de agenda &amp; schrijf je in →</a></div>
+  return `${locHead(ctx, `${title} — ${ctx.studio}`, desc, url, ld)}<body>
+${locNav(ctx, base)}
+<section class="hero">${locHeroVid(video)}<div class="in"><p class="eyebrow">${esc(ctx.studio)}</p><h1>${esc(title)}</h1><p class="lead">Live online ${esc(service)}, vanuit huis in ${esc(loc.city)}. Persoonlijke begeleiding, kleine groepen, geen reistijd.</p><button class="scrolldown" data-scroll><span class="arrow">↓</span>Scroll omlaag</button></div></section>
+<span id="start"></span>
+<article class="sec reveal">${bodyHtml}</article>
+<div class="cta reveal"><a href="${esc(base)}/booking-app.html">Bekijk de agenda &amp; schrijf je in →</a></div>
 ${faqHtml}
-<footer><p><a href="${esc(base)}/locaties.html" style="color:${accent};text-decoration:none">← Alle locaties</a> · <a href="${esc(base)}/index.html" style="color:${accent};text-decoration:none">${esc(ctx.studio)}</a></p><p style="opacity:.7">Powered by Nebula</p></footer>
+${locFooter(ctx, base)}
+${LOC_REVEAL_JS}
 </body></html>`;
 }
 
-function locationsHubHtml(ctx: Ctx, cities: Loc[]): string {
-  const accent = ctx.accent || "#7a00df", base = ctx.domain ? `https://${ctx.domain}` : "";
+function locationsHubHtml(ctx: Ctx, cities: Loc[], video: string): string {
+  const base = ctx.domain ? `https://${ctx.domain}` : "";
+  const url = `${base}/locaties.html`;
   const byProv = PROVINCE_ORDER.map((prov) => {
     const list = cities.filter((c) => c.province === prov);
     if (!list.length) return "";
-    return `<div class="col"><h3>${esc(prov)}</h3><ul>${list.map((c) => `<li><a href="${esc(base)}/locaties/${locSlug(c.city)}.html">${esc(c.city)}</a></li>`).join("")}</ul></div>`;
+    return `<div class="col reveal"><h3>${esc(prov)}</h3><ul>${list.map((c) => `<li><a href="${esc(base)}/locaties/${locSlug(c.city)}.html">${esc(c.city)}</a></li>`).join("")}</ul></div>`;
   }).join("");
-  return `<!DOCTYPE html><html lang="${esc(ctx.language)}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Online training — locaties in heel Nederland | ${esc(ctx.studio)}</title><meta name="description" content="${esc(ctx.studio)} biedt online training aan in heel Nederland. Bekijk je plaats.">
-<link rel="canonical" href="${esc(base)}/locaties.html">
-<style>:root{--ac:${accent}}body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,Arial,sans-serif;color:#1f2937;background:#fff;line-height:1.6}.wrap{max-width:1000px;margin:0 auto;padding:30px 24px 64px}h1{font-size:32px;margin:0 0 6px}.sub{color:#6b7280;margin:0 0 28px}.cols{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:22px}.col h3{font-size:16px;margin:0 0 8px;color:#111827}.col ul{list-style:none;padding:0;margin:0}.col li{margin:0 0 6px}.col a{color:#374151;text-decoration:none;font-size:15px}.col a:hover{color:var(--ac)}a.home{color:var(--ac);font-weight:700;text-decoration:none}</style>
-</head><body><div class="wrap"><p><a class="home" href="${esc(base)}/index.html">← ${esc(ctx.studio)}</a></p><h1>Online training — waar je ook woont</h1><p class="sub">Al onze trainingen zijn <strong>online</strong> en live. Kies je plaats en doe mee vanuit heel Nederland.</p><div class="cols">${byProv || "<p>Binnenkort beschikbaar.</p>"}</div></div></body></html>`;
+  const title = `Online training — locaties in heel Nederland | ${ctx.studio}`;
+  const desc = `${ctx.studio} geeft online training in heel Nederland — live vanuit huis. Kies je plaats.`.slice(0, 160);
+  return `${locHead(ctx, title, desc, url)}<body>
+${locNav(ctx, base)}
+<section class="hero">${locHeroVid(video)}<div class="in"><p class="eyebrow">${esc(ctx.studio)}</p><h1>Online training, waar je ook woont</h1><p class="lead">Al onze trainingen zijn online en live. Kies je plaats en doe mee vanuit heel Nederland.</p><button class="scrolldown" data-scroll><span class="arrow">↓</span>Bekijk locaties</button></div></section>
+<span id="start"></span>
+<div class="cols">${byProv || "<p style=\"text-align:center;grid-column:1/-1\">Binnenkort beschikbaar.</p>"}</div>
+${locFooter(ctx, base)}
+${LOC_REVEAL_JS}
+</body></html>`;
 }
 
 function ensureLocationsLink(html: string): string {
@@ -636,7 +695,7 @@ export async function generateLocationPage(projectId: number, opts?: { city?: st
   const byPath = new Map(rows0.map((f) => [f.path, { id: f.id }]));
   // Persist the (possibly derived) service phrase so syncPublishedAux + future runs stay consistent.
   if (!hasFile) await writeFileFor(projectId, byPath, ".nebula-locations", service, "plaintext");
-  await writeFileFor(projectId, byPath, `locaties/${locSlug(target.city)}.html`, locationPageHtml(ctx, service, target, body));
+  await writeFileFor(projectId, byPath, `locaties/${locSlug(target.city)}.html`, locationPageHtml(ctx, service, target, body, siteHeroVideo(files)));
   const fresh = await db.select().from(projectFiles).where(eq(projectFiles.projectId, projectId));
   await syncPublishedAux(projectId, ctx, fresh.map((f) => ({ path: f.path, id: f.id, content: f.content })));
   logger.info({ projectId, city: target.city }, "[seo] location page published");
@@ -687,7 +746,7 @@ async function syncPublishedAux(projectId: number, ctx: Ctx, rows: { path: strin
   // that hub — the full city list lives on the hub page itself (a same-styled sub-site), NOT stuffed
   // into every page's footer. Also strips any earlier footer city list we may have injected before.
   if (locCfg && locCities.length) {
-    await writeFileFor(projectId, byPath, "locaties.html", locationsHubHtml(ctx, locCities));
+    await writeFileFor(projectId, byPath, "locaties.html", locationsHubHtml(ctx, locCities, siteHeroVideo(rows)));
     changed.add("locaties.html");
     for (const f of rows) {
       if (!f.path.toLowerCase().endsWith(".html")) continue;
