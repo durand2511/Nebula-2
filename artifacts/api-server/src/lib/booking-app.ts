@@ -1420,13 +1420,13 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
     var studio=(BAKED&&BAKED.studio)?esc(BAKED.studio):'onze studio';
     var logo=(BAKED&&BAKED.logo)?'<img src="'+BAKED.logo+'" alt="logo" style="max-height:64px;max-width:220px;object-fit:contain;display:block;margin:0 auto 22px;filter:drop-shadow(0 2px 12px rgba(0,0,0,.4))">':'';
     var _open=(!S.classes||!S.classes.length)||S.classes.some(function(c){return ((S.counts&&S.counts[c.id])||0)<(c.cap||0);});
-    var statusHtml=_open?''+statusHtml+'':'<span class="ba-status full"><span class="sd"></span><span><span class="sl">Status</span>Alles vol</span></span>';
+    var statusHtml=_open?'<span class="ba-status"><span class="sd"></span><span><span class="sl">Status</span>Open voor boekingen</span></span>':'<span class="ba-status full"><span class="sd"></span><span><span class="sl">Status</span>Alles vol</span></span>';
     return ''+
       '<section class="ba-hero2">'+logo+
         '<div class="eyebrow2">Boekingen \u00b7 '+studio+'</div>'+
         '<h1>Boek je plek.</h1>'+
         '<p class="sub2">Bekijk het rooster en reserveer eenvoudig je les bij '+studio+'.</p>'+
-        '<div class="cta2"><a class="ba-btn" href="#ba-agenda" style="text-decoration:none;display:inline-flex;align-items:center;justify-content:center">Start here</a><a class="ba-btn ghost" href="#ba-login" style="text-decoration:none;display:inline-flex;align-items:center;justify-content:center">Inloggen</a><span class="ba-status"><span class="sd"></span><span><span class="sl">Status</span>Open voor boekingen</span></span></div>'+'<div class="ba-clock" id="ba-clock"></div>'+
+        '<div class="cta2">'+statusHtml+'</div>'+'<div class="ba-clock" id="ba-clock"></div>'+
         '<a class="ba-scrolldown" href="#ba-agenda"><span>Rooster</span><span class="dot">\u2193</span></a>'+
       '</section>'+
       '<section id="ba-agenda" class="ba-section ba-rv">'+
@@ -2016,7 +2016,7 @@ body{margin:0;font-family:'Inter',system-ui,-apple-system,'Segoe UI',Roboto,Helv
 .ba-hero-grad{background:linear-gradient(135deg,#c8b89a,#0a0a0a) !important}
 .ba-fixedvideo{position:fixed;inset:0;z-index:0;overflow:hidden;pointer-events:none;background:#0a0a0a}
 .ba-fixedvideo iframe{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%) scale(1.55);width:100vw;height:56.25vw;min-height:100vh;min-width:177.78vh;border:0;pointer-events:none}
-.ba-fixedvideo::after{content:"";position:absolute;inset:0;background:linear-gradient(rgba(10,10,10,.38),rgba(10,10,10,.86))}
+.ba-fixedvideo::after{content:"";position:absolute;inset:0;background:radial-gradient(ellipse at center,rgba(10,10,10,.82) 0%,rgba(10,10,10,.5) 42%,rgba(10,10,10,.9) 100%)}
 /* scroll-reveal */
 .ba-rv{opacity:0;transform:translateY(18px);transition:opacity .7s cubic-bezier(.2,.7,.2,1),transform .7s cubic-bezier(.2,.7,.2,1)}
 .ba-rv.is-in{opacity:1;transform:none}
