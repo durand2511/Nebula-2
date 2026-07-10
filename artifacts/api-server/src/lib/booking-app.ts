@@ -88,6 +88,11 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
 @media(max-width:560px){#booking-app{padding:18px 14px 56px}#booking-app .ba-2{grid-template-columns:1fr}#booking-app .ba-card{padding:16px}#booking-app .ba-h{font-size:34px}#booking-app .ba-row{gap:8px}#booking-app .ba-tabs{gap:5px}}
 #booking-app .ba-hero2{min-height:80vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;position:relative;padding:30px 20px;overflow:hidden;border-radius:20px}
 #booking-app .ba-hero2>*{position:relative;z-index:1}
+#booking-app .ba-status{display:inline-flex;align-items:center;gap:10px;background:rgba(255,255,255,.06);border:1px solid var(--ba-line2);border-radius:999px;padding:9px 18px;font-size:13px;color:var(--ba-ink);text-align:left}
+#booking-app .ba-status .sd{width:8px;height:8px;border-radius:50%;background:#34d399;box-shadow:0 0 0 0 rgba(52,211,153,.6);animation:bapulse 2s infinite}
+#booking-app .ba-status .sl{display:block;font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:var(--ba-muted)}
+@keyframes bapulse{0%{box-shadow:0 0 0 0 rgba(52,211,153,.5)}70%{box-shadow:0 0 0 7px rgba(52,211,153,0)}100%{box-shadow:0 0 0 0 rgba(52,211,153,0)}}
+#booking-app .ba-clock{position:absolute;top:16px;right:18px;z-index:2;font-family:'Inter';font-size:11px;letter-spacing:.14em;color:var(--ba-muted);text-transform:uppercase}
 #booking-app .ba-hero2-bg{position:absolute !important;inset:0;z-index:0 !important;overflow:hidden;pointer-events:none;background:#0a0a0a}
 #booking-app .ba-hero2-bg iframe{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:100vw;height:56.25vw;min-height:100%;min-width:177.78vh;border:0;pointer-events:none;opacity:.6}
 #booking-app .ba-hero2-bg::after{content:"";position:absolute;inset:0;background:radial-gradient(130% 130% at 50% 0%,rgba(10,10,10,.3),rgba(10,10,10,.9))}
@@ -1413,7 +1418,7 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
         '<div class="eyebrow2">Boekingen \u00b7 '+studio+'</div>'+
         '<h1>Boek je plek.</h1>'+
         '<p class="sub2">Bekijk het rooster en reserveer eenvoudig je les bij '+studio+'.</p>'+
-        '<div class="cta2"><button class="ba-btn" data-act="goregister">Account aanmaken</button><a class="ba-btn ghost" href="#ba-login" style="text-decoration:none;display:inline-flex;align-items:center;justify-content:center">Inloggen</a>'+langSelect()+'</div>'+
+        '<div class="cta2"><a class="ba-btn" href="#ba-agenda" style="text-decoration:none;display:inline-flex;align-items:center;justify-content:center">Start here</a><a class="ba-btn ghost" href="#ba-login" style="text-decoration:none;display:inline-flex;align-items:center;justify-content:center">Inloggen</a><span class="ba-status"><span class="sd"></span><span><span class="sl">Status</span>Open voor boekingen</span></span></div>'+'<div class="ba-clock" id="ba-clock"></div>'+
         '<a class="ba-scrolldown" href="#ba-agenda"><span>Rooster</span><span class="dot">\u2193</span></a>'+
       '</section>'+
       '<section id="ba-agenda" class="ba-section ba-rv">'+
@@ -2011,6 +2016,7 @@ ${appMain}
   try{var r=document.getElementById('booking-app');if(r){new MutationObserver(function(){scan();}).observe(r,{childList:true,subtree:true});}}catch(e){}
   setTimeout(revealAll,2200);
 })();</script>
+<script>(function(){function t(){var el=document.getElementById('ba-clock');if(!el)return;var d=new Date();function p(n){return(n<10?'0':'')+n;}el.textContent='YOU '+p(d.getHours())+':'+p(d.getMinutes())+':'+p(d.getSeconds());}setInterval(t,1000);t();})();</script>
 </body>
 </html>`;
 }
