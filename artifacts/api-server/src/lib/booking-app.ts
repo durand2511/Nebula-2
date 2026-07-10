@@ -13,43 +13,43 @@
 
 const BOOKING_APP_MAIN = `<section id="booking-app">
 <style>
-#booking-app{--ba:var(--buildly-primary,#1f6f78);--ba-bg:#f6f7f9;--ba-line:#e6e8ec;--ba-ink:#1f2937;--ba-muted:#6b7280;--ba-soft:color-mix(in srgb,var(--ba) 8%,#fff);--ba-soft2:color-mix(in srgb,var(--ba) 14%,#fff);--ba-ring:color-mix(in srgb,var(--ba) 28%,transparent);--ba-shadow:0 1px 2px rgba(17,24,39,.05),0 10px 30px -16px rgba(17,24,39,.22);font-family:inherit;color:var(--ba-ink);max-width:1080px;margin:0 auto;padding:28px 20px 72px;box-sizing:border-box;-webkit-font-smoothing:antialiased}
+#booking-app{--ba:#c8b89a;--ba-bg:#0f0f0f;--ba-line:rgba(255,255,255,.10);--ba-line2:rgba(255,255,255,.17);--ba-ink:#f2f0ea;--ba-muted:#9a968c;--ba-card:rgba(255,255,255,.035);--ba-ring:rgba(200,184,154,.35);position:relative;z-index:1;font-family:inherit;color:var(--ba-ink);max-width:1080px;margin:0 auto;padding:28px 20px 72px;box-sizing:border-box;-webkit-font-smoothing:antialiased}
 #booking-app *{box-sizing:border-box}
-#booking-app .ba-h{font-size:28px;font-weight:800;letter-spacing:-.01em;margin:0 0 4px}
-#booking-app .ba-sub{color:var(--ba-muted);margin:0 0 22px;font-size:14px}
-#booking-app .ba-tabs{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:24px;padding:5px;background:color-mix(in srgb,var(--ba) 5%,#fff);border:1px solid var(--ba-line);border-radius:14px;overflow-x:auto}
-#booking-app .ba-tab{appearance:none;border:0;background:none;font:inherit;font-weight:600;font-size:14px;color:var(--ba-muted);padding:9px 16px;cursor:pointer;border-radius:10px;white-space:nowrap;transition:background .15s ease,color .15s ease}
-#booking-app .ba-tab:hover{color:var(--ba-ink);background:rgba(17,24,39,.04)}
-#booking-app .ba-tab.is-on{color:var(--ba);background:#fff;box-shadow:0 1px 2px rgba(17,24,39,.06),0 2px 8px -4px rgba(17,24,39,.2);font-weight:700}
-#booking-app .ba-panel{display:none;animation:bafade .2s ease}
+#booking-app .ba-h{font-family:'Instrument Serif',Georgia,serif;font-size:44px;font-weight:400;letter-spacing:-.01em;line-height:1.05;margin:0 0 6px;color:#fff}
+#booking-app .ba-sub{color:var(--ba-muted);margin:0 0 24px;font-size:14px;font-weight:300}
+#booking-app .ba-tabs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:26px;padding:5px;background:rgba(255,255,255,.04);border:1px solid var(--ba-line);border-radius:14px;overflow-x:auto;backdrop-filter:blur(8px)}
+#booking-app .ba-tab{appearance:none;border:0;background:none;font:inherit;font-weight:500;font-size:13.5px;color:var(--ba-muted);padding:9px 16px;cursor:pointer;border-radius:10px;white-space:nowrap;transition:background .2s,color .2s;letter-spacing:.01em}
+#booking-app .ba-tab:hover{color:var(--ba-ink);background:rgba(255,255,255,.05)}
+#booking-app .ba-tab.is-on{color:#0a0a0a;background:var(--ba);font-weight:600}
+#booking-app .ba-panel{display:none;animation:bafade .3s ease}
 #booking-app .ba-panel.is-on{display:block}
-@keyframes bafade{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+@keyframes bafade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
 #booking-app .ba-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:16px}
-#booking-app .ba-card{border:1px solid var(--ba-line);border-radius:16px;padding:20px;background:#fff;box-shadow:var(--ba-shadow)}
-#booking-app .ba-card h4{margin:0 0 3px;font-size:16px;font-weight:700;letter-spacing:-.01em}
-#booking-app .ba-meta{color:var(--ba-muted);font-size:13px;margin:0 0 12px;line-height:1.5}
-#booking-app .ba-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-bottom:24px}
-#booking-app .ba-stat{border:1px solid var(--ba-line);border-radius:16px;padding:18px 18px;background:linear-gradient(180deg,var(--ba-soft),#fff);box-shadow:var(--ba-shadow);transition:transform .16s ease}
-#booking-app .ba-stat:hover{transform:translateY(-2px)}
-#booking-app .ba-stat b{display:block;font-size:30px;line-height:1.05;font-weight:800;color:var(--ba);letter-spacing:-.02em}
-#booking-app .ba-stat span{color:var(--ba-muted);font-size:13px;font-weight:500}
-#booking-app .ba-btn{appearance:none;border:0;border-radius:11px;background:var(--ba);color:#fff;font:inherit;font-weight:700;font-size:14px;padding:10px 16px;cursor:pointer;transition:filter .15s ease,box-shadow .15s ease,transform .05s ease;box-shadow:0 1px 2px rgba(17,24,39,.12)}
-#booking-app .ba-btn:hover{filter:brightness(1.06);box-shadow:0 4px 14px -4px var(--ba-ring)}
+#booking-app .ba-card{border:1px solid var(--ba-line);border-radius:16px;padding:20px;background:var(--ba-card);backdrop-filter:blur(10px)}
+#booking-app .ba-card h4{margin:0 0 3px;font-size:16px;font-weight:600;letter-spacing:-.01em;color:#fff}
+#booking-app .ba-meta{color:var(--ba-muted);font-size:13px;margin:0 0 12px;line-height:1.5;font-weight:300}
+#booking-app .ba-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-bottom:26px}
+#booking-app .ba-stat{border:1px solid var(--ba-line);border-radius:16px;padding:20px 18px;background:var(--ba-card);backdrop-filter:blur(10px);transition:transform .2s,border-color .2s}
+#booking-app .ba-stat:hover{transform:translateY(-3px);border-color:var(--ba-ring)}
+#booking-app .ba-stat b{display:block;font-family:'Instrument Serif',serif;font-size:38px;line-height:1;font-weight:400;color:var(--ba);letter-spacing:-.01em}
+#booking-app .ba-stat span{color:var(--ba-muted);font-size:13px;font-weight:300}
+#booking-app .ba-btn{appearance:none;border:0;border-radius:11px;background:var(--ba);color:#0a0a0a;font:inherit;font-weight:600;font-size:14px;padding:11px 18px;cursor:pointer;transition:filter .2s,box-shadow .2s,transform .05s;letter-spacing:.01em}
+#booking-app .ba-btn:hover{filter:brightness(1.08);box-shadow:0 6px 22px -6px var(--ba-ring)}
 #booking-app .ba-btn:active{transform:translateY(1px)}
 #booking-app .ba-btn:focus-visible{outline:none;box-shadow:0 0 0 3px var(--ba-ring)}
-#booking-app .ba-btn[disabled]{opacity:.45;cursor:not-allowed;box-shadow:none;filter:none}
-#booking-app .ba-btn.ghost{background:#fff;color:var(--ba-ink);border:1px solid var(--ba-line);box-shadow:none}
-#booking-app .ba-btn.ghost:hover{background:rgba(17,24,39,.04);filter:none}
-#booking-app .ba-btn.warn{background:#fff;color:#b91c1c;border:1px solid #fecaca;box-shadow:none}
-#booking-app .ba-btn.warn:hover{background:#fef2f2;filter:none}
-#booking-app .ba-btn.warn:focus-visible{box-shadow:0 0 0 3px rgba(220,38,38,.25)}
-#booking-app .ba-btn.sm{padding:7px 12px;font-size:13px;border-radius:9px}
-#booking-app .ba-badge{display:inline-flex;align-items:center;gap:4px;font-size:12px;font-weight:600;padding:3px 10px;border-radius:999px;background:var(--ba-bg);color:#374151;border:1px solid transparent}
-#booking-app .ba-badge.full{background:#fef2f2;color:#b91c1c;border-color:#fecaca}
-#booking-app .ba-badge.ok{background:#ecfdf5;color:#047857;border-color:#a7f3d0}
-#booking-app .ba-badge.warn{background:#fffbeb;color:#b45309;border-color:#fde68a}
-#booking-app .ba-att{border:1px solid var(--ba-line);border-radius:12px;margin-bottom:8px;overflow:hidden;background:#fff}
-#booking-app .ba-att>summary{cursor:pointer;padding:12px 14px;font-size:15px;list-style:none;background:var(--ba-soft);user-select:none}
+#booking-app .ba-btn[disabled]{opacity:.4;cursor:not-allowed;box-shadow:none;filter:none}
+#booking-app .ba-btn.ghost{background:transparent;color:var(--ba-ink);border:1px solid var(--ba-line2)}
+#booking-app .ba-btn.ghost:hover{background:rgba(255,255,255,.06);filter:none}
+#booking-app .ba-btn.warn{background:transparent;color:#f87171;border:1px solid rgba(248,113,113,.4)}
+#booking-app .ba-btn.warn:hover{background:rgba(248,113,113,.12);filter:none}
+#booking-app .ba-btn.warn:focus-visible{box-shadow:0 0 0 3px rgba(248,113,113,.25)}
+#booking-app .ba-btn.sm{padding:8px 13px;font-size:13px;border-radius:9px}
+#booking-app .ba-badge{display:inline-flex;align-items:center;gap:4px;font-size:12px;font-weight:500;padding:3px 11px;border-radius:999px;background:rgba(255,255,255,.07);color:var(--ba-ink);border:1px solid var(--ba-line)}
+#booking-app .ba-badge.full{background:rgba(248,113,113,.14);color:#f87171;border-color:rgba(248,113,113,.35)}
+#booking-app .ba-badge.ok{background:rgba(52,211,153,.14);color:#34d399;border-color:rgba(52,211,153,.35)}
+#booking-app .ba-badge.warn{background:rgba(251,191,36,.14);color:#fbbf24;border-color:rgba(251,191,36,.35)}
+#booking-app .ba-att{border:1px solid var(--ba-line);border-radius:12px;margin-bottom:8px;overflow:hidden;background:var(--ba-card)}
+#booking-app .ba-att>summary{cursor:pointer;padding:12px 14px;font-size:15px;list-style:none;background:rgba(255,255,255,.03);user-select:none;color:var(--ba-ink)}
 #booking-app .ba-att>summary::-webkit-details-marker{display:none}
 #booking-app .ba-att>summary:before{content:"\\25B8";display:inline-block;margin-right:8px;color:var(--ba-muted);transition:transform .15s}
 #booking-app .ba-att[open]>summary:before{transform:rotate(90deg)}
@@ -57,32 +57,35 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
 #booking-app .ba-att .ba-item{margin:0;border-radius:0;border:0;border-bottom:1px solid var(--ba-line);padding:10px 14px}
 #booking-app .ba-att .ba-item:last-child{border-bottom:0}
 #booking-app .ba-row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
-#booking-app label.ba-f{display:block;font-size:13px;font-weight:600;color:#374151;margin:12px 0 5px}
-#booking-app input,#booking-app select,#booking-app textarea{font:inherit;font-size:14px;width:100%;min-height:42px;padding:10px 12px;border:1px solid var(--ba-line);border-radius:11px;background:#fff;color:var(--ba-ink);transition:border-color .15s ease,box-shadow .15s ease}
+#booking-app label.ba-f{display:block;font-size:13px;font-weight:500;color:var(--ba-ink);margin:12px 0 5px}
+#booking-app input,#booking-app select,#booking-app textarea{font:inherit;font-size:14px;width:100%;min-height:44px;padding:11px 13px;border:1px solid var(--ba-line2);border-radius:11px;background:rgba(255,255,255,.04);color:var(--ba-ink);transition:border-color .2s,box-shadow .2s}
+#booking-app input::placeholder,#booking-app textarea::placeholder{color:#6f6b62}
 #booking-app input:focus,#booking-app select:focus,#booking-app textarea:focus{outline:none;border-color:var(--ba);box-shadow:0 0 0 3px var(--ba-ring)}
+#booking-app select option{background:#141414;color:var(--ba-ink)}
 #booking-app .ba-2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
 #booking-app .ba-list{display:flex;flex-direction:column;gap:10px}
 #booking-app .ba-scroll{max-height:320px;overflow-y:auto;padding-right:6px}
 #booking-app .ba-agenda{display:flex;flex-direction:column;gap:18px}
-#booking-app .ba-day-h{font-weight:800;font-size:15px;text-transform:capitalize;margin:0 0 10px;padding-bottom:6px;border-bottom:2px solid var(--ba-line)}
+#booking-app .ba-day-h{font-family:'Instrument Serif',serif;font-weight:400;font-size:22px;text-transform:capitalize;margin:0 0 12px;padding-bottom:8px;border-bottom:1px solid var(--ba-line);color:#fff}
 #booking-app .ba-appt{display:flex;gap:14px;align-items:stretch;margin-bottom:10px}
-#booking-app .ba-appt-time{flex:0 0 72px;font-weight:700;font-size:14px;color:#6b7280;padding-top:14px;text-align:right;white-space:nowrap}
-#booking-app .ba-appt-card{flex:1;border:1px solid var(--ba-line);border-left:5px solid var(--ba);border-radius:12px;padding:12px 14px;background:#fff;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
-#booking-app .ba-appt-card.is-full{border-left-color:#dc2626}
-#booking-app .ba-appt-card.is-mine{border-left-color:#047857;background:#f0fdf8}
+#booking-app .ba-appt-time{flex:0 0 72px;font-weight:500;font-size:14px;color:var(--ba-muted);padding-top:15px;text-align:right;white-space:nowrap}
+#booking-app .ba-appt-card{flex:1;border:1px solid var(--ba-line);border-left:3px solid var(--ba);border-radius:12px;padding:13px 15px;background:var(--ba-card);backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;transition:border-color .2s,transform .2s}
+#booking-app .ba-appt-card:hover{transform:translateX(2px);border-left-color:#e6d9bf}
+#booking-app .ba-appt-card.is-full{border-left-color:#f87171}
+#booking-app .ba-appt-card.is-mine{border-left-color:#34d399;background:rgba(52,211,153,.08)}
 #booking-app .ba-appt-main{min-width:0}
-#booking-app .ba-appt-main b{font-size:15px}
+#booking-app .ba-appt-main b{font-size:15px;color:#fff;font-weight:500}
 #booking-app .ba-empty{display:flex;gap:14px}
-#booking-app .ba-empty .ba-empty-card{flex:1;border:1px dashed var(--ba-line);border-radius:12px;padding:12px 14px;color:#9ca3af;font-size:13px;font-style:italic;margin-left:70px}
+#booking-app .ba-empty .ba-empty-card{flex:1;border:1px dashed var(--ba-line2);border-radius:12px;padding:12px 14px;color:#6f6b62;font-size:13px;font-style:italic;margin-left:70px}
 #booking-app .ba-weeknav{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:18px}
-#booking-app .ba-weeknav b{font-size:15px}
-#booking-app .ba-item{border:1px solid var(--ba-line);border-radius:13px;padding:13px 15px;background:#fff;transition:border-color .15s ease,box-shadow .15s ease}
-#booking-app .ba-item:hover{border-color:color-mix(in srgb,var(--ba) 30%,var(--ba-line));box-shadow:0 4px 14px -10px rgba(17,24,39,.3)}
-#booking-app .ba-note{font-size:12px;color:#9ca3af;margin-top:8px;line-height:1.5}
-#booking-app pre{background:#0f172a;color:#e2e8f0;padding:12px;border-radius:10px;overflow:auto;font-size:12px}
-@media(max-width:560px){#booking-app{padding:18px 14px 56px}#booking-app .ba-2{grid-template-columns:1fr}#booking-app .ba-card{padding:16px}#booking-app .ba-h{font-size:23px}#booking-app .ba-row{gap:8px}#booking-app .ba-tabs{gap:5px}}
-#booking-app .ba-auth{max-width:520px;margin:10px auto}
-#booking-app .ba-auth h2{font-size:24px;font-weight:800;margin:0 0 4px}
+#booking-app .ba-weeknav b{font-size:16px;color:#fff;font-weight:500}
+#booking-app .ba-item{border:1px solid var(--ba-line);border-radius:13px;padding:14px 16px;background:var(--ba-card);backdrop-filter:blur(8px);transition:border-color .2s,transform .2s}
+#booking-app .ba-item:hover{border-color:var(--ba-ring);transform:translateY(-1px)}
+#booking-app .ba-note{font-size:12px;color:#6f6b62;margin-top:8px;line-height:1.5}
+#booking-app pre{background:rgba(0,0,0,.5);color:#d8d3c7;padding:12px;border-radius:10px;overflow:auto;font-size:12px;border:1px solid var(--ba-line)}
+@media(max-width:560px){#booking-app{padding:18px 14px 56px}#booking-app .ba-2{grid-template-columns:1fr}#booking-app .ba-card{padding:16px}#booking-app .ba-h{font-size:34px}#booking-app .ba-row{gap:8px}#booking-app .ba-tabs{gap:5px}}
+#booking-app .ba-auth{max-width:480px;margin:8vh auto 10px}
+#booking-app .ba-auth h2{font-family:'Instrument Serif',serif;font-size:40px;font-weight:400;margin:0 0 6px;color:#fff}
 #booking-app .ba-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
 @media(max-width:560px){#booking-app .ba-3{grid-template-columns:1fr}}
 </style>
@@ -1913,11 +1916,7 @@ export function buildBookingAppPage(opts: BookingAppOpts = {}): string {
   // and define .ba-hero for the full-screen home. The image is inlined exactly once here.
   const bgCss = bg ? `
 :root{--ba-img:url("${bg}")}
-body{background:linear-gradient(rgba(247,248,250,.88),rgba(247,248,250,.90)),var(--ba-img) center/cover fixed !important}
-.ba-top{background:transparent !important;border-bottom:none !important}
-.ba-top .ba-brand,.ba-top nav a{text-shadow:0 1px 6px rgba(255,255,255,.6)}
-#booking-app .ba-card,#booking-app .ba-stat,#booking-app .ba-item{background:rgba(255,255,255,.93) !important;backdrop-filter:blur(3px)}
-.ba-hero{background:linear-gradient(rgba(15,23,42,.42),rgba(15,23,42,.58)),var(--ba-img) center/cover !important}
+.ba-hero{background:linear-gradient(rgba(10,10,10,.55),rgba(10,10,10,.8)),var(--ba-img) center/cover !important}
 ` : "";
   const appMain = BOOKING_APP_MAIN.replace("var BAKED=__BAKED__;", () => "var BAKED=" + baked + ";");
   return `<!DOCTYPE html>
@@ -1926,21 +1925,42 @@ body{background:linear-gradient(rgba(247,248,250,.88),rgba(247,248,250,.90)),var
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Boekingen — ${escH(title)}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
 <style>
 :root{--buildly-primary:${accent}}
 *{box-sizing:border-box}
-body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1f2937;background:#f5f6f8}
+html{scroll-behavior:smooth}
+body{margin:0;font-family:'Inter',system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#f2f0ea;background:#0a0a0a;-webkit-font-smoothing:antialiased}
+/* full-screen loader — fades out once the page is ready (the "laad-animatie") */
+#ba-loader{position:fixed;inset:0;z-index:9999;background:#0a0a0a;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:22px;transition:opacity .7s ease,visibility .7s ease}
+#ba-loader.is-done{opacity:0;visibility:hidden;pointer-events:none}
+#ba-loader .ring{width:54px;height:54px;border-radius:50%;border:2px solid rgba(255,255,255,.10);border-top-color:#c8b89a;animation:baspin .9s linear infinite}
+#ba-loader .lw{font-family:'Instrument Serif',serif;font-size:27px;letter-spacing:.02em;color:#f2f0ea;opacity:.9}
+@keyframes baspin{to{transform:rotate(360deg)}}
+/* subtle background video (the tonymak-style hero) */
+.ba-herovid{position:fixed;inset:0;z-index:0;overflow:hidden;background:#0a0a0a;pointer-events:none}
+.ba-herovid video{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);min-width:100%;min-height:100%;object-fit:cover;opacity:.30;filter:grayscale(.25) contrast(1.03)}
+.ba-herovid::after{content:"";position:absolute;inset:0;background:radial-gradient(130% 130% at 50% 0%,rgba(10,10,10,.35),rgba(10,10,10,.92))}
+/* top bar */
 .ba-top{position:sticky;top:0;z-index:30;background:transparent;display:flex;align-items:center;justify-content:center;padding:14px;pointer-events:none}
-.ba-home{pointer-events:auto;display:inline-flex;align-items:center;gap:8px;background:rgba(255,255,255,.92);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);color:#1f2937;font-weight:700;font-size:15px;text-decoration:none;padding:10px 24px;border-radius:999px;box-shadow:0 6px 22px rgba(0,0,0,.18);transition:transform .16s ease,box-shadow .16s ease}
-.ba-home:hover{transform:scale(1.06);box-shadow:0 10px 28px rgba(0,0,0,.26)}
+.ba-home{pointer-events:auto;display:inline-flex;align-items:center;gap:8px;background:rgba(255,255,255,.06);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);color:#f2f0ea;font-weight:500;font-size:14px;letter-spacing:.02em;text-decoration:none;padding:10px 22px;border-radius:999px;border:1px solid rgba(255,255,255,.13);transition:background .2s ease,border-color .2s ease,transform .1s ease}
+.ba-home:hover{background:rgba(200,184,154,.16);border-color:rgba(200,184,154,.55)}
 .ba-home:active{transform:scale(.97)}
-.ba-hero-grad{background:linear-gradient(135deg,${accent},#1f2937) !important}
+.ba-hero-grad{background:linear-gradient(135deg,#c8b89a,#0a0a0a) !important}
+/* scroll-reveal */
+.ba-rv{opacity:0;transform:translateY(18px);transition:opacity .7s cubic-bezier(.2,.7,.2,1),transform .7s cubic-bezier(.2,.7,.2,1)}
+.ba-rv.is-in{opacity:1;transform:none}
 ${bgCss}</style>
 </head>
 <body>
+<div id="ba-loader"><div class="ring"></div><div class="lw">${escH(title)}</div></div>
+<div class="ba-herovid"><video autoplay muted loop playsinline preload="auto"><source src="https://videos.pexels.com/video-files/8347847/8347847-uhd_4096_2160_30fps.mp4" type="video/mp4"></video></div>
 <header class="ba-top"><a class="ba-home" href="index.html">Home</a></header>
 ${appMain}
 <footer style="text-align:center;padding:22px 16px 28px"><a href="https://nebulabookings.com" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:8px;color:#8a8b83;font:600 12px/1 system-ui,sans-serif;text-decoration:none">Powered by <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAJYAAABvCAYAAAAOnDkzAAAsdElEQVR42u19eXwUVbb/OfdWdWcPCQkEwg4qq4iAIKAOKCCMjMoIyigMrj8eLiOIOsx7PmDGGRXkKSo4OLj7QGEUF/Z9F9k3kU0CCFlIQro7nd6q6p73R3eHSvetTgf0vfCbPtCf7lRXdS33W+d8z/eeewsgYQlLWMISlrCEJSxhP7dh4hLUb2OMwZPjxl33U3HxjYZhBNq3b7/6lVdeOZO4Mgm7LLv//vvu6dixo7tdu3Z01VVXUefOnQtGjhzZub4fN080XT1uHM4hLS39FYfD0ZmCBrquZ7ndLqWk5PySeu1pE81Xf42IwOl0ZUYu8/kCvT/77DNbwmPVI1u9+ouGKtp79urePWnvgQPlRFSv+VV2dvYjhmE0N/NixhikpbEPt23b6U54rHpgD40Zc/PkyX/7bsv27Rs3bN26q++NN7516NDCenvn67rOiIhLPFlmQUFJw0QorB9hxX7g8OEZ5eXlbXVdh4CmpRUWFz/+xBNzetbnrB0Ro9rIMAyltLTUlgCW/Ir9r+7v2WefvaaqqqpraL8UxBpBSUlJa6jXyLKKkiylPh+38r+9w7/+dXLupk27Rrtd7m7A8EJGRubs5cuXH/ul93v06NF2uq7bQ6AyA1ypx+1DSECSm5KpqpqdAFbI5s6dm/L2229/6na7BwghABHB6XS1IaI7EVH8wnyllRBCFiLrMx0gQjQilwEA+ny+jEQoDNnixYuvD4MqHIp0Tbtu8vjxmb/0vn0+T2OLkFxv00JF4QRAkhuOwO/3JyWAFTKv19vedNcFPYlhZB4pKsr9pfft8XgsyK5B9dddASAyIVuu6zq/IkPhk0+O6/bjj6fu4ZyXtm/fceGMGTMKL3dnmqapksVpDocjFwB+WZ4lrM6VUz3vKxR1uJb1G1gPPHDfgHXrNn/m8/lyEBEKCk4/NH78Q8PmzHnvNFxeF4Xk7iMsLy9P/qUzUMaY9FxRCKpvomiYCyKiOVSj2dMzxmw/kwxje/zxR686e/Z8WyFEMiI6s7Kyjn/44YenEVH/2YD11ltvpf3jH++85vV6c8I8yOv1dtm2bc8MIrrvcki2oigBGRFNS0vLqQ0YM2bMyKmsvNAmENDSFVACGnnPdWyYX/L7556rilM9lybuqCgixvHClClTmns8njZE5OnYsePhMWPGVP0SgHrxxRfzt2zZMraioqKDorB9o0bd//ennnrKzVjU9cbQTXpZHOvMmTPJDz300MNdu3Yd4/f7OwkhUogoDGZn586df+jbt+/STm3bLnjno49+vGxgrVixok9VlefaCFST2+2+59Zb+z8IAO9e6skkJydLG8UwjCZW20yePOnatWs3TXjvvfduBaAmiKgQAQkhXF8CFHfq1OlYenr6ttatWy/99NNPD1pkfmBI0IeIYLfbI7Mu+OGHH9InT37ugdOnzw5fsGDBdQCQQ0Ta119/daJXr15fdunSZc68efPOWh3z22+/nb9584ZuublZx2fN+vvR2q7LM8880/Lzz/+5tLLS3UkIAYyx+99///2OhmE80r1794CFZ7tkjzV58jMd77777redTufNputl9oyZuq739vl8vcvKyp7q3bv33HvuuWfWpEmTyi6ZvLtcrlahNqjREEIILCwsnj5mzJgbLj0kGU6Z9/B6vamy9ceNe+SOpUtXrSkvLx/r8/mae70+xePxgtfrxUAgkBkIBK7xer3Dzp8//9KuXbu29ezZ8+/jx49vaQFeQ3bn2+32gBlo999/760PPHD/+u+/PzLH6XTe5vP5crxeL/h8PtXn83coKyubvHXr1k2DBt3620iRFxHhwTFjRr3zzjvbd+3a883q1Zu2DBs27I7aQt/evXuec7kqO4lgWCYhBLhcrvumT59+laqqbguve0kea+LEiX2WLVuzvKKi4ubw/iLamkwCMmmalltaWvofH374wcbhw4cPjVfYlnUX+KzCcSAQyN6zZ8/7Vo1Xe8qvu0jiOQzDiOJYTz/9xICtW7/7pLKyMje0DSFi9ct88kREuq6nlZWV/b8NG9ZtHDBgwH2M1Tw1IYSUL6iq6g838O0DBz6xe/f+byoqHN0Nw6jeh3mfRER+v7/1yZOn5/fr12+c+UL/539Oarpj9+5ZDoejma4b4PP5cgoKTv552bJldqtrYhhGstPp6h/paQ3DSN69e3djAHBKb1KiOvPSP/3pTz3WrVu7yOVytYh0HLFpGFFVlafj999//88BAwY8Fg+4ooBlt9srY2xIHo+n45bNm+dPmjQp7xLIe4BJOJrNZmto3udLU6a02rhx67tutzszgrxGvqIugM8XaHnmzJlPevbsPtUsfhLV0IMwfHPabLYAIsKtt/Z/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" alt="Nebula" style="height:20px;width:auto;vertical-align:middle"></a></footer>
+<script>(function(){function done(){var l=document.getElementById('ba-loader');if(l)l.classList.add('is-done');}if(document.readyState==='complete'){setTimeout(done,350);}else{window.addEventListener('load',function(){setTimeout(done,350);});}setTimeout(done,3500);})();</script>
 </body>
 </html>`;
 }
