@@ -90,6 +90,8 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
 #booking-app .ba-hero2>*{position:relative;z-index:1}
 #booking-app .ba-status{display:inline-flex;align-items:center;gap:10px;background:rgba(255,255,255,.06);border:1px solid var(--ba-line2);border-radius:999px;padding:9px 18px;font-size:13px;color:var(--ba-ink);text-align:left}
 #booking-app .ba-status .sd{width:8px;height:8px;border-radius:50%;background:#34d399;box-shadow:0 0 0 0 rgba(52,211,153,.6);animation:bapulse 2s infinite}
+#booking-app .ba-status.full .sd{background:#f87171;box-shadow:0 0 0 0 rgba(248,113,113,.6);animation:bapulseR 2s infinite}
+@keyframes bapulseR{0%{box-shadow:0 0 0 0 rgba(248,113,113,.5)}70%{box-shadow:0 0 0 7px rgba(248,113,113,0)}100%{box-shadow:0 0 0 0 rgba(248,113,113,0)}}
 #booking-app .ba-status .sl{display:block;font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:var(--ba-muted)}
 @keyframes bapulse{0%{box-shadow:0 0 0 0 rgba(52,211,153,.5)}70%{box-shadow:0 0 0 7px rgba(52,211,153,0)}100%{box-shadow:0 0 0 0 rgba(52,211,153,0)}}
 #booking-app .ba-clock{position:absolute;top:16px;right:18px;z-index:2;font-family:'Inter';font-size:11px;letter-spacing:.14em;color:var(--ba-muted);text-transform:uppercase}
@@ -1417,6 +1419,8 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
   function vBrowse(){
     var studio=(BAKED&&BAKED.studio)?esc(BAKED.studio):'onze studio';
     var logo=(BAKED&&BAKED.logo)?'<img src="'+BAKED.logo+'" alt="logo" style="max-height:64px;max-width:220px;object-fit:contain;display:block;margin:0 auto 22px;filter:drop-shadow(0 2px 12px rgba(0,0,0,.4))">':'';
+    var _open=(!S.classes||!S.classes.length)||S.classes.some(function(c){return ((S.counts&&S.counts[c.id])||0)<(c.cap||0);});
+    var statusHtml=_open?''+statusHtml+'':'<span class="ba-status full"><span class="sd"></span><span><span class="sl">Status</span>Alles vol</span></span>';
     return ''+
       '<section class="ba-hero2">'+logo+
         '<div class="eyebrow2">Boekingen \u00b7 '+studio+'</div>'+
@@ -2011,7 +2015,7 @@ body{margin:0;font-family:'Inter',system-ui,-apple-system,'Segoe UI',Roboto,Helv
 .ba-home:active{transform:scale(.97)}
 .ba-hero-grad{background:linear-gradient(135deg,#c8b89a,#0a0a0a) !important}
 .ba-fixedvideo{position:fixed;inset:0;z-index:0;overflow:hidden;pointer-events:none;background:#0a0a0a}
-.ba-fixedvideo iframe{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:100vw;height:56.25vw;min-height:100%;min-width:177.78vh;border:0;pointer-events:none}
+.ba-fixedvideo iframe{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%) scale(1.55);width:100vw;height:56.25vw;min-height:100vh;min-width:177.78vh;border:0;pointer-events:none}
 .ba-fixedvideo::after{content:"";position:absolute;inset:0;background:linear-gradient(rgba(10,10,10,.38),rgba(10,10,10,.86))}
 /* scroll-reveal */
 .ba-rv{opacity:0;transform:translateY(18px);transition:opacity .7s cubic-bezier(.2,.7,.2,1),transform .7s cubic-bezier(.2,.7,.2,1)}
