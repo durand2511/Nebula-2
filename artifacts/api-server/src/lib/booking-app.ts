@@ -17,7 +17,9 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
 #booking-app *{box-sizing:border-box}
 #booking-app .ba-h{font-family:'Instrument Serif',Georgia,serif;font-size:44px;font-weight:400;letter-spacing:-.01em;line-height:1.05;margin:0 0 6px;color:#fff}
 #booking-app .ba-sub{color:var(--ba-muted);margin:0 0 24px;font-size:14px;font-weight:300}
-#booking-app .ba-tabs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:26px;padding:5px;background:rgba(255,255,255,.04);border:1px solid var(--ba-line);border-radius:14px;overflow-x:auto;backdrop-filter:blur(8px)}
+#booking-app .ba-tabs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;padding:6px;background:rgba(14,14,14,.9);border:1px solid var(--ba-line);border-radius:14px;overflow-x:auto;backdrop-filter:blur(14px);position:sticky;top:10px;z-index:20}
+#booking-app .ba-appsec{padding:34px 0 8px;border-top:1px solid var(--ba-line);margin-top:22px;scroll-margin-top:90px}
+#booking-app .ba-appsec:first-child{border-top:0;margin-top:8px;padding-top:14px}
 #booking-app .ba-tab{appearance:none;border:0;background:none;font:inherit;font-weight:500;font-size:13.5px;color:var(--ba-muted);padding:9px 16px;cursor:pointer;border-radius:10px;white-space:nowrap;transition:background .2s,color .2s;letter-spacing:.01em}
 #booking-app .ba-tab:hover{color:var(--ba-ink);background:rgba(255,255,255,.05)}
 #booking-app .ba-tab.is-on{color:#0a0a0a;background:var(--ba);font-weight:600}
@@ -1411,7 +1413,7 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
         '<div class="eyebrow2">Boekingen \u00b7 '+studio+'</div>'+
         '<h1>Boek je plek.</h1>'+
         '<p class="sub2">Bekijk het rooster en reserveer eenvoudig je les bij '+studio+'.</p>'+
-        '<div class="cta2"><button class="ba-btn" data-act="goregister">Account aanmaken</button><button class="ba-btn ghost" data-act="gologin">Inloggen</button>'+langSelect()+'</div>'+
+        '<div class="cta2"><button class="ba-btn" data-act="goregister">Account aanmaken</button><a class="ba-btn ghost" href="#ba-login" style="text-decoration:none;display:inline-flex;align-items:center;justify-content:center">Inloggen</a>'+langSelect()+'</div>'+
         '<a class="ba-scrolldown" href="#ba-agenda"><span>Rooster</span><span class="dot">\u2193</span></a>'+
       '</section>'+
       '<section id="ba-agenda" class="ba-section ba-rv">'+
@@ -1473,7 +1475,7 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
       '<div class="ba-row" style="margin:6px 0 14px"><div class="ba-meta" style="margin:0">Ingelogd als '+esc(u.name)+'</div><div class="ba-row" style="gap:8px">'+langSelect()+'<button class="ba-btn ghost sm" data-act="logout">Uitloggen</button></div></div>'+
       '<div class="ba-tabs">'+tb+'</div><div class="ba-host"></div>';
   }
-  function renderHost(){var host=root.querySelector('.ba-host');if(host){host.innerHTML=(PANELS[activeTab]||pBoeken)();if(activeTab==='koppel'){refreshStripeStatus();refreshGcalStatus();refreshInvoiceSettings();refreshImportStatus();}if(activeTab==='comm')refreshEmailStatus();if(activeTab==='studio')refreshInvoices();translateDOM(host);}renderAttModal();renderInfoModal();}
+  function renderHost(){var host=root.querySelector('.ba-host');if(host){var u=S.session;if(u){var tabs=tabsFor(u.role);host.innerHTML=tabs.map(function(t,i){var num=('0'+(i+1)).slice(-2);return '<section id="ba-sec-'+t[0]+'" class="ba-appsec"><div class="ba-secnum">'+num+' / '+t[1]+'</div>'+((PANELS[t[0]]||pBoeken)())+'</section>';}).join('');refreshStripeStatus();refreshGcalStatus();refreshInvoiceSettings();refreshImportStatus();refreshEmailStatus();refreshInvoices();translateDOM(host);}}renderAttModal();renderInfoModal();}
   function render(){
     initI18n();
     var sc=!S.session?'login':'app';
@@ -1518,7 +1520,7 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
   });
   root.addEventListener('click',function(e){
     var t=e.target.closest('[data-tab]');
-    if(t){activeTab=t.getAttribute('data-tab');render();return;}
+    if(t){activeTab=t.getAttribute('data-tab');var _a=root.querySelectorAll('.ba-tab');for(var _i=0;_i<_a.length;_i++)_a[_i].classList.toggle('is-on',_a[_i]===t);var _s=document.getElementById('ba-sec-'+activeTab);if(_s)_s.scrollIntoView({behavior:'smooth',block:'start'});return;}
     var a=e.target.closest('[data-act]'); if(!a)return; var act=a.getAttribute('data-act');
 
     // Les-detail ("meer info") — mag altijd, ook uitgelogd in de publieke agenda.
