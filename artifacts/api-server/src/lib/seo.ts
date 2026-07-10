@@ -123,6 +123,7 @@ export async function suggestTopics(ctx: Ctx, used: string[], n = 6): Promise<{ 
     `Je bent SEO-strateeg voor "${ctx.studio}" (${ctx.description || ctx.studio}). Taal: ${ctx.language}.\n` +
     `Stel ${n} artikelonderwerpen voor die samen een CONTENTCLUSTER vormen rond de kernpropositie (long-tail, lage concurrentie, lokaal waar mogelijk). ` +
     `BELANGRIJK: kies onderwerpen die duidelijk VERSCHILLEN van wat al bestaat — geen herhaling, varieer de invalshoek/subniche.\n` +
+    `Formuleer de "title" bij voorkeur als een VRAAG zoals mensen die letterlijk in Google typen (bijv. "Wat is ...?", "Hoe ...?", "Kan ... helpen bij ...?", "Waarom ...?", "Helpt ... tegen ...?") — dit wint de "Mensen vragen ook"- en snippet-posities. Voeg de plaats/regio toe waar dat natuurlijk past. Het "keyword" blijft het kernzoekwoord (geen vraagvorm).\n` +
     `Al gebruikt (titels + zoekwoorden), vermijd deze en alles wat er sterk op lijkt: ${used.slice(0, 80).join(" | ") || "(geen)"}.\n` +
     `PURE JSON-array: [{"title":"...","keyword":"hoofdzoekwoord"}]. Geen uitleg.`, 700);
   return parseJson<{ title: string; keyword: string }[]>(text, []).filter((t) => t && t.title).slice(0, n);
@@ -489,18 +490,170 @@ async function reRenderArticles(projectId: number, ctx: Ctx, rows: { path: strin
   return changed;
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+// HYPERLOCAL LOCATION PAGES — one "online <service> in <city>" landing page per
+// day, interlinked via a /locaties hub + a nav link + a footer city list, added
+// to the sitemap and pinged to Google/Bing (same auto-indexing pipeline as blog).
+// Opt-in per project by a ".nebula-locations" file (content = the service line);
+// absent → feature OFF, so only sites that opt in ever get location pages.
+// ════════════════════════════════════════════════════════════════════════════
+type Loc = { province: string; city: string };
+// Home region (Zuid-Holland/Utrecht) first so the most relevant cities publish earliest.
+const NL_LOCATIONS: Loc[] = [
+  { province: "Zuid-Holland", city: "Capelle aan den IJssel" }, { province: "Zuid-Holland", city: "Rotterdam" }, { province: "Zuid-Holland", city: "Krimpen aan den IJssel" }, { province: "Zuid-Holland", city: "Nieuwerkerk aan den IJssel" }, { province: "Zuid-Holland", city: "Zoetermeer" }, { province: "Zuid-Holland", city: "Gouda" }, { province: "Zuid-Holland", city: "Schiedam" }, { province: "Zuid-Holland", city: "Vlaardingen" }, { province: "Zuid-Holland", city: "Spijkenisse" }, { province: "Zuid-Holland", city: "Delft" }, { province: "Zuid-Holland", city: "Den Haag" }, { province: "Zuid-Holland", city: "Dordrecht" }, { province: "Zuid-Holland", city: "Leiden" }, { province: "Zuid-Holland", city: "Alphen aan den Rijn" }, { province: "Zuid-Holland", city: "Westland" }, { province: "Zuid-Holland", city: "Leidschendam-Voorburg" }, { province: "Zuid-Holland", city: "Katwijk" }, { province: "Zuid-Holland", city: "Barendrecht" }, { province: "Zuid-Holland", city: "Ridderkerk" }, { province: "Zuid-Holland", city: "Zwijndrecht" },
+  { province: "Utrecht", city: "Utrecht" }, { province: "Utrecht", city: "Nieuwegein" }, { province: "Utrecht", city: "Amersfoort" }, { province: "Utrecht", city: "Veenendaal" }, { province: "Utrecht", city: "Zeist" }, { province: "Utrecht", city: "Houten" },
+  { province: "Noord-Holland", city: "Amsterdam" }, { province: "Noord-Holland", city: "Haarlem" }, { province: "Noord-Holland", city: "Amstelveen" }, { province: "Noord-Holland", city: "Alkmaar" }, { province: "Noord-Holland", city: "Hilversum" }, { province: "Noord-Holland", city: "Hoorn" }, { province: "Noord-Holland", city: "Purmerend" }, { province: "Noord-Holland", city: "Zaanstad" }, { province: "Noord-Holland", city: "Haarlemmermeer" },
+  { province: "Noord-Brabant", city: "Eindhoven" }, { province: "Noord-Brabant", city: "Tilburg" }, { province: "Noord-Brabant", city: "Breda" }, { province: "Noord-Brabant", city: "Den Bosch" }, { province: "Noord-Brabant", city: "Helmond" }, { province: "Noord-Brabant", city: "Oss" }, { province: "Noord-Brabant", city: "Roosendaal" }, { province: "Noord-Brabant", city: "Bergen op Zoom" },
+  { province: "Gelderland", city: "Nijmegen" }, { province: "Gelderland", city: "Arnhem" }, { province: "Gelderland", city: "Apeldoorn" }, { province: "Gelderland", city: "Ede" }, { province: "Gelderland", city: "Doetinchem" },
+  { province: "Overijssel", city: "Zwolle" }, { province: "Overijssel", city: "Enschede" }, { province: "Overijssel", city: "Deventer" }, { province: "Overijssel", city: "Hengelo" }, { province: "Overijssel", city: "Almelo" },
+  { province: "Limburg", city: "Maastricht" }, { province: "Limburg", city: "Venlo" }, { province: "Limburg", city: "Heerlen" }, { province: "Limburg", city: "Roermond" }, { province: "Limburg", city: "Sittard-Geleen" }, { province: "Limburg", city: "Weert" },
+  { province: "Flevoland", city: "Almere" }, { province: "Flevoland", city: "Lelystad" },
+  { province: "Groningen", city: "Groningen" }, { province: "Friesland", city: "Leeuwarden" }, { province: "Friesland", city: "Drachten" }, { province: "Friesland", city: "Heerenveen" }, { province: "Friesland", city: "Sneek" },
+  { province: "Drenthe", city: "Assen" }, { province: "Drenthe", city: "Emmen" }, { province: "Drenthe", city: "Meppel" },
+  { province: "Zeeland", city: "Middelburg" }, { province: "Zeeland", city: "Vlissingen" }, { province: "Zeeland", city: "Terneuzen" },
+];
+const PROVINCE_ORDER = ["Zuid-Holland", "Utrecht", "Noord-Holland", "Noord-Brabant", "Gelderland", "Overijssel", "Limburg", "Flevoland", "Groningen", "Friesland", "Drenthe", "Zeeland"];
+const locSlug = (city: string) => slugify(city);
+
+function locationConfig(rows: { path: string; content: string }[]): { service: string } | null {
+  const f = rows.find((r) => r.path === ".nebula-locations");
+  if (!f) return null;
+  return { service: (f.content || "").trim() || "online mindfulness training" };
+}
+
+async function locationBodyHtml(ctx: Ctx, service: string, loc: Loc): Promise<string> {
+  const html = await ai(
+    `Schrijf in het Nederlands ALLEEN de bodytekst (uitsluitend <h2>, <h3>, <p> en <ul><li> — GEEN <html>, <head>, <h1>, GEEN uitleg vooraf) voor een lokale landingspagina van "${ctx.studio}" (${ctx.description || service}).\n` +
+    `Dienst: ${service}. Plaats: ${loc.city} (provincie ${loc.province}). CRUCIAAL: de dienst is volledig ONLINE — inwoners van ${loc.city} volgen de training live via videobellen vanuit huis, zonder reistijd.\n` +
+    `700-900 woorden, UNIEK en specifiek voor ${loc.city} (verwerk natuurlijke, kloppende lokale context; verzin GEEN adressen, namen of feiten). Bouw op met secties zoals: wat de training inhoudt, waarom online juist voor inwoners van ${loc.city} handig is, hoe het praktisch werkt, voor wie het is, wat je ervoor nodig hebt, en een warme afsluiter met uitnodiging om je in te schrijven. Professionele, warme toon.`,
+    2400);
+  const clean = String(html || "").replace(/```html?/gi, "").replace(/```/g, "").trim();
+  return /<(p|h2|h3|ul)\b/i.test(clean) ? clean
+    : `<h2>Online ${esc(service)} in ${esc(loc.city)}</h2><p>Vanuit ${esc(loc.city)} volg je bij ${esc(ctx.studio)} eenvoudig online een ${esc(service)} — live en vanuit je eigen vertrouwde omgeving, zonder reistijd. Persoonlijke begeleiding, in kleine groepen, op momenten die bij jou passen.</p>`;
+}
+
+function locationPageHtml(ctx: Ctx, service: string, loc: Loc, bodyHtml: string): string {
+  const accent = ctx.accent || "#7a00df", base = ctx.domain ? `https://${ctx.domain}` : "";
+  const url = `${base}/locaties/${locSlug(loc.city)}.html`;
+  const title = `Online ${service} in ${loc.city}`;
+  const desc = `Volg online ${service} vanuit ${loc.city} bij ${ctx.studio} — live vanuit huis, persoonlijke begeleiding, flexibel en toegankelijk.`.slice(0, 160);
+  const logo = ctx.logo ? `<img src="${esc(ctx.logo)}" alt="Logo ${esc(ctx.studio)}" style="max-height:44px;max-width:170px;object-fit:contain">` : `<b>${esc(ctx.studio)}</b>`;
+  const faq = [
+    { q: `Is de ${service} in ${loc.city} online?`, a: `Ja. Je volgt de training volledig online, live via videobellen, vanuit je eigen huis in ${loc.city}. Geen reistijd, wel persoonlijk contact.` },
+    { q: `Kan ik meedoen vanuit ${loc.city}?`, a: `Zeker. Omdat alles online is, doe je vanuit heel ${loc.province} — en dus ook vanuit ${loc.city} — gewoon mee.` },
+    { q: `Wat heb ik nodig?`, a: `Een laptop, tablet of telefoon met internet en een rustig plekje. Vooraf ontvang je een deelnamelink per e-mail.` },
+    { q: `Hoe meld ik me aan?`, a: `Bekijk de agenda, kies een moment en schrijf je online in. Daarna krijg je alle informatie toegestuurd.` },
+  ];
+  const faqHtml = `<section class="faq"><h2>Veelgestelde vragen — ${esc(loc.city)}</h2>${faq.map((f) => `<details><summary>${esc(f.q)}</summary><p>${esc(f.a)}</p></details>`).join("")}</section>`;
+  const ld = [
+    { "@context": "https://schema.org", "@type": "Service", name: title, serviceType: service, areaServed: { "@type": "City", name: loc.city }, provider: { "@type": "Organization", name: ctx.studio }, url, description: desc },
+    { "@context": "https://schema.org", "@type": "FAQPage", mainEntity: faq.map((f) => ({ "@type": "Question", name: f.q, acceptedAnswer: { "@type": "Answer", text: f.a } })) },
+    { "@context": "https://schema.org", "@type": "BreadcrumbList", itemListElement: [{ "@type": "ListItem", position: 1, name: ctx.studio, item: `${base}/index.html` }, { "@type": "ListItem", position: 2, name: "Locaties", item: `${base}/locaties.html` }, { "@type": "ListItem", position: 3, name: loc.city, item: url }] },
+  ];
+  return `<!DOCTYPE html><html lang="${esc(ctx.language)}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${esc(title)} — ${esc(ctx.studio)}</title><meta name="description" content="${esc(desc)}"><link rel="canonical" href="${esc(url)}">
+<meta property="og:title" content="${esc(title)}"><meta property="og:description" content="${esc(desc)}"><meta property="og:type" content="website">
+${ld.map((o) => `<script type="application/ld+json">${JSON.stringify(o)}</script>`).join("")}
+<style>:root{--ac:${accent};--ink:#1f2937;--soft:#6b7280;--line:#e6e8ec}*{box-sizing:border-box}body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,Arial,sans-serif;color:var(--ink);line-height:1.7;background:#fff}
+.top{display:flex;align-items:center;justify-content:space-between;gap:16px;max-width:900px;margin:0 auto;padding:18px 40px;border-bottom:1px solid var(--line)}
+.top nav a{color:var(--ink);text-decoration:none;font-size:15px;margin-left:18px}.top nav a:hover{color:var(--ac)}
+.hero{max-width:760px;margin:0 auto;padding:40px 40px 8px}.hero h1{font-size:34px;line-height:1.2;margin:0 0 10px}.byline{color:var(--soft);font-size:14px;margin:0}
+.article{max-width:760px;margin:0 auto;padding:8px 40px 10px}.article h2{font-size:25px;margin:34px 0 10px}.article h3{font-size:20px;margin:24px 0 8px}.article p{margin:0 0 15px}.article ul{margin:0 0 15px;padding-left:22px}
+.cta{max-width:760px;margin:26px auto;padding:0 40px}.cta a{display:inline-block;background:var(--ac);color:#fff;text-decoration:none;font-weight:600;padding:14px 26px;border-radius:999px}
+.faq{max-width:760px;margin:0 auto;padding:0 40px}.faq h2{font-size:24px;margin:34px 0 10px}.faq details{border-top:1px solid var(--line);padding:14px 0}.faq summary{cursor:pointer;font-weight:600}
+footer{max-width:900px;margin:40px auto 0;padding:26px 40px;border-top:1px solid var(--line);color:var(--soft);font-size:14px}
+@media(max-width:900px){.top,.hero,.article,.cta,.faq,footer{padding-left:22px;padding-right:22px}}</style>
+</head><body>
+<div class="top">${logo}<nav><a href="${esc(base)}/index.html">Home</a><a href="${esc(base)}/locaties.html">Locaties</a><a href="${esc(base)}/blog.html">Blog</a><a href="${esc(base)}/booking-app.html">Aanmelden</a></nav></div>
+<div class="hero"><h1>${esc(title)}</h1><p class="byline">Online training vanuit ${esc(loc.city)} · ${esc(ctx.studio)}</p></div>
+<article class="article">${bodyHtml}</article>
+<div class="cta"><a href="${esc(base)}/booking-app.html">Bekijk de agenda &amp; schrijf je in →</a></div>
+${faqHtml}
+<footer><p><a href="${esc(base)}/locaties.html" style="color:${accent};text-decoration:none">← Alle locaties</a> · <a href="${esc(base)}/index.html" style="color:${accent};text-decoration:none">${esc(ctx.studio)}</a></p><p style="opacity:.7">Powered by Nebula</p></footer>
+</body></html>`;
+}
+
+function locationsHubHtml(ctx: Ctx, cities: Loc[]): string {
+  const accent = ctx.accent || "#7a00df", base = ctx.domain ? `https://${ctx.domain}` : "";
+  const byProv = PROVINCE_ORDER.map((prov) => {
+    const list = cities.filter((c) => c.province === prov);
+    if (!list.length) return "";
+    return `<div class="col"><h3>${esc(prov)}</h3><ul>${list.map((c) => `<li><a href="${esc(base)}/locaties/${locSlug(c.city)}.html">${esc(c.city)}</a></li>`).join("")}</ul></div>`;
+  }).join("");
+  return `<!DOCTYPE html><html lang="${esc(ctx.language)}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Online training — locaties in heel Nederland | ${esc(ctx.studio)}</title><meta name="description" content="${esc(ctx.studio)} biedt online training aan in heel Nederland. Bekijk je plaats.">
+<link rel="canonical" href="${esc(base)}/locaties.html">
+<style>:root{--ac:${accent}}body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,Arial,sans-serif;color:#1f2937;background:#fff;line-height:1.6}.wrap{max-width:1000px;margin:0 auto;padding:30px 24px 64px}h1{font-size:32px;margin:0 0 6px}.sub{color:#6b7280;margin:0 0 28px}.cols{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:22px}.col h3{font-size:16px;margin:0 0 8px;color:#111827}.col ul{list-style:none;padding:0;margin:0}.col li{margin:0 0 6px}.col a{color:#374151;text-decoration:none;font-size:15px}.col a:hover{color:var(--ac)}a.home{color:var(--ac);font-weight:700;text-decoration:none}</style>
+</head><body><div class="wrap"><p><a class="home" href="${esc(base)}/index.html">← ${esc(ctx.studio)}</a></p><h1>Online training — waar je ook woont</h1><p class="sub">Al onze trainingen zijn <strong>online</strong> en live. Kies je plaats en doe mee vanuit heel Nederland.</p><div class="cols">${byProv || "<p>Binnenkort beschikbaar.</p>"}</div></div></body></html>`;
+}
+
+function locationsFooterBlock(ctx: Ctx, cities: Loc[]): string {
+  const accent = ctx.accent || "#7a00df", base = ctx.domain ? `https://${ctx.domain}` : "";
+  const cols = PROVINCE_ORDER.map((prov) => {
+    const list = cities.filter((c) => c.province === prov);
+    if (!list.length) return "";
+    return `<div style="min-width:150px"><div style="font-weight:700;color:#111;margin:0 0 6px;font-size:13px">${esc(prov)}</div>${list.map((c) => `<a href="${esc(base)}/locaties/${locSlug(c.city)}.html" style="display:block;color:#555;text-decoration:none;font-size:13px;margin:0 0 3px">${esc(c.city)}</a>`).join("")}</div>`;
+  }).join("");
+  return `<section data-nebula-locations style="background:#f7f8fa;border-top:1px solid #e6e8ec;padding:30px 24px;font-family:system-ui,-apple-system,'Segoe UI',Roboto,Arial,sans-serif"><div style="max-width:1100px;margin:0 auto"><div style="font-weight:700;color:#111;margin:0 0 14px;font-size:15px"><a href="${esc(base)}/locaties.html" style="color:${accent};text-decoration:none">Online training in heel Nederland →</a></div><div style="display:flex;flex-wrap:wrap;gap:18px 26px">${cols}</div></div></section>`;
+}
+
+function injectLocationsFooter(html: string, block: string): string {
+  if (/data-nebula-locations\b/i.test(html)) return html.replace(/<section\b[^>]*data-nebula-locations[\s\S]*?<\/section>/i, block);
+  if (/<footer\b/i.test(html)) return html.replace(/<footer\b/i, block + "\n<footer");
+  if (/<\/body>/i.test(html)) return html.replace(/<\/body>/i, block + "</body>");
+  return html + block;
+}
+
+function ensureLocationsLink(html: string): string {
+  if (/href=["']locaties\.html["']/i.test(html)) return html; // already linked
+  return addNavItem(html, "Locaties", "locaties.html");
+}
+
+/** Publish at most ONE hyperlocal location page per day (opt-in via .nebula-locations). Picks the next
+ *  city that has no page yet, writes it, then syncPublishedAux rebuilds the hub/nav/footer/sitemap and
+ *  pings the search engines. Self-limiting (1/day) + best-effort. Returns the city, or null if nothing. */
+export async function generateLocationPage(projectId: number): Promise<{ city: string } | null> {
+  const rows0 = await db.select().from(projectFiles).where(eq(projectFiles.projectId, projectId));
+  const files = rows0.map((f) => ({ path: f.path, content: f.content }));
+  const cfg = locationConfig(files);
+  if (!cfg) return null; // feature off for this project
+  if (!(await isPublished(projectId))) return null; // never fully published → don't build a partial site
+  const today = new Date().toISOString().slice(0, 10);
+  const locRows = rows0.filter((f) => /^locaties\/.+\.html$/i.test(f.path));
+  if (locRows.some((f) => new Date((f.createdAt as unknown as string) || Date.now()).toISOString().slice(0, 10) === today)) return null; // already 1 today
+  const done = new Set(locRows.map((f) => f.path));
+  const next = NL_LOCATIONS.find((l) => !done.has(`locaties/${locSlug(l.city)}.html`));
+  if (!next) return null; // all cities done
+  const ctx = deriveContext(files, "nl", await resolvePublishedDomain(projectId));
+  const body = await locationBodyHtml(ctx, cfg.service, next);
+  if (!/<(p|h2|h3|ul)\b/i.test(body)) return null; // generation hiccup → retry next tick, don't write a thin page
+  const byPath = new Map(rows0.map((f) => [f.path, { id: f.id }]));
+  await writeFileFor(projectId, byPath, `locaties/${locSlug(next.city)}.html`, locationPageHtml(ctx, cfg.service, next, body));
+  const fresh = await db.select().from(projectFiles).where(eq(projectFiles.projectId, projectId));
+  await syncPublishedAux(projectId, ctx, fresh.map((f) => ({ path: f.path, id: f.id, content: f.content })));
+  logger.info({ projectId, city: next.city }, "[seo] location page published");
+  return { city: next.city };
+}
+
 // Recompute the blog hub + robots/llms/sitemap. If the site already has its OWN blog page (from the
 // nav), publish the article list INTO that page and redirect blog.html to it; otherwise fall back to
 // generating a standalone blog.html + a Blog nav link (original behaviour — nothing breaks).
 async function syncPublishedAux(projectId: number, ctx: Ctx, rows: { path: string; id: number; content: string }[]) {
+  // Always work from the freshest files (so a just-written article/location page is included).
+  const freshRows = await db.select().from(projectFiles).where(eq(projectFiles.projectId, projectId));
+  rows = freshRows.map((f) => ({ path: f.path, id: f.id, content: f.content }));
   const pub = await db.select().from(seoArticles).where(and(eq(seoArticles.projectId, projectId), eq(seoArticles.status, "published")));
   const pubList = pub.map((p) => ({ title: p.title, slug: p.slug }));
   const byPath = new Map(rows.map((f) => [f.path, { id: f.id }]));
   const hostPath = findBlogHostPath(rows);
   const hubUrl = hostPath ? "/" + hostPath.replace(/\.html$/i, "") : "/blog.html";
+  // Location landing pages (opt-in via a ".nebula-locations" file): the city pages already in /locaties.
+  const locCfg = locationConfig(rows);
+  const locPaths = rows.filter((f) => /^locaties\/.+\.html$/i.test(f.path)).map((f) => f.path).sort();
+  const locCities = locCfg ? NL_LOCATIONS.filter((l) => locPaths.includes(`locaties/${locSlug(l.city)}.html`)) : [];
   await writeFileFor(projectId, byPath, "robots.txt", robotsTxt(ctx.domain), "plaintext");
   await writeFileFor(projectId, byPath, "llms.txt", llmsTxt(ctx, pubList), "plaintext");
-  await writeFileFor(projectId, byPath, "sitemap.xml", sitemapXml(ctx.domain, ["/index.html", hubUrl, ...pubList.map((a) => `/blog/${a.slug}.html`)]), "xml");
+  await writeFileFor(projectId, byPath, "sitemap.xml", sitemapXml(ctx.domain, ["/index.html", hubUrl, ...pubList.map((a) => `/blog/${a.slug}.html`), ...(locCities.length ? ["/locaties.html", ...locPaths.map((p) => "/" + p)] : [])]), "xml");
 
   const changed = new Set<string>();
   if (hostPath) {
@@ -522,19 +675,33 @@ async function syncPublishedAux(projectId: number, ctx: Ctx, rows: { path: strin
       if (updated !== f.content) await db.update(projectFiles).set({ content: updated, updatedAt: new Date() }).where(eq(projectFiles.id, f.id));
     }
   }
+  // Location pages: rebuild the hub + inject the "Locaties" nav link and the footer city list on every
+  // normal page (marker-based, idempotent) — crawl paths + internal links to every location page.
+  if (locCfg && locCities.length) {
+    await writeFileFor(projectId, byPath, "locaties.html", locationsHubHtml(ctx, locCities));
+    changed.add("locaties.html");
+    const footer = locationsFooterBlock(ctx, locCities);
+    for (const f of rows) {
+      if (!f.path.toLowerCase().endsWith(".html")) continue;
+      if (/^blog\//i.test(f.path) || f.path === "blog.html" || /booking/i.test(f.path) || f.path === "locaties.html" || /^locaties\//i.test(f.path)) continue;
+      let c = ensureLocationsLink(f.content);
+      c = injectLocationsFooter(c, footer);
+      if (c !== f.content) { await db.update(projectFiles).set({ content: c, updatedAt: new Date() }).where(eq(projectFiles.id, f.id)); changed.add(f.path); }
+    }
+  }
   // Reinforce internal links + keep the byline author consistent across ALL published articles
   // (older articles get relinked to newer ones, and any stale/AI-invented author is corrected).
   try { (await reRenderArticles(projectId, ctx, rows, byPath)).forEach((p) => changed.add(p)); } catch { /* best-effort */ }
-  // Auto re-publish ONLY the blog/SEO files + the specific pages we deliberately edited (host branch),
+  // Auto re-publish ONLY the blog/SEO/location files + the specific pages we deliberately edited,
   // so an unrelated draft edit elsewhere isn't pushed live by accident.
   try {
-    await republishMatching(projectId, (p) => p === "blog.html" || /^blog\//i.test(p) || p === "robots.txt" || p === "llms.txt" || p === "sitemap.xml" || changed.has(p));
+    await republishMatching(projectId, (p) => p === "blog.html" || /^blog\//i.test(p) || p === "locaties.html" || /^locaties\//i.test(p) || p === "robots.txt" || p === "llms.txt" || p === "sitemap.xml" || changed.has(p));
   } catch { /* best-effort */ }
   // Ping IndexNow (Bing/Yandex) so the new/updated blog URLs get picked up instantly.
   try {
     const host = ctx.domain;
     if (host && !/localhost|127\.0\.0\.1|^$/.test(host)) {
-      const urls = [hubUrl, ...pubList.map((a) => `/blog/${a.slug}.html`)].map((u) => `https://${host}${u}`);
+      const urls = [hubUrl, ...pubList.map((a) => `/blog/${a.slug}.html`), ...(locCities.length ? ["/locaties.html", ...locPaths.map((p) => "/" + p)] : [])].map((u) => `https://${host}${u}`);
       await submitToIndexNow(host, urls);
     }
   } catch { /* best-effort */ }

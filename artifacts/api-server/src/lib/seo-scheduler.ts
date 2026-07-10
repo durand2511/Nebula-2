@@ -5,7 +5,7 @@
  */
 import { db, projectSeo } from "@workspace/db";
 import { eq } from "drizzle-orm";
-import { publishArticle, publishedToday, reconcileBlogPublishing } from "./seo.js";
+import { publishArticle, publishedToday, reconcileBlogPublishing, generateLocationPage } from "./seo.js";
 import { projectOwnerSubscribed } from "./billing.js";
 import { logger } from "./logger";
 
@@ -40,6 +40,9 @@ async function tick(): Promise<void> {
       try {
         // Auto SEO is a paid feature: skip projects whose owner isn't an active subscriber.
         if (!(await projectOwnerSubscribed(row.projectId))) continue;
+        // Independent daily task: publish at most ONE hyperlocal location page per day (opt-in via a
+        // .nebula-locations file; self-limiting + best-effort, so it never blocks the blog cycle).
+        try { await generateLocationPage(row.projectId); } catch (err) { logger.warn({ err, projectId: row.projectId }, "[seo-scheduler] location failed"); }
         // HARD CAP: never publish more than 1 article per day per website.
         const perDay = 1;
         // Already published today? Then we're done for the day — clear any failure count.
