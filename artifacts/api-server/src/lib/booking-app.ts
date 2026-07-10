@@ -84,6 +84,20 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
 #booking-app .ba-note{font-size:12px;color:#6f6b62;margin-top:8px;line-height:1.5}
 #booking-app pre{background:rgba(0,0,0,.5);color:#d8d3c7;padding:12px;border-radius:10px;overflow:auto;font-size:12px;border:1px solid var(--ba-line)}
 @media(max-width:560px){#booking-app{padding:18px 14px 56px}#booking-app .ba-2{grid-template-columns:1fr}#booking-app .ba-card{padding:16px}#booking-app .ba-h{font-size:34px}#booking-app .ba-row{gap:8px}#booking-app .ba-tabs{gap:5px}}
+#booking-app .ba-hero2{min-height:80vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;position:relative;padding:30px 0}
+#booking-app .ba-hero2.sm{min-height:auto;padding:14px 0 6px;align-items:flex-start;text-align:left}
+#booking-app .ba-hero2 .eyebrow2{font-family:'Inter';font-size:12px;letter-spacing:.28em;text-transform:uppercase;color:#c8b89a;margin-bottom:20px;font-weight:500}
+#booking-app .ba-hero2 h1{font-family:'Instrument Serif',serif;font-weight:400;font-size:clamp(46px,9vw,92px);line-height:.98;letter-spacing:-.02em;margin:0 0 18px;color:#fff}
+#booking-app .ba-hero2.sm h1{font-size:clamp(34px,6vw,58px);margin:0}
+#booking-app .ba-hero2 .sub2{font-size:18px;color:var(--ba-muted);max-width:46ch;margin:0 0 30px;font-weight:300;line-height:1.5}
+#booking-app .ba-hero2 .cta2{display:flex;gap:12px;flex-wrap:wrap;justify-content:center;align-items:center}
+#booking-app .ba-hero2.sm .cta2{justify-content:flex-start}
+#booking-app .ba-scrolldown{position:absolute;bottom:6px;left:50%;transform:translateX(-50%);color:var(--ba-muted);font-size:11px;letter-spacing:.18em;text-transform:uppercase;text-decoration:none;display:flex;flex-direction:column;align-items:center;gap:9px}
+#booking-app .ba-scrolldown:hover{color:var(--ba-ink)}
+#booking-app .ba-scrolldown .dot{width:28px;height:28px;border:1px solid var(--ba-line2);border-radius:50%;display:flex;align-items:center;justify-content:center;animation:babob 1.8s ease-in-out infinite}
+@keyframes babob{0%,100%{transform:translateY(0)}50%{transform:translateY(6px)}}
+#booking-app .ba-section{padding:44px 0 6px;border-top:1px solid var(--ba-line);margin-top:26px;scroll-margin-top:80px}
+#booking-app .ba-section-h{font-family:'Instrument Serif',serif;font-weight:400;font-size:clamp(28px,4vw,44px);color:#fff;margin:0 0 18px;letter-spacing:-.01em}
 #booking-app .ba-auth{max-width:480px;margin:8vh auto 10px}
 #booking-app .ba-auth h2{font-family:'Instrument Serif',serif;font-size:40px;font-weight:400;margin:0 0 6px;color:#fff}
 #booking-app .ba-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
@@ -1386,10 +1400,28 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
   // (or other actions) prompts login/registration. Data comes from the public (no-auth) endpoint.
   function vBrowse(){
     var studio=(BAKED&&BAKED.studio)?esc(BAKED.studio):'onze studio';
-    return '<div class="ba-row" style="margin-bottom:14px"><div><div class="ba-h" style="font-size:22px">Lessen boeken</div><div class="ba-meta" style="margin:0">'+studio+'</div></div>'+
-      '<div class="ba-row" style="gap:8px">'+langSelect()+'<button class="ba-btn ghost sm" data-act="gologin">Inloggen</button><button class="ba-btn sm" data-act="goregister">Account aanmaken</button></div></div>'+
-      '<div class="ba-note" style="background:rgba(200,184,154,.10);border:1px solid rgba(200,184,154,.3);color:#e6d9bf;padding:10px 12px;border-radius:10px;margin-bottom:14px">Bekijk hieronder het rooster. Om een les te boeken log je in of maak je een account aan.</div>'+
-      pBoeken();
+    var logo=(BAKED&&BAKED.logo)?'<img src="'+BAKED.logo+'" alt="logo" style="max-height:64px;max-width:220px;object-fit:contain;display:block;margin:0 auto 22px;filter:drop-shadow(0 2px 12px rgba(0,0,0,.4))">':'';
+    return ''+
+      '<section class="ba-hero2">'+logo+
+        '<div class="eyebrow2">Boekingen \u00b7 '+studio+'</div>'+
+        '<h1>Boek je plek.</h1>'+
+        '<p class="sub2">Bekijk het rooster en reserveer eenvoudig je les bij '+studio+'.</p>'+
+        '<div class="cta2"><button class="ba-btn" data-act="goregister">Account aanmaken</button><button class="ba-btn ghost" data-act="gologin">Inloggen</button>'+langSelect()+'</div>'+
+        '<a class="ba-scrolldown" href="#ba-agenda"><span>Rooster</span><span class="dot">\u2193</span></a>'+
+      '</section>'+
+      '<section id="ba-agenda" class="ba-section">'+
+        '<div class="ba-section-h">Rooster</div>'+
+        '<div class="ba-note" style="background:rgba(200,184,154,.10);border:1px solid rgba(200,184,154,.3);color:#e6d9bf;padding:11px 13px;border-radius:10px;margin-bottom:16px">Bekijk hieronder het rooster. Om een les te boeken log je in of maak je een account aan.</div>'+
+        pBoeken()+
+      '</section>'+
+      '<section id="ba-login" class="ba-section">'+
+        '<div class="ba-section-h">Inloggen</div>'+
+        '<div class="ba-card" style="max-width:420px"><label class="ba-f">E-mailadres</label><input id="lg-e" type="email" placeholder="naam@voorbeeld.nl">'+
+        '<label class="ba-f">Wachtwoord</label><input id="lg-p" type="password">'+
+        '<div style="margin-top:14px"><button class="ba-btn" data-act="login">Inloggen</button></div>'+
+        '<div id="lg-err" class="ba-note" style="color:#f87171"></div>'+
+        '<p class="ba-note" style="margin-top:10px"><a href="#" data-act="goreset" style="color:var(--ba);font-weight:600">Wachtwoord vergeten?</a> \u00b7 <a href="#" data-act="goregister" style="color:var(--ba);font-weight:600">Account aanmaken</a></p></div>'+
+      '</section>';
   }
   // Plain login — what everyone (incl. customers) sees. No role labels are shown here.
   // Customers can self-register a (client) account right here.
@@ -1430,7 +1462,10 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
     var u=S.session,tabs=tabsFor(u.role);
     if(!tabs.some(function(t){return t[0]===activeTab;}))activeTab=tabs[0][0];
     var tb=tabs.map(function(t){return '<button class="ba-tab'+(t[0]===activeTab?' is-on':'')+'" data-tab="'+t[0]+'">'+t[1]+'</button>';}).join('');
-    return '<div class="ba-row" style="margin-bottom:14px"><div><div class="ba-h" style="font-size:22px">Boekingen</div><div class="ba-meta" style="margin:0">Ingelogd als '+esc(u.name)+'</div></div><div class="ba-row" style="gap:8px">'+langSelect()+'<button class="ba-btn ghost sm" data-act="logout">Uitloggen</button></div></div>'+
+    var studio=(BAKED&&BAKED.studio)?esc(BAKED.studio):'onze studio';
+    var first=esc((u.name||'').split(' ')[0]||u.name||'');
+    return '<section class="ba-hero2 sm"><div class="eyebrow2">'+studio+' \u00b7 Overzicht</div><h1>Welkom terug, '+first+'.</h1></section>'+
+      '<div class="ba-row" style="margin:6px 0 14px"><div class="ba-meta" style="margin:0">Ingelogd als '+esc(u.name)+'</div><div class="ba-row" style="gap:8px">'+langSelect()+'<button class="ba-btn ghost sm" data-act="logout">Uitloggen</button></div></div>'+
       '<div class="ba-tabs">'+tb+'</div><div class="ba-host"></div>';
   }
   function renderHost(){var host=root.querySelector('.ba-host');if(host){host.innerHTML=(PANELS[activeTab]||pBoeken)();if(activeTab==='koppel'){refreshStripeStatus();refreshGcalStatus();refreshInvoiceSettings();refreshImportStatus();}if(activeTab==='comm')refreshEmailStatus();if(activeTab==='studio')refreshInvoices();translateDOM(host);}renderAttModal();renderInfoModal();}
