@@ -518,7 +518,16 @@ const locSlug = (city: string) => slugify(city);
 function locationConfig(rows: { path: string; content: string }[]): { service: string } | null {
   const f = rows.find((r) => r.path === ".nebula-locations");
   if (!f) return null;
-  return { service: (f.content || "").trim() || "online mindfulness training" };
+  const c = (f.content || "").trim();
+  if (/^(off|none|geen|uit)$/i.test(c)) return null; // explicitly turned off for this site
+  return { service: c || "training" };
+}
+// A short, safe service phrase for the "Online <service> in <city>" title when no explicit one is set
+// (used when auto-SEO turns locations on by default). Keeps it generic so it fits any business.
+function deriveService(ctx: Ctx): string {
+  const d = (ctx.description || "").toLowerCase();
+  for (const w of ["mindfulness", "yoga", "pilates", "coaching", "therapie", "training", "massage", "meditatie"]) if (d.includes(w)) return `${w}${w === "training" ? "" : " training"}`.replace("training training", "training");
+  return "training";
 }
 
 async function locationBodyHtml(ctx: Ctx, service: string, loc: Loc): Promise<string> {
@@ -609,30 +618,46 @@ function ensureLocationsLink(html: string): string {
   return addNavItem(html, "Locaties", "locaties.html");
 }
 
-/** Publish at most ONE hyperlocal location page per day (opt-in via .nebula-locations). Picks the next
- *  city that has no page yet, writes it, then syncPublishedAux rebuilds the hub/nav/footer/sitemap and
- *  pings the search engines. Self-limiting (1/day) + best-effort. Returns the city, or null if nothing. */
-export async function generateLocationPage(projectId: number): Promise<{ city: string } | null> {
+/** Publish ONE hyperlocal location page. Locations are ON by default whenever auto-SEO is enabled for
+ *  the project (unless a ".nebula-locations" file says "off"); an explicit file sets the service phrase.
+ *  Normally picks the next city with no page yet and self-limits to 1/day; opts.city targets a specific
+ *  city and opts.force bypasses the daily limit (manual trigger). Rebuilds hub/nav/footer/sitemap and
+ *  pings the search engines. Best-effort. Returns the city, or null if nothing to do. */
+export async function generateLocationPage(projectId: number, opts?: { city?: string; force?: boolean }): Promise<{ city: string } | null> {
   const rows0 = await db.select().from(projectFiles).where(eq(projectFiles.projectId, projectId));
   const files = rows0.map((f) => ({ path: f.path, content: f.content }));
-  const cfg = locationConfig(files);
-  if (!cfg) return null; // feature off for this project
+  let cfg = locationConfig(files);
+  const hasFile = files.some((f) => f.path === ".nebula-locations");
+  // "One switch": auto-SEO ON ⇒ locations ON by default (derived service), unless a file exists that
+  // turned it off (locationConfig returns null for "off"). If a file exists but wasn't off, cfg is set.
+  if (!cfg) {
+    if (hasFile) return null; // file present and set to "off"
+    const [seoRow] = await db.select().from(projectSeo).where(eq(projectSeo.projectId, projectId));
+    if (seoRow?.autoEnabled !== "true") return null; // no auto-SEO → locations off
+    cfg = { service: "" }; // derive the service phrase below
+  }
   if (!(await isPublished(projectId))) return null; // never fully published → don't build a partial site
   const today = new Date().toISOString().slice(0, 10);
   const locRows = rows0.filter((f) => /^locaties\/.+\.html$/i.test(f.path));
-  if (locRows.some((f) => new Date((f.createdAt as unknown as string) || Date.now()).toISOString().slice(0, 10) === today)) return null; // already 1 today
+  if (!opts?.force && locRows.some((f) => new Date((f.createdAt as unknown as string) || Date.now()).toISOString().slice(0, 10) === today)) return null; // already 1 today
   const done = new Set(locRows.map((f) => f.path));
-  const next = NL_LOCATIONS.find((l) => !done.has(`locaties/${locSlug(l.city)}.html`));
-  if (!next) return null; // all cities done
+  const target = opts?.city
+    ? NL_LOCATIONS.find((l) => l.city.toLowerCase() === opts.city!.trim().toLowerCase())
+    : NL_LOCATIONS.find((l) => !done.has(`locaties/${locSlug(l.city)}.html`));
+  if (!target) return null; // unknown city, or all cities done
+  if (done.has(`locaties/${locSlug(target.city)}.html`) && !opts?.force) return null; // already exists
   const ctx = deriveContext(files, "nl", await resolvePublishedDomain(projectId));
-  const body = await locationBodyHtml(ctx, cfg.service, next);
+  const service = cfg.service || deriveService(ctx);
+  const body = await locationBodyHtml(ctx, service, target);
   if (!/<(p|h2|h3|ul)\b/i.test(body)) return null; // generation hiccup → retry next tick, don't write a thin page
   const byPath = new Map(rows0.map((f) => [f.path, { id: f.id }]));
-  await writeFileFor(projectId, byPath, `locaties/${locSlug(next.city)}.html`, locationPageHtml(ctx, cfg.service, next, body));
+  // Persist the (possibly derived) service phrase so syncPublishedAux + future runs stay consistent.
+  if (!hasFile) await writeFileFor(projectId, byPath, ".nebula-locations", service, "plaintext");
+  await writeFileFor(projectId, byPath, `locaties/${locSlug(target.city)}.html`, locationPageHtml(ctx, service, target, body));
   const fresh = await db.select().from(projectFiles).where(eq(projectFiles.projectId, projectId));
   await syncPublishedAux(projectId, ctx, fresh.map((f) => ({ path: f.path, id: f.id, content: f.content })));
-  logger.info({ projectId, city: next.city }, "[seo] location page published");
-  return { city: next.city };
+  logger.info({ projectId, city: target.city }, "[seo] location page published");
+  return { city: target.city };
 }
 
 // Recompute the blog hub + robots/llms/sitemap. If the site already has its OWN blog page (from the

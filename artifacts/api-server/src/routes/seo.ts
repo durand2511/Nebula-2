@@ -6,7 +6,7 @@ import { Router, json } from "express";
 import { db, projectSeo, seoArticles } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { logger } from "../lib/logger";
-import { publishArticle, publishedToday, improveArticle, publishDraft, publishManualArticle } from "../lib/seo.js";
+import { publishArticle, publishedToday, improveArticle, publishDraft, publishManualArticle, generateLocationPage } from "../lib/seo.js";
 import { projectOwnerSubscribed } from "../lib/billing.js";
 
 const router = Router();
@@ -56,6 +56,20 @@ router.post("/projects/:id/seo/article", json({ limit: "64kb" }), async (req, re
     if (!r) { res.status(400).json({ error: "Kon geen artikel genereren (geen website-content gevonden?)." }); return; }
     res.json({ ok: true, title: r.title, slug: r.slug, score: r.qualityScore, status: r.status, recommendation: r.publishRecommendation, notes: r.improvementNotes, wordCount: r.wordCount });
   } catch (err) { logger.error({ err, projectId }, "[seo] generate failed"); res.status(500).json({ error: "Genereren mislukt" }); }
+});
+
+// Manually publish ONE location page now (optional {city} targets a specific one; forces past the
+// 1/day limit). Locations otherwise generate automatically (1/day) whenever auto-SEO is enabled.
+router.post("/projects/:id/seo/location", json({ limit: "16kb" }), async (req, res) => {
+  const projectId = Number(req.params.id);
+  if (isNaN(projectId)) { res.status(400).json({ error: "Invalid project ID" }); return; }
+  if (!(await projectOwnerSubscribed(projectId))) { res.status(402).json({ error: SEO_PAYWALL }); return; }
+  try {
+    const city = typeof req.body?.city === "string" ? req.body.city : undefined;
+    const r = await generateLocationPage(projectId, { city, force: true });
+    if (!r) { res.status(400).json({ error: "Kon geen locatiepagina maken (onbekende plaats, site nog niet gepubliceerd, of generatie mislukte)." }); return; }
+    res.json({ ok: true, city: r.city });
+  } catch (err) { logger.error({ err, projectId }, "[seo] location generate failed"); res.status(500).json({ error: "Genereren mislukt" }); }
 });
 
 // List articles (for a drafts/published overview).
