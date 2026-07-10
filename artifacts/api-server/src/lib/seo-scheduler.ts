@@ -11,6 +11,9 @@ import { logger } from "./logger";
 
 let started = false;
 
+// After a failed/rejected auto-run, retry this soon (instead of waiting a full day).
+const RETRY_AFTER_MS = 3 * 60 * 60 * 1000; // 3 hours
+
 async function tick(): Promise<void> {
   try {
     const rows = await db.select().from(projectSeo).where(eq(projectSeo.autoEnabled, "true"));
@@ -27,11 +30,17 @@ async function tick(): Promise<void> {
         const minGapMs = Math.floor(86400000 / perDay);
         if (row.lastRunAt && now - new Date(row.lastRunAt).getTime() < minGapMs) continue;
         const result = await publishArticle(row.projectId, new Date().toISOString(), { mode: "auto" });
-        await db.update(projectSeo).set({ lastRunAt: new Date(), updatedAt: new Date() }).where(eq(projectSeo.projectId, row.projectId));
-        logger.info({ projectId: row.projectId, perDay, status: result?.status, score: result?.qualityScore, slug: result?.slug }, "[seo-scheduler] run");
+        // Only claim the full 24h slot when an article was actually PUBLISHED. If it was rejected
+        // (quality gate) or generation hiccuped, schedule a retry in ~3h instead of skipping the
+        // whole day — otherwise a single transient failure means "no article today".
+        const published = result?.status === "published";
+        const nextRun = published ? new Date() : new Date(now - minGapMs + RETRY_AFTER_MS);
+        await db.update(projectSeo).set({ lastRunAt: nextRun, updatedAt: new Date() }).where(eq(projectSeo.projectId, row.projectId));
+        logger.info({ projectId: row.projectId, perDay, published, status: result?.status, score: result?.qualityScore, slug: result?.slug }, "[seo-scheduler] run");
       } catch (err) {
         logger.warn({ err, projectId: row.projectId }, "[seo-scheduler] project failed");
-        await db.update(projectSeo).set({ lastRunAt: new Date() }).where(eq(projectSeo.projectId, row.projectId)).catch(() => {});
+        // Transient error — retry in ~3h, not tomorrow.
+        await db.update(projectSeo).set({ lastRunAt: new Date(now - minGapMs + RETRY_AFTER_MS) }).where(eq(projectSeo.projectId, row.projectId)).catch(() => {});
       }
     }
   } catch (err) {
