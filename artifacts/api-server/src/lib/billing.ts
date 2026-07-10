@@ -32,12 +32,20 @@ export function isSubscribed(u: Pick<PlatformUser, "subscriptionStatus"> | null 
   return !!u && u.subscriptionStatus === "active";
 }
 
-/** Is the project's owner a paying subscriber? Ownerless/legacy projects count as NOT subscribed. */
+// Platform owner(s): their OWN projects get full access to paid features (SEO engine, etc.) without a
+// subscription — they run the platform, they don't pay themselves. Comma/space-separated env override.
+const PLATFORM_OWNER_EMAILS = new Set(
+  (process.env.PLATFORM_OWNER_EMAILS || "durand2511@gmail.com").toLowerCase().split(/[,\s]+/).filter(Boolean),
+);
+
+/** Is the project's owner a paying subscriber (or the platform owner)? Ownerless projects = NOT subscribed. */
 export async function projectOwnerSubscribed(projectId: number): Promise<boolean> {
   const [p] = await db.select().from(projects).where(eq(projects.id, projectId));
   if (!p?.ownerId) return false;
   const [u] = await db.select().from(platformUsers).where(eq(platformUsers.id, p.ownerId));
-  return u?.subscriptionStatus === "active";
+  if (!u) return false;
+  if (u.email && PLATFORM_OWNER_EMAILS.has(u.email.toLowerCase())) return true; // platform owner → full access
+  return u.subscriptionStatus === "active";
 }
 
 /** Deduct an AI change's cost from the wallet (floored at 0) + log it. Returns {cost, remaining}. */
