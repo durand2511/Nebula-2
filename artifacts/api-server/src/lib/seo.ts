@@ -596,23 +596,6 @@ function locationsHubHtml(ctx: Ctx, cities: Loc[]): string {
 </head><body><div class="wrap"><p><a class="home" href="${esc(base)}/index.html">← ${esc(ctx.studio)}</a></p><h1>Online training — waar je ook woont</h1><p class="sub">Al onze trainingen zijn <strong>online</strong> en live. Kies je plaats en doe mee vanuit heel Nederland.</p><div class="cols">${byProv || "<p>Binnenkort beschikbaar.</p>"}</div></div></body></html>`;
 }
 
-function locationsFooterBlock(ctx: Ctx, cities: Loc[]): string {
-  const accent = ctx.accent || "#7a00df", base = ctx.domain ? `https://${ctx.domain}` : "";
-  const cols = PROVINCE_ORDER.map((prov) => {
-    const list = cities.filter((c) => c.province === prov);
-    if (!list.length) return "";
-    return `<div style="min-width:150px"><div style="font-weight:700;color:#111;margin:0 0 6px;font-size:13px">${esc(prov)}</div>${list.map((c) => `<a href="${esc(base)}/locaties/${locSlug(c.city)}.html" style="display:block;color:#555;text-decoration:none;font-size:13px;margin:0 0 3px">${esc(c.city)}</a>`).join("")}</div>`;
-  }).join("");
-  return `<section data-nebula-locations style="background:#f7f8fa;border-top:1px solid #e6e8ec;padding:30px 24px;font-family:system-ui,-apple-system,'Segoe UI',Roboto,Arial,sans-serif"><div style="max-width:1100px;margin:0 auto"><div style="font-weight:700;color:#111;margin:0 0 14px;font-size:15px"><a href="${esc(base)}/locaties.html" style="color:${accent};text-decoration:none">Online training in heel Nederland →</a></div><div style="display:flex;flex-wrap:wrap;gap:18px 26px">${cols}</div></div></section>`;
-}
-
-function injectLocationsFooter(html: string, block: string): string {
-  if (/data-nebula-locations\b/i.test(html)) return html.replace(/<section\b[^>]*data-nebula-locations[\s\S]*?<\/section>/i, block);
-  if (/<footer\b/i.test(html)) return html.replace(/<footer\b/i, block + "\n<footer");
-  if (/<\/body>/i.test(html)) return html.replace(/<\/body>/i, block + "</body>");
-  return html + block;
-}
-
 function ensureLocationsLink(html: string): string {
   if (/href=["']locaties\.html["']/i.test(html)) return html; // already linked
   return addNavItem(html, "Locaties", "locaties.html");
@@ -700,17 +683,17 @@ async function syncPublishedAux(projectId: number, ctx: Ctx, rows: { path: strin
       if (updated !== f.content) await db.update(projectFiles).set({ content: updated, updatedAt: new Date() }).where(eq(projectFiles.id, f.id));
     }
   }
-  // Location pages: rebuild the hub + inject the "Locaties" nav link and the footer city list on every
-  // normal page (marker-based, idempotent) — crawl paths + internal links to every location page.
+  // Location pages: rebuild the hub, and put ONE "Locaties" link in the site's own menu that leads to
+  // that hub — the full city list lives on the hub page itself (a same-styled sub-site), NOT stuffed
+  // into every page's footer. Also strips any earlier footer city list we may have injected before.
   if (locCfg && locCities.length) {
     await writeFileFor(projectId, byPath, "locaties.html", locationsHubHtml(ctx, locCities));
     changed.add("locaties.html");
-    const footer = locationsFooterBlock(ctx, locCities);
     for (const f of rows) {
       if (!f.path.toLowerCase().endsWith(".html")) continue;
       if (/^blog\//i.test(f.path) || f.path === "blog.html" || /booking/i.test(f.path) || f.path === "locaties.html" || /^locaties\//i.test(f.path)) continue;
       let c = ensureLocationsLink(f.content);
-      c = injectLocationsFooter(c, footer);
+      c = c.replace(/<section\b[^>]*data-nebula-locations[\s\S]*?<\/section>/gi, ""); // remove old footer list (now hub-only)
       if (c !== f.content) { await db.update(projectFiles).set({ content: c, updatedAt: new Date() }).where(eq(projectFiles.id, f.id)); changed.add(f.path); }
     }
   }
