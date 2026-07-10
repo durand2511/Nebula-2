@@ -393,7 +393,7 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
     }catch(e){}
   }
   function langSelect(){var o='';for(var k in LANGS){o+='<option value="'+k+'"'+(k===lang?' selected':'')+'>'+LANGS[k]+'</option>';}
-    return '<select class="ba-lang" data-act="setlang" title="Taal / Language" style="width:auto;padding:6px 10px;font-size:13px;border:1px solid var(--ba-line);border-radius:9px;background:#fff">'+o+'</select>';}
+    return '<select class="ba-lang" data-act="setlang" title="Taal / Language" style="width:auto;padding:6px 10px;font-size:13px;border:1px solid var(--ba-line);border-radius:9px;background:rgba(255,255,255,.06);color:var(--ba-ink)">'+o+'</select>';}
   var _i18nObs=null,_i18nBusy=false;
   function initI18n(){if(_i18nObs||typeof MutationObserver==='undefined'||!root)return;
     _i18nObs=new MutationObserver(function(){if(_i18nBusy||lang==='nl')return;_i18nBusy=true;try{translateDOM(root);}catch(e){}_i18nBusy=false;});
@@ -1078,7 +1078,7 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
     // Agenda koppelen: Google direct (instant via OAuth) + een .ics-feed voor Outlook/Apple/overig.
     h+='<div class="ba-card" style="margin-top:16px"><h4>Agenda koppelen</h4>'+
       '<p class="ba-meta">Koppel je eigen agenda aan de app. Lessen verschijnen dan automatisch in je agenda.</p>'+
-      '<div class="ba-card" style="background:#f8fafc"><div class="ba-row"><b>Google Agenda — direct</b> <span class="ba-badge" id="ba-gcal-status">…</span></div>'+
+      '<div class="ba-card" style="background:rgba(255,255,255,.03)"><div class="ba-row"><b>Google Agenda — direct</b> <span class="ba-badge" id="ba-gcal-status">…</span></div>'+
         '<p class="ba-meta" style="margin:6px 0 10px">Aanbevolen voor Google: lessen verschijnen <b>meteen</b>, geen wachttijd. Je logt eenmalig in met Google.</p>'+
         '<div class="ba-row" style="justify-content:flex-start;gap:8px"><button class="ba-btn sm" data-act="gcal-connect">Koppel Google Agenda</button><button class="ba-btn ghost sm" data-act="gcal-disconnect">Ontkoppelen</button></div>'+
         '<div id="ba-gcal-extra" class="ba-note" style="margin:6px 0 0"></div></div>'+
@@ -1113,7 +1113,7 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
       '<div class="ba-2"><div><label class="ba-f">3. Abonnementen (CSV)</label><input id="ba-mb-members" type="file" accept=".csv,text/csv"></div><div></div></div>'+
       '<div class="ba-row" style="justify-content:flex-start;gap:8px;margin-top:12px"><button class="ba-btn sm" data-act="mb-import">Importeren</button>'+
       '<button class="ba-btn ghost sm" data-act="mb-send">Activatie-mails sturen</button></div>'+
-      '<div style="border-top:1px solid #e5e7eb;margin:16px 0 12px;text-align:center"><span class="ba-meta" style="background:#fff;padding:0 10px;position:relative;top:-11px">— of —</span></div>'+
+      '<div style="border-top:1px solid var(--ba-line);margin:16px 0 12px;text-align:center"><span class="ba-meta" style="background:#141312;padding:0 10px;position:relative;top:-11px">— of —</span></div>'+
       '<p class="ba-meta" style="margin-bottom:4px"><b>Optie B — alles in één bestand</b> (klanten + strippenkaarten + abonnementen door elkaar):</p>'+
       '<div class="ba-2"><div><label class="ba-f">Eén CSV met alles erin</label><input id="ba-mb-all" type="file" accept=".csv,text/csv"></div>'+
       '<div><label class="ba-f">&nbsp;</label><button class="ba-btn sm" data-act="mb-import-all" style="margin-top:2px">Alles-in-één importeren</button></div></div>'+
@@ -1828,7 +1828,7 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
       fetch(api('calendar')).then(function(r){return r.json();}).then(function(d){if(!cbox)return;var url=d.url||'';
         cbox.innerHTML='<label class="ba-f">Jouw agenda-feed (abonneer hierop):</label>'+
           '<div class="ba-row" style="gap:6px;justify-content:flex-start"><input id="ba-cal-url" readonly value="'+esc(url)+'" style="flex:1;min-width:0"><button class="ba-btn ghost sm" data-act="cal-copy">Kopieer</button></div>'+
-          '<div class="ba-card" style="background:#f8fafc;margin-top:10px;font-size:13px;line-height:1.55">'+
+          '<div class="ba-card" style="background:rgba(255,255,255,.03);margin-top:10px;font-size:13px;line-height:1.55">'+
             '<b>Google Agenda</b><ol style="margin:6px 0 10px;padding-left:18px"><li>Open <a href="https://calendar.google.com" target="_blank" rel="noopener" style="color:var(--ba)">calendar.google.com</a></li><li>Links naast “Andere agenda’s” → <b>+</b> → <b>Via URL</b></li><li>Plak de link → <b>Agenda toevoegen</b></li></ol>'+
             '<b>Apple Agenda</b><ol style="margin:6px 0 10px;padding-left:18px"><li>iPhone: Instellingen → Agenda → Accounts → Account toevoegen → <b>Anders</b> → <b>Agenda-abonnement toevoegen</b> → plak de link</li><li>Mac: Agenda → Archief → <b>Nieuw agenda-abonnement</b> → plak de link</li></ol>'+
             '<b>Outlook / Microsoft 365</b><ol style="margin:6px 0 0;padding-left:18px"><li>Open je Outlook-agenda → <b>Agenda toevoegen</b> → <b>Abonneren via internet</b></li><li>Plak de link → <b>Importeren</b></li></ol>'+

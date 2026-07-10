@@ -39,8 +39,9 @@ async function tick(): Promise<void> {
         logger.info({ projectId: row.projectId, perDay, published, status: result?.status, score: result?.qualityScore, slug: result?.slug }, "[seo-scheduler] run");
       } catch (err) {
         logger.warn({ err, projectId: row.projectId }, "[seo-scheduler] project failed");
-        // Transient error — retry in ~3h, not tomorrow.
-        await db.update(projectSeo).set({ lastRunAt: new Date(now - minGapMs + RETRY_AFTER_MS) }).where(eq(projectSeo.projectId, row.projectId)).catch(() => {});
+        // Transient error — retry in ~3h, not tomorrow. (86400000 = the 24h per-day gap;
+        // inlined because minGapMs is scoped to the try block above and isn't visible here.)
+        await db.update(projectSeo).set({ lastRunAt: new Date(now - 86400000 + RETRY_AFTER_MS) }).where(eq(projectSeo.projectId, row.projectId)).catch(() => {});
       }
     }
   } catch (err) {
