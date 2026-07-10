@@ -84,7 +84,11 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
 #booking-app .ba-note{font-size:12px;color:#6f6b62;margin-top:8px;line-height:1.5}
 #booking-app pre{background:rgba(0,0,0,.5);color:#d8d3c7;padding:12px;border-radius:10px;overflow:auto;font-size:12px;border:1px solid var(--ba-line)}
 @media(max-width:560px){#booking-app{padding:18px 14px 56px}#booking-app .ba-2{grid-template-columns:1fr}#booking-app .ba-card{padding:16px}#booking-app .ba-h{font-size:34px}#booking-app .ba-row{gap:8px}#booking-app .ba-tabs{gap:5px}}
-#booking-app .ba-hero2{min-height:80vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;position:relative;padding:30px 0}
+#booking-app .ba-hero2{min-height:80vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;position:relative;padding:30px 20px;overflow:hidden;border-radius:20px}
+#booking-app .ba-hero2>*{position:relative;z-index:1}
+#booking-app .ba-hero2-bg{position:absolute !important;inset:0;z-index:0 !important;overflow:hidden;pointer-events:none;background:#0a0a0a}
+#booking-app .ba-hero2-bg iframe{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:100vw;height:56.25vw;min-height:100%;min-width:177.78vh;border:0;pointer-events:none;opacity:.6}
+#booking-app .ba-hero2-bg::after{content:"";position:absolute;inset:0;background:radial-gradient(130% 130% at 50% 0%,rgba(10,10,10,.3),rgba(10,10,10,.9))}
 #booking-app .ba-hero2.sm{min-height:auto;padding:14px 0 6px;align-items:flex-start;text-align:left}
 #booking-app .ba-hero2 .eyebrow2{font-family:'Inter';font-size:12px;letter-spacing:.28em;text-transform:uppercase;color:#c8b89a;margin-bottom:20px;font-weight:500}
 #booking-app .ba-hero2 h1{font-family:'Instrument Serif',serif;font-weight:400;font-size:clamp(46px,9vw,92px);line-height:.98;letter-spacing:-.02em;margin:0 0 18px;color:#fff}
@@ -1402,7 +1406,7 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
     var studio=(BAKED&&BAKED.studio)?esc(BAKED.studio):'onze studio';
     var logo=(BAKED&&BAKED.logo)?'<img src="'+BAKED.logo+'" alt="logo" style="max-height:64px;max-width:220px;object-fit:contain;display:block;margin:0 auto 22px;filter:drop-shadow(0 2px 12px rgba(0,0,0,.4))">':'';
     return ''+
-      '<section class="ba-hero2">'+logo+
+      '<section class="ba-hero2">'+'<div class="ba-hero2-bg"><iframe src="https://www.youtube.com/embed/tg9qSlVkZSg?autoplay=1&mute=1&controls=0&loop=1&playlist=tg9qSlVkZSg&playsinline=1&modestbranding=1&rel=0&showinfo=0&disablekb=1&fs=0&iv_load_policy=3" title="" allow="autoplay; encrypted-media" frameborder="0"></iframe></div>'+logo+
         '<div class="eyebrow2">Boekingen \u00b7 '+studio+'</div>'+
         '<h1>Boek je plek.</h1>'+
         '<p class="sub2">Bekijk het rooster en reserveer eenvoudig je les bij '+studio+'.</p>'+
