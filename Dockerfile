@@ -19,9 +19,14 @@ COPY . .
 # Install workspace deps against the frozen lockfile.
 RUN pnpm install --frozen-lockfile
 
-# Build the builder frontend (Vite → artifacts/app-builder/dist/public). BASE_PATH=/ so assets load
-# from the domain root; PORT is only required because vite.config validates it at build time.
-RUN NODE_ENV=production BASE_PATH=/ PORT=8080 pnpm --filter @workspace/app-builder run build
+# Build the builder frontend (Vite → artifacts/app-builder/dist/public). One switch controls everything:
+# when ROOT_MARKETING_PROJECT is set (a Render env var, passed here as a build ARG), the app is served
+# under /app so the marketing site can own the root — the frontend is then built with BASE_PATH=/app/.
+# Unset → BASE_PATH=/ (app at root, unchanged). PORT is only required because vite.config validates it.
+ARG ROOT_MARKETING_PROJECT=
+RUN NODE_ENV=production PORT=8080 \
+    BASE_PATH="$(if [ -n \"$ROOT_MARKETING_PROJECT\" ]; then echo /app/; else echo /; fi)" \
+    pnpm --filter @workspace/app-builder run build
 
 # Bundle the API server (esbuild → artifacts/api-server/dist). It also serves the frontend above.
 RUN pnpm --filter @workspace/api-server run build
