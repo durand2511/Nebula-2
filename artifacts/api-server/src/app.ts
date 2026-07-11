@@ -12,14 +12,6 @@ import { serveProjectSite } from "./lib/host-site";
 
 const app: Express = express();
 
-// ── Optional: serve a MARKETING site at the platform root, with the app moved to /app ──
-// When ROOT_MARKETING_PROJECT is set (a project id), the platform root (nebulabookings.com/) serves
-// that project's published marketing site, and the builder console lives under /app. When it's 0/unset
-// everything behaves exactly as before (app at root). The frontend must then be built with BASE_PATH=/app/.
-const ROOT_MARKETING_PROJECT = Number(process.env.ROOT_MARKETING_PROJECT || 0);
-const isAppPath = (p: string) => p === "/app" || p.startsWith("/app/");
-const isApiPath = (p: string) => p === "/api" || p.startsWith("/api/");
-
 app.use(
   pinoHttp({
     logger,
@@ -78,9 +70,6 @@ app.use((req, res, next) => {
   // Basic-Auth prompt — browsers don't reliably send stored Basic creds to (sandboxed) iframes.
   if (req.path.startsWith("/api/") || req.path === "/api") return next();
   if (PUBLIC_PATHS.test(req.path)) return next();    // public privacy/terms pages
-  // With the marketing root active, the public site (everything except the /app console) stays open;
-  // only the /app builder console is password-gated.
-  if (ROOT_MARKETING_PROJECT && !isAppPath(req.path)) return next();
   if (!isReserved(req.headers.host || "")) return next(); // customer booking sites stay public
   if (passwordOk(String(req.headers.authorization || ""))) return next();
   res.setHeader("WWW-Authenticate", 'Basic realm="Nebula", charset="UTF-8"');
@@ -121,42 +110,20 @@ app.use((req, res, next) => {
 
 app.use("/api", router);
 
-// Marketing root: on a reserved (platform) host, serve the marketing project for every GET that isn't
-// the API or the /app console. Runs only when ROOT_MARKETING_PROJECT is set — otherwise a no-op.
-if (ROOT_MARKETING_PROJECT) {
-  app.use((req, res, next) => {
-    const host = req.headers.host || "";
-    if (!isReserved(host)) return next();            // customer domains already served above
-    if (isApiPath(req.path) || isAppPath(req.path)) return next(); // API + /app console pass through
-    if (req.method !== "GET") return next();
-    return serveProjectSite(ROOT_MARKETING_PROJECT, req, res).catch(next);
-  });
-}
-
 // Serve the builder frontend (the app-builder SPA) for platform hosts, so visiting the platform
 // domain opens the app instead of "Cannot GET /". Customer domains are already served above; every
 // /api path stays the API. If the frontend wasn't built (e.g. local API-only dev), this is skipped
 // so behaviour is unchanged.
 const FRONTEND_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "app-builder", "dist", "public");
 if (fs.existsSync(path.join(FRONTEND_DIR, "index.html"))) {
-  if (ROOT_MARKETING_PROJECT) {
-    // App console lives under /app (frontend built with BASE_PATH=/app/, so its assets resolve at /app/…).
-    app.use("/app", express.static(FRONTEND_DIR));
-    app.use((req, res, next) => {
-      if (req.method !== "GET" || !isAppPath(req.path)) return next();
-      res.sendFile(path.join(FRONTEND_DIR, "index.html"));
-    });
-    logger.info({ dir: FRONTEND_DIR, marketingProject: ROOT_MARKETING_PROJECT }, "[frontend] serving builder SPA at /app (marketing root active)");
-  } else {
-    app.use(express.static(FRONTEND_DIR));
-    // SPA fallback (Express 5-safe: a path-less middleware, not app.get("*")). Any non-/api GET that
-    // wasn't a real static file returns index.html so client-side routing (wouter) takes over.
-    app.use((req, res, next) => {
-      if (req.method !== "GET" || req.path.startsWith("/api")) return next();
-      res.sendFile(path.join(FRONTEND_DIR, "index.html"));
-    });
-    logger.info({ dir: FRONTEND_DIR }, "[frontend] serving builder SPA at /");
-  }
+  app.use(express.static(FRONTEND_DIR));
+  // SPA fallback (Express 5-safe: a path-less middleware, not app.get("*")). Any non-/api GET that
+  // wasn't a real static file returns index.html so client-side routing (wouter) takes over.
+  app.use((req, res, next) => {
+    if (req.method !== "GET" || req.path.startsWith("/api")) return next();
+    res.sendFile(path.join(FRONTEND_DIR, "index.html"));
+  });
+  logger.info({ dir: FRONTEND_DIR }, "[frontend] serving builder SPA at /");
 } else {
   logger.warn({ dir: FRONTEND_DIR }, "[frontend] build not found — serving API only");
 }

@@ -31,11 +31,6 @@ services:
         value: durand2511@gmail.com
       - key: LOG_LEVEL
         value: info
-      # ONE switch for the marketing root: set this to a project id (e.g. 77) in the Render dashboard to
-      # serve that project's marketing site at nebulabookings.com and move the app to /app. Render passes
-      # it as a Docker build arg too, so the frontend auto-builds with BASE_PATH=/app/. Empty = app at root.
-      - key: ROOT_MARKETING_PROJECT
-        sync: false
       # ── secrets: you fill these in the Render dashboard (kept out of git) ──
       - key: DATABASE_URL
         sync: false
