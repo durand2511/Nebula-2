@@ -84,6 +84,9 @@ async function stripeReq(method: string, path: string, params?: Record<string, u
 // back to the request's live host (never a hardcoded localhost in production).
 const baseUrl = (req: Request) =>
   (typeof req.headers["origin"] === "string" && req.headers["origin"]) || reqBaseUrl(req);
+// When the marketing site owns the root, the builder console lives under /app, so its Stripe
+// return URLs (ai-editor / project workspace) need that prefix. Empty when the app is still at root.
+const APP_PREFIX = process.env.ROOT_MARKETING_PROJECT ? "/app" : "";
 
 // ── Reusable helpers (used by the studio booking API to finalize/refund server-side) ──
 async function stripeAccountId(projectId: number): Promise<string | null> {
@@ -173,7 +176,7 @@ router.post("/projects/:id/stripe/onboard", json({ limit: "16kb" }), async (req,
   // Stripe rejects localhost return/refresh URLs in LIVE mode. Prefer the exact page the studio is
   // on (sent by the booking app), then the request's live host — never a hardcoded localhost.
   const b = req.body || {};
-  const fallback = `${baseUrl(req)}/projects/${projectId}`;
+  const fallback = `${baseUrl(req)}${APP_PREFIX}/projects/${projectId}`;
   const returnUrl = (typeof b.returnUrl === "string" && /^https?:\/\//.test(b.returnUrl) && b.returnUrl) || fallback;
   const refreshUrl = (typeof b.refreshUrl === "string" && /^https?:\/\//.test(b.refreshUrl) && b.refreshUrl) || returnUrl;
   try {
@@ -285,8 +288,8 @@ router.post("/projects/:id/stripe/checkout", async (req, res) => {
       mode: recurring ? "subscription" : "payment",
       payment_method_types: recurring ? SUBSCRIPTION_METHODS : ONE_OFF_METHODS,
       line_items: [{ price_data: priceData, quantity: 1 }],
-      success_url: (typeof b.successUrl === "string" && b.successUrl) || `${baseUrl(req)}/projects/${projectId}?betaald=1`,
-      cancel_url: (typeof b.cancelUrl === "string" && b.cancelUrl) || `${baseUrl(req)}/projects/${projectId}?geannuleerd=1`,
+      success_url: (typeof b.successUrl === "string" && b.successUrl) || `${baseUrl(req)}${APP_PREFIX}/projects/${projectId}?betaald=1`,
+      cancel_url: (typeof b.cancelUrl === "string" && b.cancelUrl) || `${baseUrl(req)}${APP_PREFIX}/projects/${projectId}?geannuleerd=1`,
     }, row.accountId);
     res.json({ url: session.url, id: session.id });
   } catch (err) {
@@ -491,7 +494,7 @@ router.post("/billing/subscribe", async (req, res) => {
       mode: "subscription", customer, client_reference_id: String(u.id),
       line_items: [{ price: NEBULA_PRICE, quantity: 1 }],
       subscription_data: { metadata: { platformUserId: String(u.id) } },
-      success_url: `${base}/ai-editor?sub=ok`, cancel_url: `${base}/ai-editor?sub=cancel`,
+      success_url: `${base}${APP_PREFIX}/ai-editor?sub=ok`, cancel_url: `${base}${APP_PREFIX}/ai-editor?sub=cancel`,
     });
     res.json({ url: session.url });
   } catch (err) { logger.error({ err, userId: u.id }, "[billing] subscribe failed"); res.status(500).json({ error: err instanceof Error ? err.message : "Abonneren mislukt." }); }
@@ -510,7 +513,7 @@ router.post("/billing/topup", async (req, res) => {
       line_items: [{ quantity: 1, price_data: { currency: "eur", unit_amount: Math.round(amount * 100), product_data: { name: "Nebula AI-tegoed" } } }],
       metadata: { kind: "topup", platformUserId: String(u.id), amountEur: String(amount) },
       payment_intent_data: { metadata: { kind: "topup", platformUserId: String(u.id), amountEur: String(amount) } },
-      success_url: `${base}/ai-editor?topup=ok`, cancel_url: `${base}/ai-editor?topup=cancel`,
+      success_url: `${base}${APP_PREFIX}/ai-editor?topup=ok`, cancel_url: `${base}${APP_PREFIX}/ai-editor?topup=cancel`,
     });
     res.json({ url: session.url });
   } catch (err) { logger.error({ err, userId: u.id }, "[billing] topup failed"); res.status(500).json({ error: err instanceof Error ? err.message : "Bijkopen mislukt." }); }
