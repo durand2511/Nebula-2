@@ -20,6 +20,11 @@ export function Layout({ children }: { children: React.ReactNode }) {
       {!isWorkspace && (
         <header className="sticky top-0 z-50 w-full flex justify-center pt-4 pb-2">
           <nav className="flex items-center gap-0.5 rounded-full border border-border bg-card/90 backdrop-blur px-1.5 py-1 shadow-md">
+            {/* Plain anchor (NOT a wouter Link) so it escapes the /app base and returns to the marketing
+                site at the domain root. When the marketing root isn't active this simply goes to the app home. */}
+            <a href="/" className="rounded-full px-3.5 py-1 text-xs font-medium transition-colors text-foreground/60 hover:text-foreground hover:bg-foreground/5">
+              ← Website
+            </a>
             <Link href="/" className={`rounded-full px-3.5 py-1 text-xs font-medium transition-colors ${location === "/" ? "bg-foreground text-background" : "text-foreground/60 hover:text-foreground hover:bg-foreground/5"}`}>
               Home
             </Link>
