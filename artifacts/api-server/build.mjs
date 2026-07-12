@@ -29,6 +29,8 @@ async function buildAll() {
     // - use path traversal to read files (e.g. @google-cloud/secret-manager loads sibling .proto files)
     external: [
       "*.node",
+      // Spawns a subprocess and extracts bundled runtime files — must stay in node_modules, not bundled.
+      "@anthropic-ai/claude-agent-sdk",
       "sharp",
       "better-sqlite3",
       "sqlite3",

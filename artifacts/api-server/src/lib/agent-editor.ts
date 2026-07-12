@@ -1,0 +1,275 @@
+/**
+ * Agent-SDK website editor.
+ *
+ * The AI editor used to run a bespoke tool loop; this replaces it with the official
+ * @anthropic-ai/claude-agent-sdk (the same engine as Claude Code). Since our project
+ * files live in the `projectFiles` Postgres table — not on disk — we bridge:
+ *
+ *   1. materialise every project file into an isolated temp directory,
+ *   2. run the agent (Read/Write/Edit/Glob/Grep) against that directory,
+ *   3. stream each of its actions to the build session so the UI shows live progress,
+ *   4. diff the directory back into the DB (writes, creates AND deletes),
+ *   5. clean up the temp directory.
+ *
+ * The diff-back step is what makes edits actually stick — whatever the agent left on
+ * disk becomes the new source of truth for the project.
+ */
+import { promises as fs } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { randomUUID } from "node:crypto";
+import { query } from "@anthropic-ai/claude-agent-sdk";
+import { db, projectFiles } from "@workspace/db";
+import { eq } from "drizzle-orm";
+import { recordUsage } from "./ai-usage.js";
+import { logger } from "./logger";
+
+// Alias understood by the Agent SDK; resolves to the current top model.
+const AGENT_MODEL = "claude-opus-4-8";
+const MAX_TURNS = 80;
+// Reference images the user attached are dropped here so the agent can Read them;
+// this folder is synthetic and never written back to the DB.
+const REFS_DIR = "_refs";
+
+export type AgentEvent = Record<string, unknown>;
+
+export type AgentEditResult = {
+  ok: boolean;
+  changed: string[];
+  created: string[];
+  deleted: string[];
+  finalText: string;
+};
+
+type FileRow = { id: number; path: string; content: string };
+
+function inferLanguage(p: string): string {
+  const ext = p.slice(p.lastIndexOf(".") + 1).toLowerCase();
+  switch (ext) {
+    case "html": case "htm": return "html";
+    case "css": return "css";
+    case "js": case "mjs": case "cjs": return "javascript";
+    case "ts": return "typescript";
+    case "json": return "json";
+    case "svg": return "svg";
+    case "md": return "markdown";
+    default: return "plaintext";
+  }
+}
+
+// Guard against a stored path escaping the sandbox dir (`..`, absolute paths, symlinks).
+function safeJoin(root: string, rel: string): string | null {
+  const full = path.resolve(root, rel);
+  const withSep = root.endsWith(path.sep) ? root : root + path.sep;
+  return full === root || full.startsWith(withSep) ? full : null;
+}
+
+// Recursively list files relative to `root`, skipping the synthetic refs dir.
+async function walk(root: string, dir = root): Promise<string[]> {
+  const out: string[] = [];
+  let entries: import("node:fs").Dirent[];
+  try {
+    entries = await fs.readdir(dir, { withFileTypes: true });
+  } catch {
+    return out;
+  }
+  for (const e of entries) {
+    const abs = path.join(dir, e.name);
+    const rel = path.relative(root, abs);
+    if (rel === REFS_DIR || rel.startsWith(REFS_DIR + path.sep)) continue;
+    if (e.isDirectory()) {
+      out.push(...(await walk(root, abs)));
+    } else if (e.isFile()) {
+      out.push(rel.split(path.sep).join("/"));
+    }
+  }
+  return out;
+}
+
+function systemPrompt(): string {
+  return [
+    "You are Nebula's website editor. You edit a small STATIC website that lives entirely in the current working directory: HTML pages plus CSS and JS files. There is no build step, no framework, no server code — just files served as-is.",
+    "",
+    "HOW YOU WORK:",
+    "- Do exactly what the user asks — no more, no less. Don't refactor, restructure, or 'improve' unrelated code.",
+    "- ALWAYS Read a file before you Edit it, so your old_string matches exactly.",
+    "- Prefer Edit for targeted changes; use Write to create a new file or fully replace a small one.",
+    "- Touch the file that OWNS the thing being changed: styling → the CSS file, behaviour → the JS file, copy → that page's HTML. Don't funnel everything into index.html.",
+    "- When you say you changed something, you MUST actually have written it with Edit/Write in this session. Never claim a change you didn't make.",
+    "- Keep all existing layout, sections, navigation and content intact unless the change requires otherwise.",
+    "",
+    "IMPORTED SITES: some files are large minified HTML from an imported site — do NOT rewrite those. For a site-wide visual restyle, write/extend `.nebula-restyle.css` (it is auto-injected on every page, after the site's own CSS); target the site's real selectors and keep its brand colours.",
+    "",
+    "DESIGN (only when creating new visual work, and only if the user hasn't given their own): calm, premium, editorial. Warm off-white page (#f7f4ee), crisp white cards, dark ink text (#241f1a), generous whitespace, subtle 4px radii, no heavy shadows, no purple gradients or generic AI look. Never go dark unless asked.",
+    "",
+    "Finish by giving a short, plain-language summary of what you changed.",
+  ].join("\n");
+}
+
+/**
+ * Run one agent edit against a project. Streams progress through `emit`; returns the
+ * set of files it changed. Throws only on setup failure — an agent-level failure is
+ * reported via the returned `ok: false`.
+ */
+export async function runAgentEdit(opts: {
+  projectId: number;
+  prompt: string;
+  images?: string[];
+  emit: (event: AgentEvent) => void;
+  abortController?: AbortController;
+}): Promise<AgentEditResult> {
+  const { projectId, prompt, images = [], emit } = opts;
+  const abortController = opts.abortController ?? new AbortController();
+
+  const rows: FileRow[] = await db
+    .select({ id: projectFiles.id, path: projectFiles.path, content: projectFiles.content })
+    .from(projectFiles)
+    .where(eq(projectFiles.projectId, projectId));
+
+  // realpath so the agent's absolute tool paths share our prefix (macOS /var → /private/var),
+  // which keeps the "Bezig met <file>" display clean and the write-back diff aligned.
+  const tmpRoot = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), `nebula-agent-${projectId}-`)));
+  const original = new Map<string, FileRow>(); // path → row (pre-edit snapshot)
+
+  try {
+    emit({ type: "status", message: "Project laden…" });
+    for (const row of rows) {
+      const dest = safeJoin(tmpRoot, row.path);
+      if (!dest) { logger.warn({ projectId, path: row.path }, "[agent] skipping unsafe path"); continue; }
+      await fs.mkdir(path.dirname(dest), { recursive: true });
+      await fs.writeFile(dest, row.content ?? "", "utf8");
+      original.set(row.path, row);
+    }
+
+    // Materialise reference images so the agent can Read them.
+    const refNotes: string[] = [];
+    if (images.length > 0) {
+      const refDir = path.join(tmpRoot, REFS_DIR);
+      await fs.mkdir(refDir, { recursive: true });
+      for (let i = 0; i < images.length; i++) {
+        const m = /^data:image\/([a-zA-Z0-9.+-]+);base64,(.+)$/.exec(images[i]);
+        if (!m) continue;
+        const ext = m[1].toLowerCase() === "jpeg" ? "jpg" : m[1].toLowerCase().replace(/[^a-z0-9]/g, "");
+        const name = `${REFS_DIR}/ref${i + 1}.${ext || "png"}`;
+        await fs.writeFile(path.join(tmpRoot, name), Buffer.from(m[2], "base64"));
+        refNotes.push(name);
+      }
+    }
+
+    const userPrompt = refNotes.length
+      ? `${prompt}\n\nReference image(s) attached — Read them before you start: ${refNotes.join(", ")}.`
+      : prompt;
+
+    emit({ type: "status", message: "Aan het werk…" });
+
+    let finalText = "";
+    let ok = true;
+
+    const q = query({
+      prompt: userPrompt,
+      options: {
+        cwd: tmpRoot,
+        model: AGENT_MODEL,
+        systemPrompt: systemPrompt(),
+        allowedTools: ["Read", "Write", "Edit", "Glob", "Grep"],
+        permissionMode: "bypassPermissions",
+        allowDangerouslySkipPermissions: true,
+        settingSources: [], // clean sandbox — ignore any host ~/.claude or project settings
+        maxTurns: MAX_TURNS,
+        abortController,
+      },
+    });
+
+    for await (const msg of q) {
+      if (msg.type === "assistant") {
+        for (const block of msg.message.content) {
+          if (block.type === "text" && block.text.trim()) {
+            emit({ type: "status", message: firstLine(block.text) });
+          } else if (block.type === "tool_use") {
+            emit(describeTool(block.name, block.input as Record<string, unknown>, tmpRoot));
+          }
+        }
+      } else if (msg.type === "result") {
+        finalText = msg.subtype === "success" ? msg.result : "";
+        ok = msg.subtype === "success" && !msg.is_error;
+        // Charge the tokens the agent actually spent (per model) to the usage context.
+        for (const [model, u] of Object.entries(msg.modelUsage ?? {})) {
+          recordUsage(model, { input_tokens: u.inputTokens, output_tokens: u.outputTokens });
+        }
+        if (!ok) logger.warn({ projectId, subtype: msg.subtype }, "[agent] run ended without success");
+      }
+    }
+
+    // ── Diff the sandbox back into the DB ────────────────────────────────────
+    emit({ type: "status", message: "Wijzigingen opslaan…" });
+    const onDisk = new Set(await walk(tmpRoot));
+    const changed: string[] = [], created: string[] = [], deleted: string[] = [];
+
+    for (const rel of onDisk) {
+      const abs = safeJoin(tmpRoot, rel);
+      if (!abs) continue;
+      const content = await fs.readFile(abs, "utf8").catch(() => null);
+      if (content == null) continue;
+      const prev = original.get(rel);
+      const language = inferLanguage(rel);
+      if (!prev) {
+        await db.insert(projectFiles).values({ projectId, path: rel, content, language });
+        created.push(rel);
+        emit({ type: "agent", event: "file_saved", path: rel, op: "create", linesAdded: content.split("\n").length, linesRemoved: 0, symbols: [], summary: "" });
+      } else if (content !== prev.content) {
+        await db.update(projectFiles).set({ content, language, updatedAt: new Date() }).where(eq(projectFiles.id, prev.id));
+        changed.push(rel);
+        const { added, removed } = lineDelta(prev.content, content);
+        emit({ type: "agent", event: "file_saved", path: rel, op: "update", linesAdded: added, linesRemoved: removed, symbols: [], summary: "" });
+      }
+    }
+
+    for (const [rel, row] of original) {
+      if (!onDisk.has(rel)) {
+        await db.delete(projectFiles).where(eq(projectFiles.id, row.id));
+        deleted.push(rel);
+        emit({ type: "status", message: `${rel} verwijderd` });
+      }
+    }
+
+    logger.info({ projectId, changed: changed.length, created: created.length, deleted: deleted.length, ok }, "[agent] edit complete");
+    return { ok, changed, created, deleted, finalText };
+  } finally {
+    await fs.rm(tmpRoot, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+function firstLine(text: string): string {
+  const line = text.trim().split("\n").find((l) => l.trim()) ?? "";
+  return line.length > 160 ? line.slice(0, 157) + "…" : line;
+}
+
+// A rough add/remove line count for the "+X −Y regels" badge (line-set difference).
+function lineDelta(before: string, after: string): { added: number; removed: number } {
+  const oldLines = before.split("\n");
+  const newLines = after.split("\n");
+  const oldSet = new Set(oldLines);
+  const newSet = new Set(newLines);
+  return {
+    added: newLines.filter((l) => !oldSet.has(l)).length,
+    removed: oldLines.filter((l) => !newSet.has(l)).length,
+  };
+}
+
+// Map a tool_use to the client's existing AgentEvt activity vocabulary so the UI
+// renders it with the same styled timeline (and drives the "Bezig met <file>" line).
+function describeTool(name: string, input: Record<string, unknown>, root: string): AgentEvent {
+  const rel = (p: unknown): string => {
+    if (typeof p !== "string") return "";
+    const r = path.isAbsolute(p) ? path.relative(root, p) : p;
+    return r.split(path.sep).join("/");
+  };
+  switch (name) {
+    case "Read": return { type: "agent", event: "file_read", path: rel(input.file_path), size: 0 };
+    case "Write":
+    case "Edit": return { type: "agent", event: "patch_applied", path: rel(input.file_path) };
+    case "Glob": return { type: "status", message: `Bestanden zoeken: ${String(input.pattern ?? "")}` };
+    case "Grep": return { type: "status", message: `Zoeken in code: ${String(input.pattern ?? "")}` };
+    default: return { type: "status", message: name };
+  }
+}

@@ -115,12 +115,14 @@ nav.elementor-nav-menu--dropdown .sub-menu{position:static !important;left:auto 
 // booking CTA in addition to the nav link. Links to the booking app; hidden on the booking page itself.
 export const BOOK_FLOAT_BUTTON = `<a href="/booking-app.html" data-nebula-book aria-label="Boek nu" style="position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:99998;display:inline-flex;align-items:center;gap:8px;background:#111827;color:#fff;font:600 15px/1.1 system-ui,-apple-system,'Segoe UI',Roboto,Arial,sans-serif;padding:14px 24px;border-radius:999px;text-decoration:none;box-shadow:0 10px 28px rgba(17,24,39,.28)">📅 Boek nu</a>`;
 
-// Whether the floating booking button shows on this page, per the .nebula-book-scope setting:
-// empty/"all" → every page; "off"/"none" → nowhere; otherwise a comma/space list of page paths.
+// Whether the floating booking button shows on this page, per the .nebula-book-scope setting.
+// Default is OFF — the pill only appears when explicitly enabled (scope "all" or a page list),
+// so adding a booking system no longer auto-injects an unwanted floating "Boek nu" button.
+// "all" → every page; empty/"off"/"none" → nowhere; otherwise a comma/space list of page paths.
 export function showBookButtonOn(pagePath: string, scopeRaw?: string): boolean {
-  const scope = (scopeRaw || "all").trim().toLowerCase();
-  if (scope === "" || scope === "all") return true;
-  if (scope === "off" || scope === "none" || scope === "geen") return false;
+  const scope = (scopeRaw || "off").trim().toLowerCase();
+  if (scope === "all") return true;
+  if (scope === "" || scope === "off" || scope === "none" || scope === "geen") return false;
   const page = pagePath.toLowerCase().replace(/\.html$/, "");
   return scope.split(/[\s,]+/).filter(Boolean).some((s) => s.replace(/\.html$/, "") === page);
 }

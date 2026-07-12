@@ -1303,9 +1303,9 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
   }
   var PANELS={boeken:pBoeken,agenda:pMijnAgenda,dashboard:pClientDash,studio:pStudio,mijn:pMijn,docenten:pDocenten,leden:pLeden,comm:pComm,koppel:pKoppel,videos:pVideos,abos:pSubs,stats:pStats};
   function tabsFor(role){
-    if(role==='admin'){var t=[['boeken','Lessen boeken'],['studio','Studio-beheer'],['docenten','Docenten']];if(S.pay.tegoed)t.push(['leden','Lidmaatschappen']);t.push(['videos','Videos'],['stats','Statistieken'],['comm','Communicatie'],['koppel','Integraties']);return t;}
-    if(role==='teacher')return [['agenda','Mijn agenda'],['mijn','Mijn lessen'],['boeken','Lessen boeken'],['videos','Videos']];
-    var c=[['dashboard','Mijn lessen'],['boeken','Lessen boeken']];if(S.pay.tegoed)c.push(['leden','Mijn strippenkaart']);c.push(['videos','Videos'],['abos','Abonnementen']);return c; // client
+    if(role==='admin'){var t=[['boeken','Lessen boeken'],['studio','Studio-beheer'],['docenten','Docenten']];if(S.pay.tegoed)t.push(['leden','Lidmaatschappen']);t.push(['stats','Statistieken'],['comm','Communicatie'],['koppel','Integraties']);return t;}
+    if(role==='teacher')return [['agenda','Mijn agenda'],['mijn','Mijn lessen'],['boeken','Lessen boeken']];
+    var c=[['dashboard','Mijn lessen'],['boeken','Lessen boeken']];if(S.pay.tegoed)c.push(['leden','Mijn strippenkaart']);return c; // client
   }
   function toast(msg){var o=root.querySelector('#ba-comm-out');if(o)o.textContent=msg;}
   function q(id){return root.querySelector('#'+id);}
