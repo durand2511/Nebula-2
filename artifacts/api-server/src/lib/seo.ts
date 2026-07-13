@@ -718,9 +718,24 @@ async function syncPublishedAux(projectId: number, ctx: Ctx, rows: { path: strin
   const locCfg = locationConfig(rows);
   const locPaths = rows.filter((f) => /^locaties\/.+\.html$/i.test(f.path)).map((f) => f.path).sort();
   const locCities = locCfg ? NL_LOCATIONS.filter((l) => locPaths.includes(`locaties/${locSlug(l.city)}.html`)) : [];
+  // The site's OWN content pages MUST stay in the sitemap — regenerating it for a blog/location
+  // publish previously dropped them, which de-indexed the studio's real pages. Include every served
+  // .html page except: index (added first), blog + location pages (added separately below), the
+  // booking app, and make-over/backup artefacts that should never be public.
+  const contentPaths = rows
+    .map((f) => f.path)
+    .filter((p) =>
+      /\.html$/i.test(p) &&
+      p !== "index.html" &&
+      p !== "booking-app.html" &&
+      !/^(_backup-|makeover-)/i.test(p) &&
+      !/^blog\//i.test(p) && p !== "blog.html" && p !== hostPath &&
+      !/^locaties\//i.test(p) && p !== "locaties.html",
+    )
+    .sort();
   await writeFileFor(projectId, byPath, "robots.txt", robotsTxt(ctx.domain), "plaintext");
   await writeFileFor(projectId, byPath, "llms.txt", llmsTxt(ctx, pubList), "plaintext");
-  await writeFileFor(projectId, byPath, "sitemap.xml", sitemapXml(ctx.domain, ["/index.html", hubUrl, ...pubList.map((a) => `/blog/${a.slug}.html`), ...(locCities.length ? ["/locaties.html", ...locPaths.map((p) => "/" + p)] : [])]), "xml");
+  await writeFileFor(projectId, byPath, "sitemap.xml", sitemapXml(ctx.domain, ["/index.html", ...contentPaths.map((p) => "/" + p), hubUrl, ...pubList.map((a) => `/blog/${a.slug}.html`), ...(locCities.length ? ["/locaties.html", ...locPaths.map((p) => "/" + p)] : [])]), "xml");
 
   const changed = new Set<string>();
   if (hostPath) {
