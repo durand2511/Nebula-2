@@ -170,6 +170,26 @@ export async function serveProjectSite(projectId: number, req: Request, res: Res
   // IndexNow verification file — the same key on every domain we serve, proving host control so we can
   // submit this site's URLs to Bing/Yandex. Answered before the normal file lookup.
   if (p === `${INDEXNOW_KEY}.txt`) { res.setHeader("Content-Type", "text/plain; charset=utf-8"); res.send(INDEXNOW_KEY); return; }
+  // sitemap.xml is generated LIVE from the current pages — never a stored file that can go stale in the
+  // published snapshot. This guarantees every content page stays in the sitemap for every customer,
+  // automatically, so enabling blog/location SEO can never silently drop the studio's own pages again.
+  if (p === "sitemap.xml") {
+    const host = (req.hostname || "").replace(/^www\./i, "") || "";
+    const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const pages = rows.map((r) => r.path).filter((x) => /\.html$/i.test(x) && !/^(_backup-|makeover-)/i.test(x) && x !== "booking-app.html");
+    const folderSlugs = new Set(pages.filter((x) => /\/index\.html$/i.test(x)).map((x) => x.replace(/\/index\.html$/i, "")));
+    const urls = new Set<string>(["/"]);
+    for (const s of folderSlugs) urls.add("/" + s + "/");                 // canonical extensionless form
+    for (const x of pages) {
+      if (/\/index\.html$/i.test(x) || x === "index.html") continue;
+      if (folderSlugs.has(x.replace(/\.html$/i, ""))) continue;          // duplicate of an /X/ page
+      urls.add("/" + x);
+    }
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${[...urls].sort().map((u) => `  <url><loc>${esc("https://" + host + u)}</loc></url>`).join("\n")}\n</urlset>\n`;
+    res.setHeader("Content-Type", "application/xml; charset=utf-8");
+    res.send(xml);
+    return;
+  }
   // Externalized imported CSS / fonts — served as ONE cacheable file instead of being inlined into every
   // page (that inlined blob was ~5 MB per page). The browser now downloads it once and reuses it across
   // pages → big page-speed / Core Web Vitals win. Cache-busted via the ?v=<hash> the <link> carries.
