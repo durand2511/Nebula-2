@@ -190,8 +190,17 @@ async function writeBodyHtml(ctx: Ctx, brief: Brief): Promise<string> {
   return html.trim();
 }
 
+// Convenience wrapper used by improveArticle/refresh: generate the body and carry the brief's FAQ
+// alongside it (the shape the callers expect). Returns null on a generation hiccup so the caller can
+// retry or bail instead of writing a thin page.
+async function writeBody(ctx: Ctx, brief: Brief): Promise<{ bodyHtml: string; faq: { q: string; a: string }[] } | null> {
+  const bodyHtml = await writeBodyHtml(ctx, brief);
+  if (!bodyHtml || wordCount(bodyHtml) < 120) return null;
+  return { bodyHtml, faq: Array.isArray(brief.faq) ? brief.faq : [] };
+}
+
 // ── Pipeline step 4: deterministic qualityScore across the 9 criteria (no extra AI call) ──
-function scoreArticle(brief: Brief, bodyHtml: string, faq: { q: string; a: string }[], overlap: number): Judged {
+export function scoreArticle(brief: Brief, bodyHtml: string, faq: { q: string; a: string }[], overlap: number): Judged {
   const wc = wordCount(bodyHtml);
   const paras = (bodyHtml.match(/<p\b/gi) || []).length;
   const headings = (bodyHtml.match(/<h[23]\b/gi) || []).length;
@@ -293,17 +302,28 @@ function blogIndexHtml(ctx: Ctx, items: { title: string; slug: string }[]): stri
 }
 
 // Full article page with technical SEO + E-E-A-T + internal links (cluster).
-function articleHtml(ctx: Ctx, brief: Brief, bodyHtml: string, faq: { q: string; a: string }[], related: { title: string; slug: string }[], isoDate: string): string {
+// isoDate accepts either a single ISO string (new posts: published == modified) or distinct
+// {published, modified} so re-renders keep a STABLE datePublished (Google penalises a date that keeps
+// jumping to "today" on every republish) while still refreshing dateModified.
+export function articleHtml(ctx: Ctx, brief: Brief, bodyHtml: string, faq: { q: string; a: string }[], related: { title: string; slug: string }[], isoDate: string | { published: string; modified: string }): string {
   const accent = ctx.accent || "#7a00df", base = ctx.domain ? `https://${ctx.domain}` : "";
   const url = `${base}/blog/${slugify(brief.title)}.html`;
+  const published = typeof isoDate === "string" ? isoDate : (isoDate.published || isoDate.modified);
+  const modified = typeof isoDate === "string" ? isoDate : (isoDate.modified || isoDate.published);
   const logo = ctx.logo ? `<img src="${esc(ctx.logo)}" alt="Logo van ${esc(ctx.studio)}" style="max-height:46px;max-width:180px;object-fit:contain">` : `<b>${esc(ctx.studio)}</b>`;
-  const updated = new Date(isoDate).toLocaleDateString(ctx.language === "nl" ? "nl-NL" : "en-US", { year: "numeric", month: "long", day: "numeric" });
+  const updated = new Date(modified).toLocaleDateString(ctx.language === "nl" ? "nl-NL" : "en-US", { year: "numeric", month: "long", day: "numeric" });
+  const wc = wordCount(bodyHtml);
+  const readMin = Math.max(1, Math.round(wc / 200));
+  // Never ship an empty meta description — fall back to the article's opening sentence.
+  const metaDescription = (brief.metaDescription || stripTags(bodyHtml).slice(0, 155)).trim();
+  const image = ctx.logo && /^https?:\/\//i.test(ctx.logo) ? ctx.logo : "";
   const faqHtml = faq.length ? `<section class="faq"><h2>Veelgestelde vragen</h2>${faq.map((f) => `<details><summary>${esc(f.q)}</summary><p>${esc(f.a)}</p></details>`).join("")}</section>` : "";
   const relatedHtml = related.length ? `<section class="related"><h2>Lees ook</h2><ul>${related.map((r) => `<li><a href="${esc(base)}/blog/${esc(r.slug)}.html">${esc(r.title)}</a></li>`).join("")}</ul></section>` : "";
   const disclaimer = brief.needsDisclaimer && brief.disclaimerText ? `<p class="disclaimer"><strong>Let op:</strong> ${esc(brief.disclaimerText)}</p>` : "";
   const sources = (brief.externalSources || []).filter((s) => s.url).slice(0, 5);
   const sourcesHtml = sources.length ? `<section class="sources"><h2>Bronnen</h2><ul>${sources.map((s) => `<li><a href="${esc(s.url)}" rel="nofollow noopener" target="_blank">${esc(s.title || s.url)}</a></li>`).join("")}</ul></section>` : "";
-  const ld = { "@context": "https://schema.org", "@type": brief.schemaType || "Article", headline: brief.title, description: brief.metaDescription, datePublished: isoDate, dateModified: isoDate, inLanguage: ctx.language, author: { "@type": "Person", name: ctx.author }, publisher: { "@type": "Organization", name: ctx.studio }, mainEntityOfPage: url };
+  const crumbs = `<nav class="crumbs" aria-label="Kruimelpad"><a href="${esc(base)}/index.html">${esc(ctx.studio)}</a> <span>›</span> <a href="${esc(base)}/blog.html">Blog</a> <span>›</span> <span aria-current="page">${esc(brief.title)}</span></nav>`;
+  const ld = { "@context": "https://schema.org", "@type": brief.schemaType || "Article", headline: brief.title.slice(0, 110), description: metaDescription, datePublished: published, dateModified: modified, inLanguage: ctx.language, wordCount: wc, articleSection: "Blog", ...(image ? { image: [image] } : {}), author: { "@type": "Person", name: ctx.author }, publisher: { "@type": "Organization", name: ctx.studio, ...(image ? { logo: { "@type": "ImageObject", url: image } } : {}) }, mainEntityOfPage: { "@type": "WebPage", "@id": url }, url };
   const faqLd = faq.length ? { "@context": "https://schema.org", "@type": "FAQPage", mainEntity: faq.map((f) => ({ "@type": "Question", name: f.q, acceptedAnswer: { "@type": "Answer", text: f.a } })) } : null;
   const crumbLd = { "@context": "https://schema.org", "@type": "BreadcrumbList", itemListElement: [{ "@type": "ListItem", position: 1, name: ctx.studio, item: `${base}/index.html` }, { "@type": "ListItem", position: 2, name: "Blog", item: `${base}/blog.html` }, { "@type": "ListItem", position: 3, name: brief.title, item: url }] };
   return `<!DOCTYPE html>
@@ -311,10 +331,15 @@ function articleHtml(ctx: Ctx, brief: Brief, bodyHtml: string, faq: { q: string;
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(brief.metaTitle || brief.title)}</title>
-<meta name="description" content="${esc(brief.metaDescription)}">
+<meta name="description" content="${esc(metaDescription)}">
 <meta name="keywords" content="${esc([brief.keyword, ...(brief.secondaryKeywords || [])].join(", "))}">
+<meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1">
 <link rel="canonical" href="${esc(url)}">
-<meta property="og:title" content="${esc(brief.title)}"><meta property="og:description" content="${esc(brief.metaDescription)}"><meta property="og:type" content="article">
+<meta property="og:title" content="${esc(brief.title)}"><meta property="og:description" content="${esc(metaDescription)}"><meta property="og:type" content="article">
+<meta property="og:url" content="${esc(url)}"><meta property="og:site_name" content="${esc(ctx.studio)}"><meta property="og:locale" content="${ctx.language === "nl" ? "nl_NL" : "en_US"}">
+${image ? `<meta property="og:image" content="${esc(image)}">` : ""}
+<meta property="article:published_time" content="${esc(published)}"><meta property="article:modified_time" content="${esc(modified)}"><meta property="article:author" content="${esc(ctx.author)}">
+<meta name="twitter:card" content="${image ? "summary_large_image" : "summary"}"><meta name="twitter:title" content="${esc(brief.title)}"><meta name="twitter:description" content="${esc(metaDescription)}">${image ? `<meta name="twitter:image" content="${esc(image)}">` : ""}
 <script type="application/ld+json">${JSON.stringify(ld)}</script>
 ${faqLd ? `<script type="application/ld+json">${JSON.stringify(faqLd)}</script>` : ""}
 <script type="application/ld+json">${JSON.stringify(crumbLd)}</script>
@@ -331,6 +356,8 @@ img{max-width:100%;display:block}a{color:inherit}
 .top .back{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink);text-decoration:none;border:1px solid var(--ink);border-radius:100px;padding:11px 20px;transition:all .25s}
 .top .back:hover{background:var(--ink);color:#fff}
 .hero{max-width:820px;margin:0 auto;padding:58px 40px 6px}
+.crumbs{font-size:12.5px;color:var(--soft);margin:0 0 14px;display:flex;flex-wrap:wrap;gap:7px;align-items:center}
+.crumbs a{color:var(--soft);text-decoration:none}.crumbs a:hover{color:var(--ac)}.crumbs span[aria-current]{color:var(--ink)}
 .eyebrow{font-size:12px;letter-spacing:.24em;text-transform:uppercase;color:var(--ac);font-weight:600}
 h1{font-weight:300;color:var(--ink);font-size:clamp(30px,5vw,50px);line-height:1.12;letter-spacing:-.015em;margin:18px 0 14px}
 .byline{color:var(--soft);font-size:14px;margin:0;display:flex;gap:10px;flex-wrap:wrap}
@@ -370,10 +397,11 @@ footer{max-width:1180px;margin:24px auto 0;padding:40px;border-top:1px solid var
 <a class="back" href="${esc(base)}/blog.html">← Terug naar blog</a>
 </header>
 <div class="hero">
+${crumbs}
 <span class="eyebrow">Blog</span>
 <h1>${esc(brief.title)}</h1>
-<p class="byline"><span>Door ${esc(ctx.author)}</span> · <span>${esc(updated)}</span></p>
-<p class="lead">${esc(brief.metaDescription)}</p>
+<p class="byline"><span>Door ${esc(ctx.author)}</span> · <span>${esc(updated)}</span> · <span>${readMin} min lezen</span></p>
+<p class="lead">${esc(metaDescription)}</p>
 </div>
 <article class="article">
 ${disclaimer}
@@ -482,8 +510,8 @@ async function reRenderArticles(projectId: number, ctx: Ctx, rows: { path: strin
       if (!payload?.articleHtml) continue;
       const brief = briefFromPayload(payload, ctx);
       const related = pickRelated(arts, art, 6);
-      const iso = new Date(art.updatedAt || Date.now()).toISOString().slice(0, 10);
-      const html = articleHtml(ctx, brief, payload.articleHtml, payload.faq || [], related, iso);
+      const dates = { published: new Date(art.createdAt || Date.now()).toISOString().slice(0, 10), modified: new Date(art.updatedAt || Date.now()).toISOString().slice(0, 10) };
+      const html = articleHtml(ctx, brief, payload.articleHtml, payload.faq || [], related, dates);
       if (html !== existing.content) { await writeFileFor(projectId, byPath, path, html); changed.add(path); }
     }
   } catch (err) { logger.warn({ err, projectId }, "[seo] reRenderArticles failed"); }
@@ -821,8 +849,8 @@ export async function reconcileBlogPublishing(): Promise<void> {
           if (!payload?.articleHtml) continue;
           const brief = briefFromPayload(payload, ctx);
           const related = arts.filter((a) => a.id !== art.id).slice(-5).map((p) => ({ title: p.title, slug: p.slug }));
-          const iso = new Date(art.updatedAt || Date.now()).toISOString().slice(0, 10);
-          await writeFileFor(projectId, byPath, path, articleHtml(ctx, brief, payload.articleHtml, payload.faq || [], related, iso));
+          const dates = { published: new Date(art.createdAt || Date.now()).toISOString().slice(0, 10), modified: new Date(art.updatedAt || Date.now()).toISOString().slice(0, 10) };
+          await writeFileFor(projectId, byPath, path, articleHtml(ctx, brief, payload.articleHtml, payload.faq || [], related, dates));
         }
         const fresh = await db.select().from(projectFiles).where(eq(projectFiles.projectId, projectId));
         await syncPublishedAux(projectId, ctx, fresh.map((f) => ({ path: f.path, id: f.id, content: f.content })));
@@ -995,7 +1023,9 @@ export async function improveArticle(projectId: number, isoDate: string, article
   if (!body) return null;
   const related = pub.filter((a) => a.id !== target.id).slice(-5).map((p) => ({ title: p.title, slug: p.slug }));
   const byPath = new Map(rows.map((f) => [f.path, { id: f.id }]));
-  await writeFileFor(projectId, byPath, `blog/${target.slug}.html`, articleHtml(ctx, brief, body.bodyHtml, body.faq, related, isoDate));
+  // Refresh bumps dateModified but keeps the original datePublished stable.
+  const dates = { published: new Date(target.createdAt || isoDate).toISOString().slice(0, 10), modified: isoDate };
+  await writeFileFor(projectId, byPath, `blog/${target.slug}.html`, articleHtml(ctx, brief, body.bodyHtml, body.faq, related, dates));
   const newPayload = payload ? { ...payload, articleHtml: body.bodyHtml, faq: body.faq } : null;
   await db.update(seoArticles).set({ updatedAt: new Date(), ...(newPayload ? { payload: JSON.stringify(newPayload) } : {}) }).where(eq(seoArticles.id, target.id));
   await syncPublishedAux(projectId, ctx, rows.map((f) => ({ path: f.path, id: f.id, content: f.content })));
