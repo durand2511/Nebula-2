@@ -2,6 +2,7 @@
  * pipeline (no AI, no DB queries) and asserts the on-page/technical SEO that Google & AI crawlers read.
  * Bundled by build-seo-test.mjs and run with `node --env-file`. Exits non-zero on any failed assertion. */
 import { articleHtml, scoreArticle, sitemapXml, robotsTxt, llmsTxt, deriveContext } from "./lib/seo.js";
+import { sitemapUrlsFromPaths } from "./lib/host-site.js";
 import type { ProjectFile } from "./lib/actions.js";
 
 let passed = 0;
@@ -106,6 +107,23 @@ ok(/User-agent: GPTBot/.test(rob) && /User-agent: ClaudeBot/.test(rob), "robots.
 ok(/Sitemap: https:\/\/senszenjoy\.nl\/sitemap\.xml/.test(rob), "robots.txt references the sitemap");
 const llms = llmsTxt(ctx, [{ title: "Wat is yin yoga", slug: "wat-is-yin-yoga" }]);
 ok(/senszenjoy\.nl\/blog\/wat-is-yin-yoga\.html/.test(llms), "llms.txt lists the article");
+
+// ── 5b. Live-sitemap URL canonicalisation (host-site) ───────────────────────
+section("Sitemap URL canonicalisation");
+const smUrls = sitemapUrlsFromPaths([
+  "index.html",
+  "over-mij.html", "over-mij/index.html",            // content page: flat + nested → one /over-mij/
+  "blog/wat-is-yin.html",                             // engine article (flat)
+  "blog/ademhaling/index.html",                       // make-over article (nested only)
+  "blog/body-scan.html", "blog/body-scan/index.html", // same article both forms → ONE url
+  "makeover-index.html", "_backup-index.html", "booking-app.html", // must be excluded
+]);
+ok(smUrls.includes("/over-mij/") && !smUrls.includes("/over-mij.html"), "content page → trailing-slash form only");
+ok(smUrls.includes("/blog/wat-is-yin.html"), "flat blog article → .html");
+ok(smUrls.includes("/blog/ademhaling.html") && !smUrls.includes("/blog/ademhaling/"), "nested-only blog article → collapsed to .html (no trailing slash)");
+ok(smUrls.filter((u) => u.startsWith("/blog/body-scan")).length === 1 && smUrls.includes("/blog/body-scan.html"), "article present as BOTH forms → exactly one .html URL");
+ok(!smUrls.some((u) => /makeover-|_backup-|booking-app/.test(u)), "make-over/backup/booking artefacts excluded");
+ok(!smUrls.some((u) => u.endsWith("/blog/")) && !smUrls.some((u) => u.endsWith("/index.html")), "no bare /blog/ or /index.html entries");
 
 // ── 6. Author byline uses the fixed .nebula-author name ─────────────────────
 section("Byline author");

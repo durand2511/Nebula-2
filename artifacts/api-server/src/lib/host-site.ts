@@ -158,6 +158,32 @@ function shortHash(s: string): string {
   return h.toString(36);
 }
 
+// Build the canonical sitemap URL list from the site's page paths. Content pages use the trailing-slash
+// folder form (/X/) where an X/index.html exists, else the flat /X.html; blog articles are always
+// collapsed to a single /blog/<slug>.html (matching each article's own canonical), so a flat file and a
+// nested make-over copy of the same article can never both appear. Pure + exported for testing.
+export function sitemapUrlsFromPaths(paths: string[]): string[] {
+  const pages = paths.filter((x) => /\.html$/i.test(x) && !/^(_backup-|makeover-)/i.test(x) && x !== "booking-app.html");
+  const blogSlugs = new Set<string>();
+  for (const x of pages) {
+    const nest = x.match(/^blog\/([^/]+)\/index\.html$/i);
+    const flat = x.match(/^blog\/([^/]+)\.html$/i);
+    if (nest) blogSlugs.add(nest[1]);
+    else if (flat && flat[1].toLowerCase() !== "index") blogSlugs.add(flat[1]);
+  }
+  const nonBlog = pages.filter((x) => !/^blog\//i.test(x));
+  const folderSlugs = new Set(nonBlog.filter((x) => /\/index\.html$/i.test(x)).map((x) => x.replace(/\/index\.html$/i, "")));
+  const urls = new Set<string>(["/"]);
+  for (const s of folderSlugs) urls.add("/" + s + "/");
+  for (const x of nonBlog) {
+    if (/\/index\.html$/i.test(x) || x === "index.html") continue;
+    if (folderSlugs.has(x.replace(/\.html$/i, ""))) continue;
+    urls.add("/" + x);
+  }
+  for (const s of blogSlugs) urls.add("/blog/" + s + ".html");
+  return [...urls].sort();
+}
+
 export async function serveProjectSite(projectId: number, req: Request, res: Response): Promise<void> {
   // Serve the PUBLISHED snapshot when present (draft → publish). Fall back to live files for
   // projects that haven't used publish yet (back-compat — they stay live as before).
@@ -176,16 +202,7 @@ export async function serveProjectSite(projectId: number, req: Request, res: Res
   if (p === "sitemap.xml") {
     const host = (req.hostname || "").replace(/^www\./i, "") || "";
     const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    const pages = rows.map((r) => r.path).filter((x) => /\.html$/i.test(x) && !/^(_backup-|makeover-)/i.test(x) && x !== "booking-app.html");
-    const folderSlugs = new Set(pages.filter((x) => /\/index\.html$/i.test(x)).map((x) => x.replace(/\/index\.html$/i, "")));
-    const urls = new Set<string>(["/"]);
-    for (const s of folderSlugs) urls.add("/" + s + "/");                 // canonical extensionless form
-    for (const x of pages) {
-      if (/\/index\.html$/i.test(x) || x === "index.html") continue;
-      if (folderSlugs.has(x.replace(/\.html$/i, ""))) continue;          // duplicate of an /X/ page
-      urls.add("/" + x);
-    }
-    const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${[...urls].sort().map((u) => `  <url><loc>${esc("https://" + host + u)}</loc></url>`).join("\n")}\n</urlset>\n`;
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${sitemapUrlsFromPaths(rows.map((r) => r.path)).map((u) => `  <url><loc>${esc("https://" + host + u)}</loc></url>`).join("\n")}\n</urlset>\n`;
     res.setHeader("Content-Type", "application/xml; charset=utf-8");
     res.send(xml);
     return;
