@@ -55,3 +55,6 @@ Thumbs.db
 
 # test artifacts
 test-output
+
+# large local backup artifact — never commit (was a Git-LFS pointer that broke Render clones)
+backup.tar.gz
