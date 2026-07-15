@@ -24,11 +24,12 @@ import { eq } from "drizzle-orm";
 import { recordUsage } from "./ai-usage.js";
 import { logger } from "./logger";
 
-// Model the editor's Agent SDK subprocess runs on. Kept in sync with the model our
-// deployment is proven to have access to: the SEO engine runs claude-sonnet-4-5 with
-// the same ANTHROPIC_API_KEY and works, whereas claude-opus-4-8 made the CLI subprocess
-// exit 1 ("Claude Code process exited with code 1") — most likely no Opus access on the
-// key. Restore "claude-opus-4-8" here once the key is entitled to Opus 4.8.
+// Model the editor's Agent SDK subprocess runs on. NOTE: the earlier "exit code 1" crash
+// was NOT a model-access problem — it was the root/permissions guard (see permissionMode
+// below); the CLI died before ever calling the API, so Opus access was never actually
+// tested. Sonnet 4.5 is what we've now verified working end-to-end; switch to
+// "claude-opus-4-8" if you want the top model for edit quality (will surface a clear error
+// if the key isn't entitled).
 const AGENT_MODEL = "claude-sonnet-4-5";
 const MAX_TURNS = 80;
 // Reference images the user attached are dropped here so the agent can Read them;
@@ -203,8 +204,13 @@ export async function runAgentEdit(opts: {
         model: AGENT_MODEL,
         systemPrompt: systemPrompt(),
         allowedTools: ["Read", "Write", "Edit", "Glob", "Grep"],
-        permissionMode: "bypassPermissions",
-        allowDangerouslySkipPermissions: true,
+        // Use acceptEdits, NOT bypassPermissions: the Render container runs as root, and the
+        // CLI refuses "--dangerously-skip-permissions cannot be used with root/sudo privileges"
+        // (that flag is what bypassPermissions + allowDangerouslySkipPermissions emit), so it
+        // exited 1 before doing anything. Our allowedTools are already an explicit allowlist
+        // (Read/Write/Edit/Glob/Grep) and acceptEdits auto-approves the file edits — no prompts,
+        // no root guard. Verified locally end-to-end (edit actually written).
+        permissionMode: "acceptEdits",
         settingSources: [], // clean sandbox — ignore any host ~/.claude or project settings
         maxTurns: MAX_TURNS,
         abortController,
