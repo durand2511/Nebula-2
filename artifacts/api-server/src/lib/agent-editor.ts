@@ -135,7 +135,28 @@ export async function runAgentEdit(opts: {
   const tmpRoot = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), `nebula-agent-${projectId}-`)));
   const original = new Map<string, FileRow>(); // path → row (pre-edit snapshot)
 
+  // The CLI subprocess needs a WRITABLE HOME/config dir: on boot it writes ~/.claude.json,
+  // ~/.claude/ and XDG state. In the Render container HOME isn't writable, so the CLI exited
+  // with code 1 ("Claude Code process exited with code 1"). Give it a private writable home,
+  // kept OUTSIDE tmpRoot so its config files never get diffed back into projectFiles.
+  const agentHome = await fs.mkdtemp(path.join(os.tmpdir(), `nebula-agent-home-${projectId}-`));
+  const agentConfigDir = path.join(agentHome, ".claude");
+  const subprocessEnv: Record<string, string | undefined> = {
+    ...process.env,
+    HOME: agentHome,
+    CLAUDE_CONFIG_DIR: agentConfigDir,
+    XDG_CONFIG_HOME: path.join(agentHome, ".config"),
+    XDG_CACHE_HOME: path.join(agentHome, ".cache"),
+    XDG_DATA_HOME: path.join(agentHome, ".local", "share"),
+    XDG_STATE_HOME: path.join(agentHome, ".local", "state"),
+  };
+
   try {
+    // Pre-create the writable dirs so the CLI never trips on a missing nested path.
+    await Promise.all(
+      [agentConfigDir, subprocessEnv.XDG_CONFIG_HOME, subprocessEnv.XDG_CACHE_HOME, subprocessEnv.XDG_DATA_HOME, subprocessEnv.XDG_STATE_HOME]
+        .map((p) => fs.mkdir(p as string, { recursive: true })),
+    );
     emit({ type: "status", message: "Project laden…" });
     for (const row of rows) {
       const dest = safeJoin(tmpRoot, row.path);
@@ -187,6 +208,7 @@ export async function runAgentEdit(opts: {
         settingSources: [], // clean sandbox — ignore any host ~/.claude or project settings
         maxTurns: MAX_TURNS,
         abortController,
+        env: subprocessEnv, // replaces the child env entirely — process.env is spread in above
         stderr: (data: string) => { stderrBuf += data; },
       },
     });
@@ -253,6 +275,7 @@ export async function runAgentEdit(opts: {
     return { ok, changed, created, deleted, finalText };
   } finally {
     await fs.rm(tmpRoot, { recursive: true, force: true }).catch(() => {});
+    await fs.rm(agentHome, { recursive: true, force: true }).catch(() => {});
   }
 }
 
