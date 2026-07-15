@@ -24,8 +24,12 @@ import { eq } from "drizzle-orm";
 import { recordUsage } from "./ai-usage.js";
 import { logger } from "./logger";
 
-// Alias understood by the Agent SDK; resolves to the current top model.
-const AGENT_MODEL = "claude-opus-4-8";
+// Model the editor's Agent SDK subprocess runs on. Kept in sync with the model our
+// deployment is proven to have access to: the SEO engine runs claude-sonnet-4-5 with
+// the same ANTHROPIC_API_KEY and works, whereas claude-opus-4-8 made the CLI subprocess
+// exit 1 ("Claude Code process exited with code 1") — most likely no Opus access on the
+// key. Restore "claude-opus-4-8" here once the key is entitled to Opus 4.8.
+const AGENT_MODEL = "claude-sonnet-4-5";
 const MAX_TURNS = 80;
 // Reference images the user attached are dropped here so the agent can Read them;
 // this folder is synthetic and never written back to the DB.
@@ -165,6 +169,12 @@ export async function runAgentEdit(opts: {
     let finalText = "";
     let ok = true;
 
+    // Capture the CLI subprocess's stderr. When the process exits non-zero the SDK only
+    // throws "Claude Code process exited with code N" — the actual reason (model access,
+    // unwritable HOME/config, missing env, …) is on stderr, so we buffer it and surface
+    // it in the logs if the run throws.
+    let stderrBuf = "";
+
     const q = query({
       prompt: userPrompt,
       options: {
@@ -177,27 +187,34 @@ export async function runAgentEdit(opts: {
         settingSources: [], // clean sandbox — ignore any host ~/.claude or project settings
         maxTurns: MAX_TURNS,
         abortController,
+        stderr: (data: string) => { stderrBuf += data; },
       },
     });
 
-    for await (const msg of q) {
-      if (msg.type === "assistant") {
-        for (const block of msg.message.content) {
-          if (block.type === "text" && block.text.trim()) {
-            emit({ type: "status", message: firstLine(block.text) });
-          } else if (block.type === "tool_use") {
-            emit(describeTool(block.name, block.input as Record<string, unknown>, tmpRoot));
+    try {
+      for await (const msg of q) {
+        if (msg.type === "assistant") {
+          for (const block of msg.message.content) {
+            if (block.type === "text" && block.text.trim()) {
+              emit({ type: "status", message: firstLine(block.text) });
+            } else if (block.type === "tool_use") {
+              emit(describeTool(block.name, block.input as Record<string, unknown>, tmpRoot));
+            }
           }
+        } else if (msg.type === "result") {
+          finalText = msg.subtype === "success" ? msg.result : "";
+          ok = msg.subtype === "success" && !msg.is_error;
+          // Charge the tokens the agent actually spent (per model) to the usage context.
+          for (const [model, u] of Object.entries(msg.modelUsage ?? {})) {
+            recordUsage(model, { input_tokens: u.inputTokens, output_tokens: u.outputTokens });
+          }
+          if (!ok) logger.warn({ projectId, subtype: msg.subtype }, "[agent] run ended without success");
         }
-      } else if (msg.type === "result") {
-        finalText = msg.subtype === "success" ? msg.result : "";
-        ok = msg.subtype === "success" && !msg.is_error;
-        // Charge the tokens the agent actually spent (per model) to the usage context.
-        for (const [model, u] of Object.entries(msg.modelUsage ?? {})) {
-          recordUsage(model, { input_tokens: u.inputTokens, output_tokens: u.outputTokens });
-        }
-        if (!ok) logger.warn({ projectId, subtype: msg.subtype }, "[agent] run ended without success");
       }
+    } catch (err) {
+      // The SDK's "process exited with code N" hides the cause — log the subprocess stderr.
+      logger.error({ projectId, model: AGENT_MODEL, stderr: stderrBuf.slice(-4000) }, "[agent] CLI subprocess failed");
+      throw err;
     }
 
     // ── Diff the sandbox back into the DB ────────────────────────────────────
