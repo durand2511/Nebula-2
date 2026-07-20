@@ -14,6 +14,9 @@ import { sendBookingEmail, sendPaymentEmail } from "../lib/email.js";
 import { type Wallet, type CreditLot, ymd, applyMonthlyReset, sumActiveCredits, pickLotToConsume, soonestExpiry, lotActive, creditDecision, isPast, bookTooEarly, bookOpensOn, cancelClosed, purchaseWalletUpdate, addMonths } from "../lib/studio-rules.js";
 import { verifyStripeSession, stripeRefund, cancelStripeSubscription } from "./stripe.js";
 import { getInvoiceSettings, createInvoice, renderInvoiceHtml, renderInvoicePdf } from "../lib/invoice.js";
+import { reqBaseUrl } from "../lib/req-url.js";
+import { ensureCalendar } from "../lib/calendar.js";
+import { gcalConfigured, authUrlUser, gcalStatusUser, disconnectGcalUser } from "../lib/gcal.js";
 
 const router = Router();
 const body = json({ limit: "64kb" });
@@ -225,6 +228,35 @@ router.post("/projects/:id/studio/reset", body, async (req, res) => {
     }
     res.json({ ok: true });
   } catch (err) { logger.error({ err, projectId }, "[studio] reset failed"); res.status(500).json({ error: "Reset mislukt." }); }
+});
+
+// ── Per-staff Google Calendar coupling ────────────────────────────────────
+// A logged-in staff member (teacher or admin) connects their OWN Google account; only their own
+// appointments sync. Separate from the studio-wide /gcal/* routes (which stay admin/project-level).
+const gcalBaseUrl = (req: Request) => process.env.PUBLIC_API_URL || reqBaseUrl(req as any);
+
+router.get("/projects/:id/studio/my-gcal/status", async (req, res) => {
+  const u = await authed(req, res); if (!u) return;
+  const projectId = pid(req);
+  try { res.json(await gcalStatusUser(projectId, u.email)); }
+  catch (err) { logger.error({ err, projectId }, "[studio] my-gcal status failed"); res.status(500).json({ error: "Status mislukt." }); }
+});
+
+router.post("/projects/:id/studio/my-gcal/connect", body, async (req, res) => {
+  const u = await authed(req, res); if (!u) return;
+  const projectId = pid(req);
+  if (!gcalConfigured()) { res.status(503).json({ error: "Google Agenda is nog niet ingesteld door het platform." }); return; }
+  try {
+    const { token } = await ensureCalendar(projectId, gcalBaseUrl(req));
+    res.json({ url: authUrlUser(projectId, token, u.email, gcalBaseUrl(req)) });
+  } catch (err) { logger.error({ err, projectId }, "[studio] my-gcal connect failed"); res.status(500).json({ error: "Koppelen mislukt." }); }
+});
+
+router.post("/projects/:id/studio/my-gcal/disconnect", body, async (req, res) => {
+  const u = await authed(req, res); if (!u) return;
+  const projectId = pid(req);
+  try { await disconnectGcalUser(projectId, u.email); res.json({ ok: true }); }
+  catch (err) { logger.error({ err, projectId }, "[studio] my-gcal disconnect failed"); res.status(500).json({ error: "Ontkoppelen mislukt." }); }
 });
 
 // ── Data + booking endpoints ──────────────────────────────────────────────

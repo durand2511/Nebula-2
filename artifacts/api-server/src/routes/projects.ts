@@ -27,7 +27,7 @@ import { sendBookingEmail, sendWithConfig, sendBroadcast, sendPaymentEmail, type
 import { getInvoiceSettings, saveInvoiceSettings, createInvoice, renderInvoiceHtml, renderInvoiceDocument, renderInvoicePdf, listInvoices, listInvoicesSince, renderInvoicesXls, renderVatReportXls, renderTeacherPayoutXls, getInvoice } from "../lib/invoice.js";
 import { ensureCalendar, saveLessons, getStatus as getCalendarStatus, buildIcs, getLessons, type Lesson } from "../lib/calendar.js";
 import { reqBaseUrl } from "../lib/req-url.js";
-import { pushLessons } from "../lib/gcal.js";
+import { pushLessons, pushAllTeachers } from "../lib/gcal.js";
 import { emailBrandSeed } from "../lib/actions.js";
 import { resolveSmtpConfig, explainSmtpError } from "../lib/email-config.js";
 import { generateEmailBrand, loadEmailBrand } from "../lib/email-brand.js";
@@ -4711,6 +4711,7 @@ router.post("/projects/:projectId/calendar/sync", json({ limit: "512kb" }), asyn
   try {
     const r = await saveLessons(projectId, lessons, reqBaseUrl(req));
     void pushLessons(projectId, lessons); // instant push to a connected Google Calendar (no-op if not connected)
+    void pushAllTeachers(projectId);      // re-sync every connected staff member's own calendar (their own appts)
     res.json({ ok: true, ...r });
   }
   catch (err) { logger.error({ err, projectId }, "[calendar] sync failed"); res.status(500).json({ error: "Sync mislukt." }); }

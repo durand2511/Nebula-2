@@ -7,8 +7,8 @@
  * GOOGLE_CLIENT_ID + GOOGLE_CLIENT_SECRET in the environment. The redirect URI is
  * <live-host>/api/gcal/callback.
  */
-import { db, projectGcal } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { db, projectGcal, projectGcalUser, studioClasses } from "@workspace/db";
+import { eq, and } from "drizzle-orm";
 import { logger } from "./logger";
 import type { Lesson } from "./calendar.js";
 
@@ -123,15 +123,9 @@ function eventBody(l: Lesson): Record<string, unknown> {
   };
 }
 
-/** Reconcile the project's Google Calendar with the current lessons: insert/update/delete events. */
-export async function pushLessons(projectId: number, lessons: Lesson[]): Promise<void> {
-  const at = await getAccessToken(projectId);
-  if (!at) return;
-  const [row] = await db.select().from(projectGcal).where(eq(projectGcal.projectId, projectId));
-  if (!row) return;
-  const calId = encodeURIComponent(row.calendarId || "primary");
-  let map: Record<string, string> = {};
-  try { map = JSON.parse(row.eventMap || "{}"); } catch { map = {}; }
+/** Reconcile a Google Calendar with the given lessons (insert/update/delete). Returns the new id map.
+ *  Shared by both the studio-wide (projectGcal) and per-staff (projectGcalUser) push paths. */
+async function reconcileEvents(at: string, calId: string, lessons: Lesson[], map: Record<string, string>): Promise<Record<string, string>> {
   const seen = new Set<string>();
   for (const l of lessons) {
     if (!l.date || !l.time) continue;
@@ -146,15 +140,27 @@ export async function pushLessons(projectId: number, lessons: Lesson[]): Promise
         const c = await calApi("POST", `${calId}/events`, at, body);
         if (c.json?.id) map[l.id] = c.json.id;
       }
-    } catch (err) { logger.warn({ err, projectId, lesson: l.id }, "[gcal] push event failed"); }
+    } catch (err) { logger.warn({ err, lesson: l.id }, "[gcal] push event failed"); }
   }
-  // Remove events for lessons that no longer exist.
   for (const lid of Object.keys(map)) {
     if (!seen.has(lid)) {
       try { await calApi("DELETE", `${calId}/events/${encodeURIComponent(map[lid])}`, at); } catch { /* ignore */ }
       delete map[lid];
     }
   }
+  return map;
+}
+
+/** Reconcile the project's Google Calendar with the current lessons: insert/update/delete events. */
+export async function pushLessons(projectId: number, lessons: Lesson[]): Promise<void> {
+  const at = await getAccessToken(projectId);
+  if (!at) return;
+  const [row] = await db.select().from(projectGcal).where(eq(projectGcal.projectId, projectId));
+  if (!row) return;
+  const calId = encodeURIComponent(row.calendarId || "primary");
+  let map: Record<string, string> = {};
+  try { map = JSON.parse(row.eventMap || "{}"); } catch { map = {}; }
+  map = await reconcileEvents(at, calId, lessons, map);
   await db.update(projectGcal).set({ eventMap: JSON.stringify(map) }).where(eq(projectGcal.projectId, projectId));
 }
 
@@ -167,4 +173,115 @@ export async function disconnectGcal(projectId: number): Promise<void> {
   const [row] = await db.select().from(projectGcal).where(eq(projectGcal.projectId, projectId));
   if (row?.refreshToken) { try { await fetch("https://oauth2.googleapis.com/revoke?token=" + encodeURIComponent(row.refreshToken), { method: "POST" }); } catch { /* ignore */ } }
   await db.delete(projectGcal).where(eq(projectGcal.projectId, projectId));
+}
+
+// ── Per-staff (teacher) connections ────────────────────────────────────────────────────────────
+// A staff member connects their OWN Google account; only their own appointments are synced. Stored in
+// projectGcalUser (never touches the studio-wide projectGcal above). The OAuth state carries the staff
+// email (base64url so it survives the "." split): "<projectId>.<feedToken>.u_<b64url(email)>".
+
+export function encodeUserState(email: string): string { return "u_" + Buffer.from(email.toLowerCase()).toString("base64url"); }
+export function decodeUserState(part: string): string {
+  if (!part || !part.startsWith("u_")) return "";
+  try { return Buffer.from(part.slice(2), "base64url").toString("utf8").toLowerCase(); } catch { return ""; }
+}
+
+/** Consent URL for a specific staff member. */
+export function authUrlUser(projectId: number, feedToken: string, userEmail: string, baseUrl: string): string {
+  const p = new URLSearchParams({
+    client_id: process.env.GOOGLE_CLIENT_ID || "",
+    redirect_uri: redirectUri(baseUrl),
+    response_type: "code",
+    scope: SCOPE,
+    access_type: "offline",
+    prompt: "consent",
+    include_granted_scopes: "true",
+    state: `${projectId}.${feedToken}.${encodeUserState(userEmail)}`,
+  });
+  return "https://accounts.google.com/o/oauth2/v2/auth?" + p.toString();
+}
+
+export async function exchangeCodeUser(projectId: number, userEmail: string, code: string, baseUrl: string): Promise<void> {
+  const em = userEmail.toLowerCase();
+  const tok = await tokenRequest({
+    code,
+    client_id: process.env.GOOGLE_CLIENT_ID || "",
+    client_secret: process.env.GOOGLE_CLIENT_SECRET || "",
+    redirect_uri: redirectUri(baseUrl),
+    grant_type: "authorization_code",
+  });
+  const expiry = new Date(Date.now() + (tok.expires_in || 3600) * 1000);
+  let email = "";
+  try { if (tok.id_token) email = JSON.parse(Buffer.from(String(tok.id_token).split(".")[1], "base64").toString()).email || ""; } catch { /* ignore */ }
+  const [existing] = await db.select().from(projectGcalUser).where(and(eq(projectGcalUser.projectId, projectId), eq(projectGcalUser.userEmail, em)));
+  const refreshToken = tok.refresh_token || existing?.refreshToken || "";
+  if (existing) {
+    await db.update(projectGcalUser).set({ refreshToken, accessToken: tok.access_token || "", tokenExpiry: expiry, email: email || existing.email }).where(eq(projectGcalUser.id, existing.id));
+  } else {
+    await db.insert(projectGcalUser).values({ projectId, userEmail: em, refreshToken, accessToken: tok.access_token || "", tokenExpiry: expiry, email });
+  }
+}
+
+async function getUserAccessToken(projectId: number, userEmail: string): Promise<string | null> {
+  const [row] = await db.select().from(projectGcalUser).where(and(eq(projectGcalUser.projectId, projectId), eq(projectGcalUser.userEmail, userEmail.toLowerCase())));
+  if (!row || !row.refreshToken) return null;
+  if (row.accessToken && row.tokenExpiry && row.tokenExpiry.getTime() > Date.now() + 60_000) return row.accessToken;
+  try {
+    const tok = await tokenRequest({
+      client_id: process.env.GOOGLE_CLIENT_ID || "",
+      client_secret: process.env.GOOGLE_CLIENT_SECRET || "",
+      refresh_token: row.refreshToken,
+      grant_type: "refresh_token",
+    });
+    const expiry = new Date(Date.now() + (tok.expires_in || 3600) * 1000);
+    await db.update(projectGcalUser).set({ accessToken: tok.access_token || "", tokenExpiry: expiry }).where(eq(projectGcalUser.id, row.id));
+    return tok.access_token || null;
+  } catch (err) { logger.warn({ err, projectId, userEmail }, "[gcal] user token refresh failed"); return null; }
+}
+
+/** Build a staff member's OWN lessons straight from studio_classes (filtered by teacher_email — robust,
+ *  no display-name matching). */
+export async function getTeacherLessons(projectId: number, teacherEmail: string): Promise<Lesson[]> {
+  const em = teacherEmail.toLowerCase();
+  const rows = await db.select().from(studioClasses).where(and(eq(studioClasses.projectId, projectId), eq(studioClasses.teacherEmail, em)));
+  return rows.map((c) => ({
+    id: String(c.id), title: c.title, date: c.date, time: c.time, endTime: c.endTime || undefined,
+    mode: c.mode, onlineLink: c.onlineLink || undefined, onlineInfo: c.onlineInfo || undefined, teacher: c.teacher || undefined,
+  }));
+}
+
+/** Push a staff member's own lessons to their connected Google Calendar. */
+export async function pushLessonsUser(projectId: number, userEmail: string, lessons: Lesson[]): Promise<void> {
+  const em = userEmail.toLowerCase();
+  const at = await getUserAccessToken(projectId, em);
+  if (!at) return;
+  const [row] = await db.select().from(projectGcalUser).where(and(eq(projectGcalUser.projectId, projectId), eq(projectGcalUser.userEmail, em)));
+  if (!row) return;
+  const calId = encodeURIComponent(row.calendarId || "primary");
+  let map: Record<string, string> = {};
+  try { map = JSON.parse(row.eventMap || "{}"); } catch { map = {}; }
+  map = await reconcileEvents(at, calId, lessons, map);
+  await db.update(projectGcalUser).set({ eventMap: JSON.stringify(map) }).where(eq(projectGcalUser.id, row.id));
+}
+
+/** Re-sync every connected staff member's own calendar (called after any lesson change). */
+export async function pushAllTeachers(projectId: number): Promise<void> {
+  const rows = await db.select().from(projectGcalUser).where(eq(projectGcalUser.projectId, projectId));
+  for (const row of rows) {
+    if (!row.refreshToken) continue;
+    try { await pushLessonsUser(projectId, row.userEmail, await getTeacherLessons(projectId, row.userEmail)); }
+    catch (err) { logger.warn({ err, projectId, userEmail: row.userEmail }, "[gcal] teacher resync failed"); }
+  }
+}
+
+export async function gcalStatusUser(projectId: number, userEmail: string): Promise<{ configured: boolean; connected: boolean; email: string }> {
+  const [row] = await db.select().from(projectGcalUser).where(and(eq(projectGcalUser.projectId, projectId), eq(projectGcalUser.userEmail, userEmail.toLowerCase())));
+  return { configured: gcalConfigured(), connected: !!row?.refreshToken, email: row?.email || "" };
+}
+
+export async function disconnectGcalUser(projectId: number, userEmail: string): Promise<void> {
+  const em = userEmail.toLowerCase();
+  const [row] = await db.select().from(projectGcalUser).where(and(eq(projectGcalUser.projectId, projectId), eq(projectGcalUser.userEmail, em)));
+  if (row?.refreshToken) { try { await fetch("https://oauth2.googleapis.com/revoke?token=" + encodeURIComponent(row.refreshToken), { method: "POST" }); } catch { /* ignore */ } }
+  if (row) await db.delete(projectGcalUser).where(eq(projectGcalUser.id, row.id));
 }

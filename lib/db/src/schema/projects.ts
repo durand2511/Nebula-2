@@ -221,6 +221,22 @@ export const projectGcal = pgTable("project_gcal", {
   connectedAt: timestamp("connected_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
+// Per-staff Google Calendar connections (a teacher connects their OWN Google account and only their
+// own appointments are synced). Kept in a SEPARATE table from projectGcal so the studio-wide/admin
+// connection above is never touched. One row per (project, staff email).
+export const projectGcalUser = pgTable("project_gcal_user", {
+  id: serial("id").primaryKey(),
+  projectId: integer("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  userEmail: text("user_email").notNull().default(""),   // the staff member (studio_users.email)
+  refreshToken: text("refresh_token").notNull().default(""),
+  accessToken: text("access_token").notNull().default(""),
+  tokenExpiry: timestamp("token_expiry", { withTimezone: true }),
+  calendarId: text("calendar_id").notNull().default("primary"),
+  email: text("email").notNull().default(""),            // the connected Google account email
+  eventMap: text("event_map").notNull().default("{}"),
+  connectedAt: timestamp("connected_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => ({ byUser: uniqueIndex("project_gcal_user_proj_email").on(t.projectId, t.userEmail) }));
+
 // Google Search Console OAuth per project — connect once, then auto-verify the site (via an injected
 // meta tag) and submit the sitemap. Separate from project_gcal so the calendar coupling stays untouched.
 export const projectGsc = pgTable("project_gsc", {

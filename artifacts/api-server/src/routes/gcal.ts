@@ -10,7 +10,7 @@ import { Router, json } from "express";
 import { logger } from "../lib/logger";
 import { reqBaseUrl } from "../lib/req-url.js";
 import { ensureCalendar, getLessons } from "../lib/calendar.js";
-import { authUrl, exchangeCode, pushLessons, gcalStatus, disconnectGcal, gcalConfigured } from "../lib/gcal.js";
+import { authUrl, exchangeCode, pushLessons, gcalStatus, disconnectGcal, gcalConfigured, decodeUserState, exchangeCodeUser, pushLessonsUser, getTeacherLessons } from "../lib/gcal.js";
 import { db, projectCalendar } from "@workspace/db";
 import { eq } from "drizzle-orm";
 
@@ -43,11 +43,21 @@ router.get("/gcal/callback", async (req, res) => {
     const state = String(req.query.state || "");
     const err = String(req.query.error || "");
     if (err) { res.status(400).send(page("Koppeling geannuleerd", "Je hebt de Google-toegang geweigerd. Sluit dit venster en probeer opnieuw.")); return; }
-    const [pidStr, feedToken] = state.split(".");
-    const projectId = Number(pidStr);
+    const parts = state.split(".");
+    const projectId = Number(parts[0]);
+    const feedToken = parts[1];
+    const userPart = parts[2] || "";
     if (!code || isNaN(projectId) || !feedToken) { res.status(400).send(page("Ongeldig", "De koppeling kon niet worden voltooid.")); return; }
     const [cal] = await db.select().from(projectCalendar).where(eq(projectCalendar.projectId, projectId));
     if (!cal || cal.token !== feedToken) { res.status(403).send(page("Niet toegestaan", "De koppeling kon niet worden geverifieerd.")); return; }
+    // Per-staff connection: state carries "u_<b64url(email)>" → connect only that person's own calendar.
+    const userEmail = decodeUserState(userPart);
+    if (userEmail) {
+      await exchangeCodeUser(projectId, userEmail, code, gcalBase(req));
+      void pushLessonsUser(projectId, userEmail, await getTeacherLessons(projectId, userEmail));
+      res.send(page("Google Agenda gekoppeld ✓", "Jouw eigen afspraken worden nu automatisch gesynchroniseerd. Je kunt dit venster sluiten."));
+      return;
+    }
     await exchangeCode(projectId, code, gcalBase(req));
     // Immediately push the current lessons so the calendar fills right away.
     const lessons = await getLessons(projectId, feedToken);
