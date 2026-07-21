@@ -9,6 +9,10 @@ import router from "./routes";
 import { logger } from "./lib/logger";
 import { isReserved, findByHost, PLATFORM_HOST } from "./lib/domains";
 import { serveProjectSite } from "./lib/host-site";
+import { db, projectEmail } from "@workspace/db";
+import { desc } from "drizzle-orm";
+import { sendMail, smtpConfigFromEnv, type SmtpConfig } from "./lib/smtp.js";
+import { decryptSecret } from "./lib/email-config.js";
 
 const app: Express = express();
 
@@ -106,6 +110,41 @@ app.use((req, res, next) => {
       return res.redirect(302, "https://" + PLATFORM_HOST);
     })
     .catch(next);
+});
+
+// ── Contact form (nebulabookings.com landing) ──
+// Public: a visitor leaves their phone number; we e-mail it to the platform owner so they can call back.
+const CONTACT_TO = process.env.CONTACT_EMAIL || "durand2511@gmail.com";
+async function platformSmtp(): Promise<SmtpConfig | null> {
+  const env = smtpConfigFromEnv();
+  if (env) return env;
+  // Fallback: reuse the most recently configured studio's SMTP so leads still arrive without extra setup.
+  const [r] = await db.select().from(projectEmail).orderBy(desc(projectEmail.updatedAt)).limit(1);
+  if (r) {
+    try { return { host: r.smtpHost, port: r.smtpPort, user: r.email, pass: decryptSecret(r.passEncrypted), from: r.email, secure: r.smtpSecure === "true" }; }
+    catch { /* decryption failed → no config */ }
+  }
+  return null;
+}
+function esc(s: string): string { return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c] as string)); }
+app.post("/api/contact", async (req, res) => {
+  const phone = String(req.body?.phone ?? "").trim();
+  const name = String(req.body?.name ?? "").trim().slice(0, 120);
+  const note = String(req.body?.note ?? "").trim().slice(0, 1000);
+  if (phone.replace(/\D/g, "").length < 6 || phone.length > 40) { res.status(400).json({ ok: false, error: "Vul een geldig telefoonnummer in." }); return; }
+  try {
+    const cfg = await platformSmtp();
+    if (!cfg) { logger.error("[contact] no SMTP config available"); res.status(503).json({ ok: false, error: "E-mail is nog niet ingesteld op het platform." }); return; }
+    const html = `<div style="font-family:system-ui,-apple-system,Segoe UI,sans-serif;font-size:15px;color:#14121f;line-height:1.6">`
+      + `<h2 style="margin:0 0 12px">📞 Nieuwe aanvraag via nebulabookings.com</h2>`
+      + `<p style="margin:4px 0"><b>Telefoon:</b> ${esc(phone)}</p>`
+      + (name ? `<p style="margin:4px 0"><b>Naam:</b> ${esc(name)}</p>` : "")
+      + (note ? `<p style="margin:4px 0"><b>Bericht:</b> ${esc(note)}</p>` : "")
+      + `<p style="margin:14px 0 0;color:#8b879f;font-size:13px">Neem contact op om deze aanvraag op te volgen.</p></div>`;
+    const text = `Nieuwe aanvraag via nebulabookings.com\nTelefoon: ${phone}${name ? "\nNaam: " + name : ""}${note ? "\nBericht: " + note : ""}`;
+    await sendMail(cfg, { to: CONTACT_TO, subject: "📞 Nieuwe aanvraag — " + phone, html, text, fromName: "Nebula" });
+    res.json({ ok: true });
+  } catch (err) { logger.error({ err }, "[contact] send failed"); res.status(500).json({ ok: false, error: "Versturen mislukt. Probeer het later opnieuw." }); }
 });
 
 app.use("/api", router);
