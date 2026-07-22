@@ -38,9 +38,9 @@ function ContactForm() {
   if (status === "done") {
     return (
       <div className="rounded-2xl border border-border/60 bg-card/50 p-6 text-center">
-        <div className="text-lg font-semibold text-foreground">Bedankt! 🎉</div>
+        <div className="text-lg font-semibold text-foreground">Je staat op de wachtlijst! 🎉</div>
         <p className="text-sm text-muted-foreground mt-1">
-          We hebben je nummer ontvangen en nemen snel contact met je op.
+          We laten van ons horen zodra Nebula live gaat.
         </p>
       </div>
     );
@@ -49,9 +49,10 @@ function ContactForm() {
   return (
     <form onSubmit={onSubmit} className="rounded-2xl border border-border/60 bg-card/50 p-6 text-left space-y-4">
       <div>
-        <div className="text-lg font-semibold text-foreground">Interesse? Laat je nummer achter.</div>
+        <div className="text-xs font-semibold uppercase tracking-wider text-primary">Binnenkort live 🚀</div>
+        <div className="text-lg font-semibold text-foreground mt-1">Schrijf je in voor de wachtlijst</div>
         <p className="text-sm text-muted-foreground mt-1">
-          Vul je telefoonnummer in, dan bellen we je terug om je studio online te zetten.
+          Nebula lanceert binnenkort. Vul je telefoonnummer in en je hoort als eerste wanneer we live gaan.
         </p>
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
@@ -76,7 +77,7 @@ function ContactForm() {
         disabled={status === "sending"}
         className="w-full rounded-xl bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground transition hover:opacity-90 disabled:opacity-60"
       >
-        {status === "sending" ? "Versturen…" : "Bel me terug"}
+        {status === "sending" ? "Inschrijven…" : "Zet me op de wachtlijst"}
       </button>
     </form>
   );

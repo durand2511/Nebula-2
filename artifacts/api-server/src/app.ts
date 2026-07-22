@@ -136,13 +136,13 @@ app.post("/api/contact", async (req, res) => {
     const cfg = await platformSmtp();
     if (!cfg) { logger.error("[contact] no SMTP config available"); res.status(503).json({ ok: false, error: "E-mail is nog niet ingesteld op het platform." }); return; }
     const html = `<div style="font-family:system-ui,-apple-system,Segoe UI,sans-serif;font-size:15px;color:#14121f;line-height:1.6">`
-      + `<h2 style="margin:0 0 12px">📞 Nieuwe aanvraag via nebulabookings.com</h2>`
+      + `<h2 style="margin:0 0 12px">🚀 Nieuwe wachtlijst-inschrijving via nebulabookings.com</h2>`
       + `<p style="margin:4px 0"><b>Telefoon:</b> ${esc(phone)}</p>`
       + (name ? `<p style="margin:4px 0"><b>Naam:</b> ${esc(name)}</p>` : "")
       + (note ? `<p style="margin:4px 0"><b>Bericht:</b> ${esc(note)}</p>` : "")
       + `<p style="margin:14px 0 0;color:#8b879f;font-size:13px">Neem contact op om deze aanvraag op te volgen.</p></div>`;
-    const text = `Nieuwe aanvraag via nebulabookings.com\nTelefoon: ${phone}${name ? "\nNaam: " + name : ""}${note ? "\nBericht: " + note : ""}`;
-    await sendMail(cfg, { to: CONTACT_TO, subject: "📞 Nieuwe aanvraag — " + phone, html, text, fromName: "Nebula" });
+    const text = `Nieuwe wachtlijst-inschrijving via nebulabookings.com\nTelefoon: ${phone}${name ? "\nNaam: " + name : ""}${note ? "\nBericht: " + note : ""}`;
+    await sendMail(cfg, { to: CONTACT_TO, subject: "🚀 Nieuwe wachtlijst-inschrijving — " + phone, html, text, fromName: "Nebula" });
     res.json({ ok: true });
   } catch (err) { logger.error({ err }, "[contact] send failed"); res.status(500).json({ ok: false, error: "Versturen mislukt. Probeer het later opnieuw." }); }
 });
