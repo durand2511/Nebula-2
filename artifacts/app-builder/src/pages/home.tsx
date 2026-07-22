@@ -85,6 +85,10 @@ function ContactForm() {
 export function Home() {
   return (
     <div className="flex-1 flex flex-col items-center justify-center px-4 w-full py-16 gap-10">
+      {/* Contact — bovenaan, boven het logo */}
+      <div className="w-full max-w-lg">
+        <ContactForm />
+      </div>
       <img src={logoUrl} alt="Nebula" className="h-64 md:h-96 w-auto" />
       <img
         src={whereStarsUrl}
@@ -123,11 +127,6 @@ export function Home() {
               Automatische SEO-blogs en Google-koppeling zodat nieuwe klanten je vinden.
             </p>
           </div>
-        </div>
-
-        {/* Contact */}
-        <div className="pt-4">
-          <ContactForm />
         </div>
       </div>
     </div>
