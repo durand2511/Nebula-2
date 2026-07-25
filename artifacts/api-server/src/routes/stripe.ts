@@ -15,6 +15,7 @@ import { eq, and } from "drizzle-orm";
 import { logger } from "../lib/logger";
 import { sendBookingEmail } from "../lib/email.js";
 import { getSessionUser, tokenFrom } from "../lib/platform-auth.js";
+import { getSessionUser as getStudioUser } from "../lib/studio-auth.js";
 import { addCredit, recentUsage, isSubscribed, MONTHLY_AI_CREDIT_EUR, SUBSCRIPTION_PRICE_EUR } from "../lib/billing.js";
 import { reqBaseUrl } from "../lib/req-url.js";
 
@@ -260,6 +261,29 @@ router.post("/projects/:id/stripe/dashboard", async (req, res) => {
 
 // ── 3. Checkout: pay for a class / strippenkaart (one-off) or abonnement (subscription) ──
 // Direct charge on the studio's connected account → money goes to the studio, no platform fee.
+// List recent successful card payments on the studio's connected account — for the dashboard's
+// Betalingen/Kassa reconciliation (match Tap-to-Pay payments from the Stripe app to appointments by
+// time). Admin-only.
+router.get("/projects/:id/stripe/payments", async (req, res) => {
+  const projectId = Number(req.params.id);
+  if (isNaN(projectId)) { res.status(400).json({ error: "Invalid project ID" }); return; }
+  const u = await getStudioUser(projectId, tokenFrom(req as any));
+  if (!u || u.role !== "admin") { res.status(401).json({ error: "Niet ingelogd." }); return; }
+  try {
+    const [row] = await db.select().from(projectStripe).where(eq(projectStripe.projectId, projectId));
+    if (!row || !row.accountId) { res.json({ connected: false, payments: [] }); return; }
+    const list = await stripeReq("GET", "charges?limit=50", undefined, row.accountId);
+    const payments = (Array.isArray(list.data) ? list.data : [])
+      .filter((c: any) => c && c.paid && c.status === "succeeded" && !c.refunded)
+      .map((c: any) => ({
+        id: c.id, amount: c.amount, created: c.created, currency: c.currency,
+        last4: c.payment_method_details?.card?.last4 || c.payment_method_details?.card_present?.last4 || "",
+        brand: c.payment_method_details?.card?.brand || c.payment_method_details?.card_present?.brand || "",
+      }));
+    res.json({ connected: row.chargesEnabled === "true", payments });
+  } catch (err) { logger.error({ err, projectId }, "[stripe] payments failed"); res.status(500).json({ error: "Betalingen ophalen mislukt.", payments: [] }); }
+});
+
 router.post("/projects/:id/stripe/checkout", async (req, res) => {
   const projectId = Number(req.params.id);
   if (isNaN(projectId)) { res.status(400).json({ error: "Invalid project ID" }); return; }

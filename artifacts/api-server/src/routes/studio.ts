@@ -259,6 +259,26 @@ router.post("/projects/:id/studio/my-gcal/disconnect", body, async (req, res) =>
   catch (err) { logger.error({ err, projectId }, "[studio] my-gcal disconnect failed"); res.status(500).json({ error: "Ontkoppelen mislukt." }); }
 });
 
+// Kassa/Betalingen: confirm a Stripe payment (from Tap-to-Pay in the Stripe app) as reconciled — link
+// it to an appointment/behandeling (name) or a walk-in ("Losse verkoop") and record it in the sales so
+// omzet/cijfers add up. Idempotent on the Stripe charge id (paymentIntent), so re-confirming is safe.
+router.post("/projects/:id/studio/pos-confirm", body, async (req, res) => {
+  const u = await authed(req, res); if (!u) return;
+  const projectId = pid(req);
+  const paymentIntent = String(req.body?.paymentIntent ?? "").trim().slice(0, 120);
+  const amountCents = Math.round(Number(req.body?.amount) || 0);       // Stripe amount is in cents
+  const name = (String(req.body?.name ?? "").trim().slice(0, 120)) || "Kassa";
+  const method = (String(req.body?.method ?? "pin").trim().slice(0, 20)) || "pin";
+  const date = (String(req.body?.date ?? "").slice(0, 10)) || ymd(new Date());
+  if (!paymentIntent || amountCents <= 0) { res.status(400).json({ error: "Ongeldige betaling." }); return; }
+  try {
+    const [ex] = await db.select().from(studioPurchases).where(and(eq(studioPurchases.projectId, projectId), eq(studioPurchases.paymentIntent, paymentIntent)));
+    if (ex) { res.json({ ok: true, already: true }); return; }
+    await db.insert(studioPurchases).values({ projectId, email: "", type: method, name, amount: amountCents / 100, paymentIntent, date });
+    res.json({ ok: true });
+  } catch (err) { logger.error({ err, projectId }, "[studio] pos-confirm failed"); res.status(500).json({ error: "Opslaan mislukt." }); }
+});
+
 // ── Data + booking endpoints ──────────────────────────────────────────────
 
 // Role-aware snapshot used to hydrate the booking app (replaces reading localStorage).
