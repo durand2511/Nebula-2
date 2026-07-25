@@ -284,6 +284,50 @@ router.get("/projects/:id/stripe/payments", async (req, res) => {
   } catch (err) { logger.error({ err, projectId }, "[stripe] payments failed"); res.status(500).json({ error: "Betalingen ophalen mislukt.", payments: [] }); }
 });
 
+// ── Connect the studio's OWN (full/Standard) Stripe account via OAuth ──
+// So the salon can use the Stripe app's Tap to Pay AND the dashboard reads those same payments (one
+// account for both). One-time platform setup: STRIPE_CONNECT_CLIENT_ID (ca_…) + register the redirect
+// URI "<host>/api/stripe/oauth/callback" in the Stripe Connect settings.
+router.post("/projects/:id/stripe/oauth-start", json({ limit: "8kb" }), async (req, res) => {
+  const projectId = Number(req.params.id);
+  if (isNaN(projectId)) { res.status(400).json({ error: "Invalid project ID" }); return; }
+  const u = await getStudioUser(projectId, tokenFrom(req as any));
+  if (!u || u.role !== "admin") { res.status(401).json({ error: "Niet ingelogd." }); return; }
+  const clientId = process.env.STRIPE_CONNECT_CLIENT_ID || "";
+  if (!clientId) { res.status(503).json({ error: "Stripe-koppeling is nog niet ingesteld door het platform." }); return; }
+  const base = (process.env.PUBLIC_API_URL || reqBaseUrl(req as any)).replace(/\/+$/, "");
+  const p = new URLSearchParams({
+    response_type: "code", client_id: clientId, scope: "read_write",
+    redirect_uri: `${base}/api/stripe/oauth/callback`,
+    state: `${projectId}.${Math.random().toString(36).slice(2)}`,
+    "stripe_user[country]": "NL",
+  });
+  res.json({ url: "https://connect.stripe.com/oauth/authorize?" + p.toString() });
+});
+
+router.get("/stripe/oauth/callback", async (req, res) => {
+  const page = (t: string, m: string) => `<!doctype html><meta charset="utf-8"><title>${t}</title><body style="font-family:system-ui,-apple-system,Segoe UI,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#f4f4fb"><div style="max-width:420px;text-align:center;padding:30px;background:#fff;border-radius:16px;box-shadow:0 10px 40px rgba(0,0,0,.12)"><h2 style="margin:0 0 8px">${t}</h2><p style="color:#6b7280;margin:0 0 16px">${m}</p><a href="/beheer.html" style="display:inline-block;background:#5b4fe9;color:#fff;text-decoration:none;padding:11px 20px;border-radius:10px;font-weight:600">Terug naar dashboard</a></div>`;
+  try {
+    const code = String(req.query.code || "");
+    const state = String(req.query.state || "");
+    if (String(req.query.error || "") || !code) { res.status(400).send(page("Koppeling geannuleerd", "Sluit dit venster en probeer opnieuw.")); return; }
+    const projectId = Number(state.split(".")[0]);
+    if (isNaN(projectId)) { res.status(400).send(page("Ongeldig", "Kon de koppeling niet verifiëren.")); return; }
+    const tok = await fetch("https://connect.stripe.com/oauth/token", {
+      method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ grant_type: "authorization_code", code, client_secret: process.env.STRIPE_SECRET_KEY || "" }).toString(),
+    }).then((r) => r.json());
+    const acct = tok?.stripe_user_id;
+    if (!acct) { res.status(400).send(page("Koppelen mislukt", tok?.error_description || "Kon je Stripe-account niet koppelen.")); return; }
+    let enabled = "false";
+    try { const a = await stripeReq("GET", `accounts/${acct}`); enabled = a?.charges_enabled ? "true" : "false"; } catch { /* status best-effort */ }
+    const [ex] = await db.select().from(projectStripe).where(eq(projectStripe.projectId, projectId));
+    if (ex) await db.update(projectStripe).set({ accountId: acct, chargesEnabled: enabled }).where(eq(projectStripe.projectId, projectId));
+    else await db.insert(projectStripe).values({ projectId, accountId: acct, chargesEnabled: enabled });
+    res.send(page("Stripe gekoppeld ✓", "Je eigen Stripe-account is gekoppeld. Je pinbetalingen verschijnen nu automatisch in je Kassa."));
+  } catch (e) { logger.error({ err: e }, "[stripe] oauth callback failed"); res.status(500).send(page("Er ging iets mis", "Probeer de koppeling opnieuw.")); }
+});
+
 router.post("/projects/:id/stripe/checkout", async (req, res) => {
   const projectId = Number(req.params.id);
   if (isNaN(projectId)) { res.status(400).json({ error: "Invalid project ID" }); return; }
