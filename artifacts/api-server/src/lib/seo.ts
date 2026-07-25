@@ -29,7 +29,10 @@ function jaccard(a: string, b: string): number {
   return inter / (ta.size + tb.size - inter);
 }
 
-type Ctx = { studio: string; logo: string; accent: string; domain: string; description: string; language: string; author: string };
+type Ctx = { studio: string; logo: string; accent: string; domain: string; description: string; language: string; author: string;
+  // Optional per-run local focus for blog articles: rotate the target city across the site's own
+  // location pages so blogs spread over cities (not only the home town) and each links to a location page.
+  targetCity?: string; locHref?: string };
 type Brief = {
   keyword: string; searchIntent: string; secondaryKeywords: string[]; audience: string;
   title: string; metaTitle: string; metaDescription: string;
@@ -123,6 +126,7 @@ export async function suggestTopics(ctx: Ctx, used: string[], n = 6): Promise<{ 
     `Je bent SEO-strateeg voor "${ctx.studio}" (${ctx.description || ctx.studio}). Taal: ${ctx.language}.\n` +
     `Stel ${n} artikelonderwerpen voor die samen een CONTENTCLUSTER vormen rond de kernpropositie (long-tail, lage concurrentie, lokaal waar mogelijk). ` +
     `BELANGRIJK: kies onderwerpen die duidelijk VERSCHILLEN van wat al bestaat — geen herhaling, varieer de invalshoek/subniche.\n` +
+    (ctx.targetCity ? `LOKALE FOCUS: richt deze onderwerpen op inwoners van ${ctx.targetCity} en directe omgeving (niet op de thuisplaats) — de dienst is online, dus mensen in ${ctx.targetCity} kunnen gewoon meedoen. Verwerk "${ctx.targetCity}" natuurlijk in de titel/het zoekwoord.\n` : "") +
     `Formuleer de "title" bij voorkeur als een VRAAG zoals mensen die letterlijk in Google typen (bijv. "Wat is ...?", "Hoe ...?", "Kan ... helpen bij ...?", "Waarom ...?", "Helpt ... tegen ...?") — dit wint de "Mensen vragen ook"- en snippet-posities. Voeg de plaats/regio toe waar dat natuurlijk past. Het "keyword" blijft het kernzoekwoord (geen vraagvorm).\n` +
     `Al gebruikt (titels + zoekwoorden), vermijd deze en alles wat er sterk op lijkt: ${used.slice(0, 80).join(" | ") || "(geen)"}.\n` +
     `PURE JSON-array: [{"title":"...","keyword":"hoofdzoekwoord"}]. Geen uitleg.`, 700);
@@ -157,6 +161,7 @@ async function buildBrief(ctx: Ctx, topic: { title: string; keyword: string }): 
   };
   const b = await aiJson<Brief>(
     `Maak een SEO-contentbrief (taal: ${ctx.language}) voor "${ctx.studio}" (${ctx.description || ctx.studio}) over "${topic.title}" (zoekwoord: ${topic.keyword || topic.title}). Lokaal/niche-specifiek waar passend.\n` +
+    (ctx.targetCity ? `LOKALE FOCUS: dit artikel richt zich op ${ctx.targetCity} en omgeving (online dienst, dus toegankelijk vanuit ${ctx.targetCity}).\n` : "") +
     `PURE JSON met sleutels: keyword, searchIntent ("informatief"|"lokaal"|"commercieel"|"transactioneel"), secondaryKeywords (3-6), audience, ` +
     `title, metaTitle (max 60), metaDescription (max 155), outline (4-7 items: {"h2","h3":[...]}), ` +
     `faq (3-5 items: {"q","a"} — korte, concrete antwoorden), internalLinkIdeas ([{"anchor","targetKeyword"}]), ` +
@@ -181,6 +186,7 @@ async function writeBodyHtml(ctx: Ctx, brief: Brief): Promise<string> {
     `Titel: ${brief.title}\nZoekwoord: ${brief.keyword}\nSecundair: ${(brief.secondaryKeywords || []).join(", ")}\nDoelgroep: ${brief.audience}\nIntentie: ${brief.searchIntent}\n` +
     `Outline: ${JSON.stringify(brief.outline)}\n` +
     `Eisen: minimaal 1500 woorden (tenzij het onderwerp klein is), concrete voorbeelden, lokaal/niche waar kan, korte alinea's, duidelijke koppen, natuurlijke zoekwoorden (geen stuffing), eindig met een korte conclusie + duidelijke call-to-action.\n` +
+    (ctx.locHref && ctx.targetCity ? `VERPLICHTE INTERNE LINK: verwijs precies één keer, op een natuurlijke plek in de lopende tekst, naar de online lessen voor ${ctx.targetCity} met exact deze href: <a href="${ctx.locHref}">…</a>. Kies zelf een natuurlijke ankertekst (bijv. "online ${brief.keyword} in ${ctx.targetCity}"). Verzin GEEN andere interne links naar niet-bestaande pagina's.\n` : "") +
     `Geef ALLEEN de HTML terug (geen JSON, geen markdown-fences, geen uitleg). Toegestane tags: <h2>,<h3>,<p>,<ul>,<ol>,<li>,<strong>,<blockquote>,<a>. Geen <html>/<head>/<h1>/<img>.`,
     8000, 240000);
   // Clean any stray fences/prose; keep from the first real tag onward.
@@ -550,6 +556,19 @@ function locationConfig(rows: { path: string; content: string }[]): { service: s
   if (/^(off|none|geen|uit)$/i.test(c)) return null; // explicitly turned off for this site
   return { service: c || "training" };
 }
+// For sites that HAVE location pages: rotate a blog's local focus across those cities so blog topics
+// spread over the region (not only the home town) and each blog can link to a real location page.
+// Returns null for sites without locations → blog generation is completely unchanged for them.
+function pickBlogCity(files: { path: string; content: string }[], seq: number): { city: string; href: string } | null {
+  if (!locationConfig(files)) return null;
+  const slugs = files.map((f) => (f.path.match(/^locaties\/([a-z0-9-]+)\.html$/) || [])[1]).filter(Boolean) as string[];
+  const cities = [...new Set(slugs.map((s) => NL_LOCATIONS.find((l) => locSlug(l.city) === s)?.city).filter(Boolean) as string[])];
+  if (cities.length < 2) return null; // need a spread to bother
+  cities.sort((a, b) => NL_LOCATIONS.findIndex((l) => l.city === a) - NL_LOCATIONS.findIndex((l) => l.city === b));
+  const pool = cities.slice(1); // skip the home town (earliest in the list) to actively spread outward
+  const city = pool[((seq % pool.length) + pool.length) % pool.length];
+  return { city, href: `/locaties/${locSlug(city)}.html` };
+}
 // A short, safe service phrase for the "Online <service> in <city>" title when no explicit one is set
 // (used when auto-SEO turns locations on by default). Keeps it generic so it fits any business.
 function deriveService(ctx: Ctx): string {
@@ -888,6 +907,9 @@ export async function publishArticle(projectId: number, isoDate: string, opts?: 
   const pastTopics = past.map((p) => ({ title: p.title, query: p.query }));
   const used = past.map((p) => p.title).concat(past.map((p) => p.query).filter(Boolean));
   const newWebsite = publishedPast.length < 3;
+  // Rotate the blog's local focus across the site's own location cities (spread + internal link). Only
+  // affects location-enabled sites; wrapped so a hiccup here can never block a normal blog run.
+  try { const bc = pickBlogCity(files, publishedPast.length); if (bc) { ctx.targetCity = bc.city; ctx.locHref = bc.href; } } catch { /* best-effort */ }
   const threshold = (await getSettings(projectId)).autoPublishMin;
 
   // Candidate topics. In AUTO mode we try several (freshest first) so we can keep going until one
