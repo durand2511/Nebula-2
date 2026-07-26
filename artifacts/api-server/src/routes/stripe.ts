@@ -273,14 +273,17 @@ router.get("/projects/:id/stripe/payments", async (req, res) => {
     const [row] = await db.select().from(projectStripe).where(eq(projectStripe.projectId, projectId));
     if (!row || !row.accountId) { res.json({ connected: false, payments: [] }); return; }
     const list = await stripeReq("GET", "charges?limit=50", undefined, row.accountId);
-    const payments = (Array.isArray(list.data) ? list.data : [])
+    const raw = Array.isArray(list.data) ? list.data : [];
+    const payments = raw
       .filter((c: any) => c && c.paid && c.status === "succeeded" && !c.refunded)
       .map((c: any) => ({
         id: c.id, amount: c.amount, created: c.created, currency: c.currency,
         last4: c.payment_method_details?.card?.last4 || c.payment_method_details?.card_present?.last4 || "",
         brand: c.payment_method_details?.card?.brand || c.payment_method_details?.card_present?.brand || "",
       }));
-    res.json({ connected: row.chargesEnabled === "true", payments });
+    const sk = process.env.STRIPE_SECRET_KEY || "";
+    const debug = { mode: sk.startsWith("sk_live") ? "live" : (sk.startsWith("sk_test") ? "test" : "unknown"), rawCount: raw.length, statuses: raw.slice(0, 5).map((c: any) => ({ st: c.status, paid: c.paid, amt: c.amount, live: c.livemode })) };
+    res.json({ connected: row.chargesEnabled === "true", payments, debug });
   } catch (err) { logger.error({ err, projectId }, "[stripe] payments failed"); res.status(500).json({ error: "Betalingen ophalen mislukt.", payments: [] }); }
 });
 
