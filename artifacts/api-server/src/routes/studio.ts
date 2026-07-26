@@ -334,7 +334,8 @@ router.get("/projects/:id/studio/state", async (req, res) => {
       const codes = await db.select().from(studioCodes).where(eq(studioCodes.projectId, projectId));
       out.codes = codes.map((c) => ({ id: c.id, code: c.code, kind: c.kind, value: c.value, balance: c.balance, expiresAt: c.expiresAt, maxUses: c.maxUses, uses: c.uses }));
       const [st] = await db.select().from(studioSettings).where(eq(studioSettings.projectId, projectId));
-      out.settings = { ownerReport: st?.ownerReport || "off", reviewUrl: st?.reviewUrl || "" };
+      let svc: unknown[] = []; try { svc = JSON.parse(st?.services || "[]"); if (!Array.isArray(svc)) svc = []; } catch { svc = []; }
+      out.settings = { ownerReport: st?.ownerReport || "off", reviewUrl: st?.reviewUrl || "", services: svc };
       // Subscriber payment status: who has a running (monthly) membership and whether it's still paid.
       // validUntil is bumped +32d on each Stripe invoice.paid; needsPayment is set on repeated failure.
       const nameByEmail: Record<string, string> = {}; users.forEach((uu) => { nameByEmail[uu.email] = uu.name; });
@@ -816,13 +817,24 @@ router.post("/projects/:id/studio/settings", body, async (req, res) => {
   if (u.role !== "admin") { res.status(403).json({ error: "Geen rechten." }); return; }
   const projectId = pid(req as any); const b = req.body || {};
   const ownerReport = ["off", "weekly", "monthly"].includes(b.ownerReport) ? b.ownerReport : undefined;
+  // Treatment/dienst catalog: [{name, price, duration}] — normalised + capped (name+price only required).
+  let services: string | undefined;
+  if (Array.isArray(b.services)) {
+    const clean = b.services.slice(0, 200).map((s: any) => ({
+      name: String(s?.name ?? "").trim().slice(0, 120),
+      price: Math.max(0, Math.round(Number(s?.price) || 0)),
+      duration: Math.max(0, Math.round(Number(s?.duration) || 0)),
+    })).filter((s: any) => s.name);
+    services = JSON.stringify(clean);
+  }
   try {
     const [ex] = await db.select().from(studioSettings).where(eq(studioSettings.projectId, projectId));
     const patch: Record<string, unknown> = { updatedAt: new Date() };
     if (ownerReport !== undefined) patch.ownerReport = ownerReport;
     if (b.reviewUrl !== undefined) patch.reviewUrl = String(b.reviewUrl || "").trim().slice(0, 500);
+    if (services !== undefined) patch.services = services;
     if (ex) await db.update(studioSettings).set(patch).where(eq(studioSettings.projectId, projectId));
-    else await db.insert(studioSettings).values({ projectId, ownerReport: ownerReport || "off", reviewUrl: String(b.reviewUrl || "").trim().slice(0, 500) });
+    else await db.insert(studioSettings).values({ projectId, ownerReport: ownerReport || "off", reviewUrl: String(b.reviewUrl || "").trim().slice(0, 500), services: services || "[]" });
     res.json({ ok: true });
   } catch (err) { logger.error({ err, projectId }, "[studio] settings failed"); res.status(500).json({ error: "Opslaan mislukt." }); }
 });

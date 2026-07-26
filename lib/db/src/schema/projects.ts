@@ -388,6 +388,7 @@ export const studioSettings = pgTable("studio_settings", {
   projectId: integer("project_id").primaryKey().references(() => projects.id, { onDelete: "cascade" }),
   ownerReport: text("owner_report").notNull().default("off"),   // off | weekly | monthly — auto report to admins
   reviewUrl: text("review_url").notNull().default(""),          // Google review link; set = auto review request after 1st class
+  services: text("services").notNull().default("[]"),           // JSON array of {name, price, duration} — the treatment/dienst catalog (no time)
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
