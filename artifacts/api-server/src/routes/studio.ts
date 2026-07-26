@@ -16,7 +16,7 @@ import { verifyStripeSession, stripeRefund, cancelStripeSubscription } from "./s
 import { getInvoiceSettings, createInvoice, renderInvoiceHtml, renderInvoicePdf } from "../lib/invoice.js";
 import { reqBaseUrl } from "../lib/req-url.js";
 import { ensureCalendar } from "../lib/calendar.js";
-import { gcalConfigured, authUrlUser, gcalStatusUser, disconnectGcalUser } from "../lib/gcal.js";
+import { gcalConfigured, authUrlUser, gcalStatusUser, disconnectGcalUser, pushAllTeachers } from "../lib/gcal.js";
 
 const router = Router();
 const body = json({ limit: "64kb" });
@@ -395,6 +395,7 @@ router.post("/projects/:id/studio/classes", body, async (req, res) => {
       const [c] = await db.insert(studioClasses).values({ ...common, date: ymd(d) }).returning();
       if (!first) first = c;
     }
+    void pushAllTeachers(projectId); // sync every connected staff/admin Google Calendar (no-op if none)
     res.json({ ok: true, class: first ? clsOut(first) : null, count: weeks });
   } catch (err) { logger.error({ err, projectId }, "[studio] create class failed"); res.status(500).json({ error: "Les toevoegen mislukt." }); }
 });
@@ -408,6 +409,7 @@ router.delete("/projects/:id/studio/classes/:cid", async (req, res) => {
     if (!c) { res.status(404).json({ error: "Les niet gevonden." }); return; }
     if (u.role === "teacher" && c.teacherEmail !== u.email) { res.status(403).json({ error: "Niet jouw les." }); return; }
     await db.delete(studioClasses).where(eq(studioClasses.id, cid));
+    void pushAllTeachers(projectId); // sync every connected staff/admin Google Calendar (removes the event)
     res.json({ ok: true });
   } catch (err) { logger.error({ err, projectId }, "[studio] delete class failed"); res.status(500).json({ error: "Verwijderen mislukt." }); }
 });

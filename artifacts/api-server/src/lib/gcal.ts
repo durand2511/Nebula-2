@@ -7,7 +7,7 @@
  * GOOGLE_CLIENT_ID + GOOGLE_CLIENT_SECRET in the environment. The redirect URI is
  * <live-host>/api/gcal/callback.
  */
-import { db, projectGcal, projectGcalUser, studioClasses } from "@workspace/db";
+import { db, projectGcal, projectGcalUser, studioClasses, studioUsers } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
 import { logger } from "./logger";
 import type { Lesson } from "./calendar.js";
@@ -243,7 +243,11 @@ async function getUserAccessToken(projectId: number, userEmail: string): Promise
  *  no display-name matching). */
 export async function getTeacherLessons(projectId: number, teacherEmail: string): Promise<Lesson[]> {
   const em = teacherEmail.toLowerCase();
-  const rows = await db.select().from(studioClasses).where(and(eq(studioClasses.projectId, projectId), eq(studioClasses.teacherEmail, em)));
+  // An admin/owner syncs the WHOLE salon agenda to their calendar; a teacher only their own lessons.
+  const [uu] = await db.select().from(studioUsers).where(and(eq(studioUsers.projectId, projectId), eq(studioUsers.email, em)));
+  const rows = uu?.role === "admin"
+    ? await db.select().from(studioClasses).where(eq(studioClasses.projectId, projectId))
+    : await db.select().from(studioClasses).where(and(eq(studioClasses.projectId, projectId), eq(studioClasses.teacherEmail, em)));
   return rows.map((c) => ({
     id: String(c.id), title: c.title, date: c.date, time: c.time, endTime: c.endTime || undefined,
     mode: c.mode, onlineLink: c.onlineLink || undefined, onlineInfo: c.onlineInfo || undefined, teacher: c.teacher || undefined,
