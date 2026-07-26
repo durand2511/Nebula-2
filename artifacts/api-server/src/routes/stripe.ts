@@ -288,7 +288,8 @@ router.get("/projects/:id/stripe/payments", async (req, res) => {
           brand: pmd.card?.brand || pmd.card_present?.brand || "",
         };
       });
-    res.json({ connected: row.chargesEnabled === "true", payments });
+    const debug = { piCount: raw.length, statuses: raw.slice(0, 8).map((p: any) => ({ st: p.status, amt: p.amount, cap: p.capture_method, live: p.livemode })) };
+    res.json({ connected: row.chargesEnabled === "true", payments, debug });
   } catch (err) { logger.error({ err, projectId }, "[stripe] payments failed"); res.status(500).json({ error: "Betalingen ophalen mislukt.", payments: [] }); }
 });
 
