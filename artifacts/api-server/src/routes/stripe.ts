@@ -288,7 +288,14 @@ router.get("/projects/:id/stripe/payments", async (req, res) => {
           brand: pmd.card?.brand || pmd.card_present?.brand || "",
         };
       });
-    const debug = { piCount: raw.length, statuses: raw.slice(0, 8).map((p: any) => ({ st: p.status, amt: p.amount, cap: p.capture_method, live: p.livemode })) };
+    let acct: any = {};
+    try { acct = await stripeReq("GET", `accounts/${row.accountId}`); } catch (e: any) { acct = { err: String(e?.message || e) }; }
+    const debug = {
+      accountId: row.accountId,
+      piCount: raw.length,
+      statuses: raw.slice(0, 8).map((p: any) => ({ st: p.status, amt: p.amount })),
+      acct: acct.err || { email: acct.email, name: acct.business_profile?.name || acct.settings?.dashboard?.display_name, country: acct.country, type: acct.type, charges_enabled: acct.charges_enabled },
+    };
     res.json({ connected: row.chargesEnabled === "true", payments, debug });
   } catch (err) { logger.error({ err, projectId }, "[stripe] payments failed"); res.status(500).json({ error: "Betalingen ophalen mislukt.", payments: [] }); }
 });
