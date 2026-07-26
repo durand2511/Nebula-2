@@ -272,30 +272,23 @@ router.get("/projects/:id/stripe/payments", async (req, res) => {
   try {
     const [row] = await db.select().from(projectStripe).where(eq(projectStripe.projectId, projectId));
     if (!row || !row.accountId) { res.json({ connected: false, payments: [] }); return; }
-    const list = await stripeReq("GET", "charges?limit=50", undefined, row.accountId);
+    // The Stripe dashboard "Payments" (and Tap to Pay in the Stripe app) are PaymentIntents — list
+    // those, not the legacy /charges list (which can miss Tap to Pay / Terminal payments). Expand the
+    // latest charge to read the card brand/last4.
+    const list = await stripeReq("GET", "payment_intents?limit=50&expand[]=data.latest_charge", undefined, row.accountId);
     const raw = Array.isArray(list.data) ? list.data : [];
     const payments = raw
-      .filter((c: any) => c && c.paid && c.status === "succeeded" && !c.refunded)
-      .map((c: any) => ({
-        id: c.id, amount: c.amount, created: c.created, currency: c.currency,
-        last4: c.payment_method_details?.card?.last4 || c.payment_method_details?.card_present?.last4 || "",
-        brand: c.payment_method_details?.card?.brand || c.payment_method_details?.card_present?.brand || "",
-      }));
-    const sk = process.env.STRIPE_SECRET_KEY || "";
-    let pi: any = {}, bal: any = {}, acct: any = {};
-    try { pi = await stripeReq("GET", "payment_intents?limit=5", undefined, row.accountId); } catch (e: any) { pi = { err: String(e?.message || e) }; }
-    try { bal = await stripeReq("GET", "balance", undefined, row.accountId); } catch (e: any) { bal = { err: String(e?.message || e) }; }
-    try { acct = await stripeReq("GET", `accounts/${row.accountId}`); } catch (e: any) { acct = { err: String(e?.message || e) }; }
-    const debug = {
-      mode: sk.startsWith("sk_live") ? "live" : (sk.startsWith("sk_test") ? "test" : "unknown"),
-      accountId: row.accountId,
-      chargeCount: raw.length,
-      piCount: Array.isArray(pi.data) ? pi.data.length : (pi.err || "?"),
-      piStatuses: Array.isArray(pi.data) ? pi.data.slice(0, 5).map((p: any) => ({ st: p.status, amt: p.amount, live: p.livemode })) : [],
-      balance: bal.err || { avail: (bal.available || []).map((b: any) => b.amount), pending: (bal.pending || []).map((b: any) => b.amount) },
-      acct: acct.err || { email: acct.email, country: acct.country, charges_enabled: acct.charges_enabled, details_submitted: acct.details_submitted },
-    };
-    res.json({ connected: row.chargesEnabled === "true", payments, debug });
+      .filter((p: any) => p && p.status === "succeeded")
+      .map((p: any) => {
+        const ch = p.latest_charge && typeof p.latest_charge === "object" ? p.latest_charge : null;
+        const pmd = (ch && ch.payment_method_details) || {};
+        return {
+          id: p.id, amount: p.amount_received || p.amount, created: p.created, currency: p.currency,
+          last4: pmd.card?.last4 || pmd.card_present?.last4 || "",
+          brand: pmd.card?.brand || pmd.card_present?.brand || "",
+        };
+      });
+    res.json({ connected: row.chargesEnabled === "true", payments });
   } catch (err) { logger.error({ err, projectId }, "[stripe] payments failed"); res.status(500).json({ error: "Betalingen ophalen mislukt.", payments: [] }); }
 });
 
