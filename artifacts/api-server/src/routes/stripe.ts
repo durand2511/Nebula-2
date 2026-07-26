@@ -288,15 +288,7 @@ router.get("/projects/:id/stripe/payments", async (req, res) => {
           brand: pmd.card?.brand || pmd.card_present?.brand || "",
         };
       });
-    let acct: any = {};
-    try { acct = await stripeReq("GET", `accounts/${row.accountId}`); } catch (e: any) { acct = { err: String(e?.message || e) }; }
-    const debug = {
-      accountId: row.accountId,
-      piCount: raw.length,
-      statuses: raw.slice(0, 8).map((p: any) => ({ st: p.status, amt: p.amount })),
-      acct: acct.err || { email: acct.email, name: acct.business_profile?.name || acct.settings?.dashboard?.display_name, country: acct.country, type: acct.type, charges_enabled: acct.charges_enabled },
-    };
-    res.json({ connected: row.chargesEnabled === "true", payments, debug });
+    res.json({ connected: row.chargesEnabled === "true", payments });
   } catch (err) { logger.error({ err, projectId }, "[stripe] payments failed"); res.status(500).json({ error: "Betalingen ophalen mislukt.", payments: [] }); }
 });
 
@@ -342,6 +334,28 @@ router.get("/stripe/oauth/callback", async (req, res) => {
     else await db.insert(projectStripe).values({ projectId, accountId: acct, chargesEnabled: enabled });
     res.send(page("Stripe gekoppeld ✓", "Je eigen Stripe-account is gekoppeld. Je pinbetalingen verschijnen nu automatisch in je Kassa."));
   } catch (e) { logger.error({ err: e }, "[stripe] oauth callback failed"); res.status(500).send(page("Er ging iets mis", "Probeer de koppeling opnieuw.")); }
+});
+
+// Disconnect the studio's Stripe account (e.g. the wrong account was connected). Best-effort OAuth
+// deauthorize, then remove the stored link so they can connect the right account.
+router.post("/projects/:id/stripe/disconnect", json({ limit: "8kb" }), async (req, res) => {
+  const projectId = Number(req.params.id);
+  if (isNaN(projectId)) { res.status(400).json({ error: "Invalid project ID" }); return; }
+  const u = await getStudioUser(projectId, tokenFrom(req as any));
+  if (!u || u.role !== "admin") { res.status(401).json({ error: "Niet ingelogd." }); return; }
+  try {
+    const [row] = await db.select().from(projectStripe).where(eq(projectStripe.projectId, projectId));
+    if (row?.accountId && process.env.STRIPE_CONNECT_CLIENT_ID) {
+      try {
+        await fetch("https://connect.stripe.com/oauth/deauthorize", {
+          method: "POST", headers: { Authorization: `Bearer ${process.env.STRIPE_SECRET_KEY || ""}`, "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({ client_id: process.env.STRIPE_CONNECT_CLIENT_ID, stripe_user_id: row.accountId }).toString(),
+        });
+      } catch (e) { logger.warn({ err: e, projectId }, "[stripe] deauthorize best-effort failed"); }
+    }
+    await db.delete(projectStripe).where(eq(projectStripe.projectId, projectId));
+    res.json({ ok: true });
+  } catch (err) { logger.error({ err, projectId }, "[stripe] disconnect failed"); res.status(500).json({ error: "Ontkoppelen mislukt." }); }
 });
 
 router.post("/projects/:id/stripe/checkout", async (req, res) => {
