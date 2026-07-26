@@ -822,7 +822,7 @@ router.post("/projects/:id/studio/settings", body, async (req, res) => {
   if (Array.isArray(b.services)) {
     const clean = b.services.slice(0, 200).map((s: any) => ({
       name: String(s?.name ?? "").trim().slice(0, 120),
-      price: Math.max(0, Math.round(Number(s?.price) || 0)),
+      price: Math.max(0, Math.round((Number(s?.price) || 0) * 100) / 100),
       duration: Math.max(0, Math.round(Number(s?.duration) || 0)),
     })).filter((s: any) => s.name);
     services = JSON.stringify(clean);
