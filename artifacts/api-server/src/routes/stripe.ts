@@ -282,7 +282,19 @@ router.get("/projects/:id/stripe/payments", async (req, res) => {
         brand: c.payment_method_details?.card?.brand || c.payment_method_details?.card_present?.brand || "",
       }));
     const sk = process.env.STRIPE_SECRET_KEY || "";
-    const debug = { mode: sk.startsWith("sk_live") ? "live" : (sk.startsWith("sk_test") ? "test" : "unknown"), rawCount: raw.length, statuses: raw.slice(0, 5).map((c: any) => ({ st: c.status, paid: c.paid, amt: c.amount, live: c.livemode })) };
+    let pi: any = {}, bal: any = {}, acct: any = {};
+    try { pi = await stripeReq("GET", "payment_intents?limit=5", undefined, row.accountId); } catch (e: any) { pi = { err: String(e?.message || e) }; }
+    try { bal = await stripeReq("GET", "balance", undefined, row.accountId); } catch (e: any) { bal = { err: String(e?.message || e) }; }
+    try { acct = await stripeReq("GET", `accounts/${row.accountId}`); } catch (e: any) { acct = { err: String(e?.message || e) }; }
+    const debug = {
+      mode: sk.startsWith("sk_live") ? "live" : (sk.startsWith("sk_test") ? "test" : "unknown"),
+      accountId: row.accountId,
+      chargeCount: raw.length,
+      piCount: Array.isArray(pi.data) ? pi.data.length : (pi.err || "?"),
+      piStatuses: Array.isArray(pi.data) ? pi.data.slice(0, 5).map((p: any) => ({ st: p.status, amt: p.amount, live: p.livemode })) : [],
+      balance: bal.err || { avail: (bal.available || []).map((b: any) => b.amount), pending: (bal.pending || []).map((b: any) => b.amount) },
+      acct: acct.err || { email: acct.email, country: acct.country, charges_enabled: acct.charges_enabled, details_submitted: acct.details_submitted },
+    };
     res.json({ connected: row.chargesEnabled === "true", payments, debug });
   } catch (err) { logger.error({ err, projectId }, "[stripe] payments failed"); res.status(500).json({ error: "Betalingen ophalen mislukt.", payments: [] }); }
 });
