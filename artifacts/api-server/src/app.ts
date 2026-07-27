@@ -89,12 +89,20 @@ app.use((req, res, next) => {
   findByHost(host)
     .then(async (match) => {
       if (match && match.status === "active" && match.redirectTo) {
-        // SEO domain move: 301 to the target. Keep the path only if the target really has that page
-        // (else the clean homepage URL — avoids a soft-404 homepage clone at a junk URL). Single hop.
-        const target = match.redirectTo.toLowerCase().replace(/\/+$/, "");
-        if (normalizeHost(host) === normalizeHost(target)) return next(); // never redirect a domain to itself
+        // SEO domain move: 301 to the target. `redirect_to` is "host" or "host/path".
+        const to = match.redirectTo.toLowerCase().replace(/^https?:\/\//, "");
+        const targetHost = to.split("/")[0];
+        if (normalizeHost(host) === normalizeHost(targetHost)) return next(); // never redirect a domain to itself
+        const specificPath = to.slice(targetHost.length).replace(/^\/+|\/+$/g, "");
+        if (specificPath) {
+          // A specific landing page → send EVERYTHING there, so all the old domain's link equity is
+          // consolidated onto that one page (single hop; trailing slash = the real page, not the stub).
+          return res.redirect(301, "https://" + targetHost + "/" + specificPath + "/");
+        }
+        // Bare host target → keep the path only if the target really has that page (else the clean
+        // homepage URL — avoids a soft-404 homepage clone at a junk URL). Single hop.
         const keep = await projectHasPage(match.projectId, req.path).catch(() => false);
-        return res.redirect(301, keep ? ("https://" + target + req.originalUrl) : ("https://" + target + "/"));
+        return res.redirect(301, keep ? ("https://" + targetHost + req.originalUrl) : ("https://" + targetHost + "/"));
       }
       if (match && match.status === "active") return serveProjectSite(match.projectId, req, res);
       // NEVER let a browser cache these. Without this, a machine that visited the domain during DNS
