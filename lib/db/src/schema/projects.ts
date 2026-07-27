@@ -549,6 +549,21 @@ export const studioContacts = pgTable("studio_contacts", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 }, (t) => ({ projEmail: uniqueIndex("studio_contacts_proj_email").on(t.projectId, t.email) }));
 
+// Retail products / stock. Sold at the till: a Stripe payment whose amount matches a product's price is
+// auto-reconciled → stock -1. When stock hits `lowStock`, the supplier is e-mailed a reorder list once
+// (lowNotified guards against repeats until it's restocked above the threshold).
+export const studioProducts = pgTable("studio_products", {
+  id: serial("id").primaryKey(),
+  projectId: integer("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  name: text("name").notNull().default(""),
+  price: real("price").notNull().default(0),
+  stock: integer("stock").notNull().default(0),
+  lowStock: integer("low_stock").notNull().default(3),        // waarschuw + mail leverancier op/onder dit aantal
+  supplierEmail: text("supplier_email").notNull().default(""),
+  lowNotified: text("low_notified").notNull().default("false"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => ({ byProj: index("studio_products_proj").on(t.projectId) }));
+
 // A marketing campaign (manual now; birthday/win-back triggers reuse the same send + tracking path).
 export const studioCampaigns = pgTable("studio_campaigns", {
   id: serial("id").primaryKey(),

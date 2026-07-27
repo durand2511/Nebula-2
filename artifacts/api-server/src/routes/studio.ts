@@ -4,7 +4,7 @@
  * Classes, bookings, wallets, members & purchases follow in the next steps.
  */
 import { Router, json, type Request, type Response } from "express";
-import { db, studioUsers, studioClasses, studioMembers, studioWallets, studioCreditLots, studioBookings, studioPurchases, studioVideos, studioVideoPlans, studioVideoAccess, studioCodes, studioLocations, studioSettings, studioContacts, studioCampaigns, studioCampaignRecipients, type StudioUser } from "@workspace/db";
+import { db, studioUsers, studioClasses, studioMembers, studioWallets, studioCreditLots, studioBookings, studioPurchases, studioVideos, studioVideoPlans, studioVideoAccess, studioCodes, studioLocations, studioSettings, studioContacts, studioCampaigns, studioCampaignRecipients, studioProducts, type StudioUser } from "@workspace/db";
 import { and, eq, sql } from "drizzle-orm";
 import { logger } from "../lib/logger";
 import { hashPassword, verifyPassword } from "../lib/password.js";
@@ -338,6 +338,8 @@ router.get("/projects/:id/studio/state", async (req, res) => {
       const [st] = await db.select().from(studioSettings).where(eq(studioSettings.projectId, projectId));
       let svc: unknown[] = []; try { svc = JSON.parse(st?.services || "[]"); if (!Array.isArray(svc)) svc = []; } catch { svc = []; }
       out.settings = { ownerReport: st?.ownerReport || "off", reviewUrl: st?.reviewUrl || "", services: svc };
+      const products = await db.select().from(studioProducts).where(eq(studioProducts.projectId, projectId));
+      out.products = products.map((p) => ({ id: p.id, name: p.name, price: p.price, stock: p.stock, lowStock: p.lowStock, supplierEmail: p.supplierEmail }));
       // Subscriber payment status: who has a running (monthly) membership and whether it's still paid.
       // validUntil is bumped +32d on each Stripe invoice.paid; needsPayment is set on repeated failure.
       const nameByEmail: Record<string, string> = {}; users.forEach((uu) => { nameByEmail[uu.email] = uu.name; });
@@ -867,6 +869,42 @@ router.delete("/projects/:id/studio/locations/:lid", async (req, res) => {
     await db.update(studioClasses).set({ locationId: 0 }).where(and(eq(studioClasses.projectId, projectId), eq(studioClasses.locationId, lid)));
     res.json({ ok: true });
   } catch (err) { logger.error({ err, projectId }, "[studio] delete location failed"); res.status(500).json({ error: "Verwijderen mislukt." }); }
+});
+
+// ── Voorraad / producten ──
+// Create or update a product. Restocking above the low threshold re-arms the supplier reorder mail.
+router.post("/projects/:id/studio/products", body, async (req, res) => {
+  const u = await authed(req, res); if (!u) return;
+  if (u.role !== "admin") { res.status(403).json({ error: "Geen rechten." }); return; }
+  const projectId = pid(req as any); const b = req.body || {};
+  const name = String(b.name || "").trim().slice(0, 120);
+  if (!name) { res.status(400).json({ error: "Naam is verplicht." }); return; }
+  const price = Math.max(0, Math.round((Number(b.price) || 0) * 100) / 100);
+  const stock = Math.max(0, parseInt(b.stock, 10) || 0);
+  const lowStock = Math.max(0, parseInt(b.lowStock, 10) || 0);
+  const supplierEmail = String(b.supplierEmail || "").trim().toLowerCase().slice(0, 160);
+  try {
+    if (b.id) {
+      const [ex] = await db.select().from(studioProducts).where(and(eq(studioProducts.projectId, projectId), eq(studioProducts.id, Number(b.id))));
+      if (!ex) { res.status(404).json({ error: "Product niet gevonden." }); return; }
+      // Re-arm the reorder mail if it's restocked above the (new) threshold.
+      const lowNotified = stock > lowStock ? "false" : ex.lowNotified;
+      await db.update(studioProducts).set({ name, price, stock, lowStock, supplierEmail, lowNotified }).where(eq(studioProducts.id, ex.id));
+    } else {
+      await db.insert(studioProducts).values({ projectId, name, price, stock, lowStock, supplierEmail });
+    }
+    res.json({ ok: true });
+  } catch (err) { logger.error({ err, projectId }, "[studio] product upsert failed"); res.status(500).json({ error: "Opslaan mislukt." }); }
+});
+
+router.delete("/projects/:id/studio/products/:pid", async (req, res) => {
+  const u = await authed(req, res); if (!u) return;
+  if (u.role !== "admin") { res.status(403).json({ error: "Geen rechten." }); return; }
+  const projectId = pid(req as any); const prodId = Number(req.params.pid);
+  try {
+    await db.delete(studioProducts).where(and(eq(studioProducts.projectId, projectId), eq(studioProducts.id, prodId)));
+    res.json({ ok: true });
+  } catch (err) { logger.error({ err, projectId }, "[studio] product delete failed"); res.status(500).json({ error: "Verwijderen mislukt." }); }
 });
 
 // ── Retention marketing / campaigns ──

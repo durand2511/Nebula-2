@@ -10,7 +10,7 @@
  */
 import { Router, type IRouter, type Request, raw, json } from "express";
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { db, projectStripe, projects, studioVideoAccess, studioPurchases, studioWallets, platformUsers } from "@workspace/db";
+import { db, projectStripe, projects, studioVideoAccess, studioPurchases, studioWallets, platformUsers, studioProducts, studioClasses } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
 import { logger } from "../lib/logger";
 import { sendBookingEmail } from "../lib/email.js";
@@ -18,6 +18,8 @@ import { getSessionUser, tokenFrom } from "../lib/platform-auth.js";
 import { getSessionUser as getStudioUser } from "../lib/studio-auth.js";
 import { addCredit, recentUsage, isSubscribed, MONTHLY_AI_CREDIT_EUR, SUBSCRIPTION_PRICE_EUR } from "../lib/billing.js";
 import { reqBaseUrl } from "../lib/req-url.js";
+import { resolveSmtpConfig } from "../lib/email-config.js";
+import { sendMail } from "../lib/smtp.js";
 
 const router: IRouter = Router();
 
@@ -264,6 +266,75 @@ router.post("/projects/:id/stripe/dashboard", async (req, res) => {
 // List recent successful card payments on the studio's connected account — for the dashboard's
 // Betalingen/Kassa reconciliation (match Tap-to-Pay payments from the Stripe app to appointments by
 // time). Admin-only.
+export type ProjectPayment = { id: string; amount: number; created: number; currency: string; last4: string; brand: string };
+
+/** Succeeded Stripe payments (PaymentIntents) for a project's connected account, or [] if none. */
+export async function fetchProjectPayments(projectId: number): Promise<ProjectPayment[]> {
+  const [row] = await db.select().from(projectStripe).where(eq(projectStripe.projectId, projectId));
+  if (!row || !row.accountId) return [];
+  const list = await stripeReq("GET", "payment_intents?limit=50&expand[]=data.latest_charge", undefined, row.accountId);
+  const raw = Array.isArray(list.data) ? list.data : [];
+  return raw
+    .filter((p: any) => p && p.status === "succeeded")
+    .map((p: any) => {
+      const ch = p.latest_charge && typeof p.latest_charge === "object" ? p.latest_charge : null;
+      const pmd = (ch && ch.payment_method_details) || {};
+      return {
+        id: p.id, amount: p.amount_received || p.amount, created: p.created, currency: p.currency,
+        last4: pmd.card?.last4 || pmd.card_present?.last4 || "",
+        brand: pmd.card?.brand || pmd.card_present?.brand || "",
+      };
+    });
+}
+
+// Auto-reconcile product sales: a succeeded payment whose amount EXACTLY matches a product's price (and
+// doesn't match an appointment's price that day — those stay manual) is booked as a product sale and
+// deducts 1 from stock. Idempotent on the Stripe payment id. When a product drops to/under its lowStock
+// threshold, its supplier gets a reorder e-mail once (until restocked above the threshold).
+export async function reconcileProducts(projectId: number, payments?: ProjectPayment[]): Promise<{ deducted: number }> {
+  const products = await db.select().from(studioProducts).where(eq(studioProducts.projectId, projectId));
+  if (!products.length) return { deducted: 0 };
+  const pays = payments || await fetchProjectPayments(projectId).catch(() => []);
+  if (!pays.length) return { deducted: 0 };
+  const purchases = await db.select().from(studioPurchases).where(eq(studioPurchases.projectId, projectId));
+  const done = new Set(purchases.filter((p) => p.paymentIntent).map((p) => p.paymentIntent));
+  const classes = await db.select().from(studioClasses).where(eq(studioClasses.projectId, projectId));
+  let deducted = 0; const suppliersToNotify = new Set<string>();
+  for (const p of pays) {
+    if (done.has(p.id)) continue;
+    const amt = p.amount / 100;
+    const pday = ymdUTC(new Date(p.created * 1000));
+    // Leave it for manual reconcile if an appointment that day is priced the same (could be a treatment).
+    if (classes.some((c) => c.date === pday && Math.abs((c.price || 0) - amt) < 0.01)) continue;
+    const prod = products.find((pr) => pr.price > 0 && Math.abs(pr.price - amt) < 0.01);
+    if (!prod) continue;
+    await db.insert(studioPurchases).values({ projectId, email: "", type: "product", name: prod.name, amount: amt, paymentIntent: p.id, date: pday });
+    const newStock = Math.max(0, prod.stock - 1);
+    await db.update(studioProducts).set({ stock: newStock }).where(eq(studioProducts.id, prod.id));
+    prod.stock = newStock; done.add(p.id); deducted++;
+    if (newStock <= prod.lowStock && prod.supplierEmail && prod.lowNotified !== "true") suppliersToNotify.add(prod.supplierEmail);
+  }
+  for (const sup of suppliersToNotify) { try { await sendLowStockEmail(projectId, sup); } catch (e) { logger.warn({ err: e, projectId }, "[stock] low-stock mail failed"); } }
+  return { deducted };
+}
+
+/** E-mail a supplier the list of their products at/under the low-stock threshold; mark them notified. */
+async function sendLowStockEmail(projectId: number, supplierEmail: string): Promise<void> {
+  const all = await db.select().from(studioProducts).where(eq(studioProducts.projectId, projectId));
+  const low = all.filter((p) => p.supplierEmail.toLowerCase() === supplierEmail.toLowerCase() && p.stock <= p.lowStock && p.lowNotified !== "true");
+  if (!low.length) return;
+  const cfg = await resolveSmtpConfig(projectId);
+  const [proj] = await db.select().from(projects).where(eq(projects.id, projectId));
+  const salon = proj?.name || "de salon";
+  if (cfg) {
+    const rows = low.map((p) => `<tr><td style="padding:6px 12px;border-bottom:1px solid #eee">${p.name}</td><td style="padding:6px 12px;border-bottom:1px solid #eee;text-align:right">nog ${p.stock} op voorraad</td></tr>`).join("");
+    const html = `<div style="font-family:system-ui,Segoe UI,sans-serif;max-width:520px"><h2>Nabestelling — ${salon}</h2><p>De volgende producten zijn (bijna) op. Graag bijbestellen:</p><table style="border-collapse:collapse;width:100%"><tbody>${rows}</tbody></table><p style="color:#888;font-size:13px">Automatisch verstuurd door ${salon}.</p></div>`;
+    const text = `Nabestelling — ${salon}\n\n` + low.map((p) => `- ${p.name}: nog ${p.stock} op voorraad`).join("\n");
+    try { await sendMail(cfg, { to: supplierEmail, subject: `Nabestelling voor ${salon}`, html, text, fromName: salon }); } catch (e) { logger.warn({ err: e, projectId }, "[stock] supplier mail send failed"); }
+  }
+  for (const p of low) await db.update(studioProducts).set({ lowNotified: "true" }).where(eq(studioProducts.id, p.id));
+}
+
 router.get("/projects/:id/stripe/payments", async (req, res) => {
   const projectId = Number(req.params.id);
   if (isNaN(projectId)) { res.status(400).json({ error: "Invalid project ID" }); return; }
@@ -272,23 +343,10 @@ router.get("/projects/:id/stripe/payments", async (req, res) => {
   try {
     const [row] = await db.select().from(projectStripe).where(eq(projectStripe.projectId, projectId));
     if (!row || !row.accountId) { res.json({ connected: false, payments: [] }); return; }
-    // The Stripe dashboard "Payments" (and Tap to Pay in the Stripe app) are PaymentIntents — list
-    // those, not the legacy /charges list (which can miss Tap to Pay / Terminal payments). Expand the
-    // latest charge to read the card brand/last4.
-    const list = await stripeReq("GET", "payment_intents?limit=50&expand[]=data.latest_charge", undefined, row.accountId);
-    const raw = Array.isArray(list.data) ? list.data : [];
-    const payments = raw
-      .filter((p: any) => p && p.status === "succeeded")
-      .map((p: any) => {
-        const ch = p.latest_charge && typeof p.latest_charge === "object" ? p.latest_charge : null;
-        const pmd = (ch && ch.payment_method_details) || {};
-        return {
-          id: p.id, amount: p.amount_received || p.amount, created: p.created, currency: p.currency,
-          last4: pmd.card?.last4 || pmd.card_present?.last4 || "",
-          brand: pmd.card?.brand || pmd.card_present?.brand || "",
-        };
-      });
-    res.json({ connected: row.chargesEnabled === "true", payments });
+    const payments = await fetchProjectPayments(projectId);
+    // Auto-book product sales + deduct stock (leaves appointment-priced payments for manual reconcile).
+    const rec = await reconcileProducts(projectId, payments).catch(() => ({ deducted: 0 }));
+    res.json({ connected: row.chargesEnabled === "true", payments, reconciled: rec.deducted });
   } catch (err) { logger.error({ err, projectId }, "[stripe] payments failed"); res.status(500).json({ error: "Betalingen ophalen mislukt.", payments: [] }); }
 });
 

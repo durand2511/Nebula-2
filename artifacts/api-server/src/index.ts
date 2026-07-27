@@ -4,6 +4,7 @@ import { startReminderScheduler } from "./lib/reminders";
 import { startNudgeScheduler } from "./lib/nudges";
 import { startSeoScheduler } from "./lib/seo-scheduler";
 import { startCampaignScheduler } from "./lib/campaign-scheduler";
+import { startProductScheduler } from "./lib/product-scheduler";
 import { startDomainHealthcheck } from "./lib/domain-healthcheck";
 import { anthropic } from "@workspace/integrations-openai-ai-server";
 import { instrumentAnthropic } from "./lib/ai-usage";
@@ -36,5 +37,6 @@ app.listen(port, (err) => {
   startNudgeScheduler();
   startSeoScheduler();
   startCampaignScheduler();
+  startProductScheduler();
   startDomainHealthcheck();
 });
