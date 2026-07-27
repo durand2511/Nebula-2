@@ -102,11 +102,11 @@ export async function findActiveByHost(host: string): Promise<{ projectId: numbe
 
 /** Any domain row for a Host (any status) — lets the host router tell a PENDING (still-connecting)
  *  domain apart from a truly unknown one, so it can show a "connecting" page instead of a redirect. */
-export async function findByHost(host: string): Promise<{ projectId: number; status: string } | null> {
+export async function findByHost(host: string): Promise<{ projectId: number; status: string; redirectTo: string } | null> {
   const h = normalizeHost(host);
   if (!h || isReserved(h)) return null;
   const [row] = await db.select().from(domains).where(eq(domains.domain, h));
-  return row ? { projectId: row.projectId, status: row.status } : null;
+  return row ? { projectId: row.projectId, status: row.status, redirectTo: row.redirectTo || "" } : null;
 }
 
 /**

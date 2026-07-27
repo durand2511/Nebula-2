@@ -184,6 +184,25 @@ export function sitemapUrlsFromPaths(paths: string[]): string[] {
   return [...urls].sort();
 }
 
+/**
+ * Does the project actually have a real page for this request path? Mirrors serveProjectSite's file
+ * resolution but WITHOUT the homepage fallback — so a 301-redirect domain can send known paths to their
+ * equivalent and unknown paths to the clean homepage URL (never a soft-404 homepage clone at a junk URL).
+ */
+export async function projectHasPage(projectId: number, reqPath: string): Promise<boolean> {
+  const published = await getPublishedFiles(projectId);
+  const paths: string[] = published
+    ? Object.keys(published)
+    : (await db.select({ path: projectFiles.path }).from(projectFiles).where(eq(projectFiles.projectId, projectId))).map((r) => r.path);
+  if (!paths.length) return false;
+  let p = decodeURIComponent((reqPath || "/").split("?")[0].replace(/^\/+/, ""));
+  if (p === "" || p.endsWith("/")) p += "index.html";
+  const set = new Set(paths);
+  if (set.has(p)) return true;
+  if (!/\.[a-z0-9]+$/i.test(p) && set.has(p + ".html")) return true;
+  return false;
+}
+
 export async function serveProjectSite(projectId: number, req: Request, res: Response): Promise<void> {
   // Serve the PUBLISHED snapshot when present (draft → publish). Fall back to live files for
   // projects that haven't used publish yet (back-compat — they stay live as before).

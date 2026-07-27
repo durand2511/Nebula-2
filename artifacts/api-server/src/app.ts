@@ -7,8 +7,8 @@ import { fileURLToPath } from "node:url";
 import { timingSafeEqual } from "node:crypto";
 import router from "./routes";
 import { logger } from "./lib/logger";
-import { isReserved, findByHost, PLATFORM_HOST } from "./lib/domains";
-import { serveProjectSite } from "./lib/host-site";
+import { isReserved, findByHost, normalizeHost, PLATFORM_HOST } from "./lib/domains";
+import { serveProjectSite, projectHasPage } from "./lib/host-site";
 import { db, projectEmail } from "@workspace/db";
 import { desc } from "drizzle-orm";
 import { sendMail, smtpConfigFromEnv, type SmtpConfig } from "./lib/smtp.js";
@@ -87,7 +87,15 @@ app.use((req, res, next) => {
   const host = req.headers.host || "";
   if (isReserved(host) || req.path === "/api" || req.path.startsWith("/api/")) return next();
   findByHost(host)
-    .then((match) => {
+    .then(async (match) => {
+      if (match && match.status === "active" && match.redirectTo) {
+        // SEO domain move: 301 to the target. Keep the path only if the target really has that page
+        // (else the clean homepage URL — avoids a soft-404 homepage clone at a junk URL). Single hop.
+        const target = match.redirectTo.toLowerCase().replace(/\/+$/, "");
+        if (normalizeHost(host) === normalizeHost(target)) return next(); // never redirect a domain to itself
+        const keep = await projectHasPage(match.projectId, req.path).catch(() => false);
+        return res.redirect(301, keep ? ("https://" + target + req.originalUrl) : ("https://" + target + "/"));
+      }
       if (match && match.status === "active") return serveProjectSite(match.projectId, req, res);
       // NEVER let a browser cache these. Without this, a machine that visited the domain during DNS
       // setup keeps redirecting to the platform even after it goes live (it works on fresh machines,

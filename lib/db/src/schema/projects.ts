@@ -261,6 +261,7 @@ export const domains = pgTable("domains", {
   domain: text("domain").notNull().unique(),
   projectId: integer("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
   status: text("status").notNull().default("pending"),
+  redirectTo: text("redirect_to").notNull().default(""), // set = this domain 301-redirects here (SEO domain move), not a content host
   verifiedAt: timestamp("verified_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
