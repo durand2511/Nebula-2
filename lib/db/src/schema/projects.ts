@@ -535,6 +535,49 @@ export const studioVideoAccess = pgTable("studio_video_access", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 }, (t) => ({ projEmailCat: uniqueIndex("studio_video_access_proj_email_cat").on(t.projectId, t.email, t.category), bySub: index("studio_video_access_sub").on(t.subscription) }));
 
+// ── Retention marketing (campaigns) ──
+// A CRM contact record per customer email: the salon's marketing-consent + birthday store. The full
+// audience is DERIVED (users/bookings/purchases ∪ contacts); this row holds the fields that aren't
+// derivable — birthday + explicit marketing opt-in (AVG). No opt-in row / opt-in=false ⇒ never mailed.
+export const studioContacts = pgTable("studio_contacts", {
+  id: serial("id").primaryKey(),
+  projectId: integer("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  email: text("email").notNull(),
+  name: text("name").notNull().default(""),
+  birthdate: text("birthdate").notNull().default(""),          // yyyy-mm-dd, "" = unknown
+  marketingOptIn: text("marketing_opt_in").notNull().default("false"), // explicit consent (AVG)
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => ({ projEmail: uniqueIndex("studio_contacts_proj_email").on(t.projectId, t.email) }));
+
+// A marketing campaign (manual now; birthday/win-back triggers reuse the same send + tracking path).
+export const studioCampaigns = pgTable("studio_campaigns", {
+  id: serial("id").primaryKey(),
+  projectId: integer("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  name: text("name").notNull().default(""),
+  subject: text("subject").notNull().default(""),
+  body: text("body").notNull().default(""),
+  filter: text("filter").notNull().default("{}"),             // JSON segment {treatment, inactiveDays, birthdayWithin}
+  status: text("status").notNull().default("draft"),          // draft | scheduled | sending | sent | failed
+  scheduledAt: timestamp("scheduled_at", { withTimezone: true }),
+  sentAt: timestamp("sent_at", { withTimezone: true }),
+  totalRecipients: integer("total_recipients").notNull().default(0),
+  opens: integer("opens").notNull().default(0),
+  clicks: integer("clicks").notNull().default(0),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => ({ byProj: index("studio_campaigns_proj").on(t.projectId) }));
+
+// Per-recipient send + tracking row. Its token drives open pixel / click redirect / unsubscribe.
+export const studioCampaignRecipients = pgTable("studio_campaign_recipients", {
+  id: serial("id").primaryKey(),
+  projectId: integer("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  campaignId: integer("campaign_id").notNull(),
+  email: text("email").notNull().default(""),
+  token: text("token").notNull().default(""),                 // unique per (campaign, recipient)
+  openedAt: text("opened_at").notNull().default(""),
+  clickedAt: text("clicked_at").notNull().default(""),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => ({ byCampaign: index("studio_campaign_recip_camp").on(t.campaignId), byToken: uniqueIndex("studio_campaign_recip_token").on(t.token) }));
+
 // Discount codes / promos / gift cards. kind: percent (% off) | fixed (€ off) | gift (€ balance spent down).
 export const studioCodes = pgTable("studio_codes", {
   id: serial("id").primaryKey(),

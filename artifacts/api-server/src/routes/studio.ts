@@ -4,7 +4,7 @@
  * Classes, bookings, wallets, members & purchases follow in the next steps.
  */
 import { Router, json, type Request, type Response } from "express";
-import { db, studioUsers, studioClasses, studioMembers, studioWallets, studioCreditLots, studioBookings, studioPurchases, studioVideos, studioVideoPlans, studioVideoAccess, studioCodes, studioLocations, studioSettings, type StudioUser } from "@workspace/db";
+import { db, studioUsers, studioClasses, studioMembers, studioWallets, studioCreditLots, studioBookings, studioPurchases, studioVideos, studioVideoPlans, studioVideoAccess, studioCodes, studioLocations, studioSettings, studioContacts, studioCampaigns, studioCampaignRecipients, type StudioUser } from "@workspace/db";
 import { and, eq, sql } from "drizzle-orm";
 import { logger } from "../lib/logger";
 import { hashPassword, verifyPassword } from "../lib/password.js";
@@ -17,6 +17,8 @@ import { getInvoiceSettings, createInvoice, renderInvoiceHtml, renderInvoicePdf 
 import { reqBaseUrl } from "../lib/req-url.js";
 import { ensureCalendar } from "../lib/calendar.js";
 import { gcalConfigured, authUrlUser, gcalStatusUser, disconnectGcalUser, pushAllTeachers } from "../lib/gcal.js";
+import { resolveSmtpConfig } from "../lib/email-config.js";
+import { buildAudience, segmentCounts, sendCampaign, loadBrand, type Segment } from "../lib/campaigns.js";
 
 const router = Router();
 const body = json({ limit: "64kb" });
@@ -865,6 +867,141 @@ router.delete("/projects/:id/studio/locations/:lid", async (req, res) => {
     await db.update(studioClasses).set({ locationId: 0 }).where(and(eq(studioClasses.projectId, projectId), eq(studioClasses.locationId, lid)));
     res.json({ ok: true });
   } catch (err) { logger.error({ err, projectId }, "[studio] delete location failed"); res.status(500).json({ error: "Verwijderen mislukt." }); }
+});
+
+// ── Retention marketing / campaigns ──
+function parseSegment(b: any): Segment {
+  const seg: Segment = {};
+  if (b && typeof b.treatment === "string" && b.treatment.trim()) seg.treatment = b.treatment.trim().slice(0, 120);
+  const inact = parseInt(b?.inactiveDays, 10); if (inact > 0) seg.inactiveDays = Math.min(3650, inact);
+  const bd = parseInt(b?.birthdayWithin, 10); if (bd > 0) seg.birthdayWithin = Math.min(366, bd);
+  return seg;
+}
+
+// Audience (opt-in status, birthday, last visit, treatments) + treatment list + campaigns with stats.
+router.get("/projects/:id/studio/marketing", async (req, res) => {
+  const u = await authed(req, res); if (!u) return;
+  if (u.role !== "admin") { res.status(403).json({ error: "Geen rechten." }); return; }
+  const projectId = pid(req as any);
+  try {
+    const aud = await buildAudience(projectId);
+    const classes = await db.select().from(studioClasses).where(eq(studioClasses.projectId, projectId));
+    const treatments = [...new Set(classes.map((c) => c.title).filter(Boolean))];
+    const camps = await db.select().from(studioCampaigns).where(eq(studioCampaigns.projectId, projectId));
+    const [cfg, brand] = await Promise.all([resolveSmtpConfig(projectId), loadBrand(projectId)]);
+    res.json({
+      configured: !!cfg,
+      salonName: brand.studio || "onze salon",
+      treatments,
+      contacts: aud.map((c) => ({ email: c.email, name: c.name, birthdate: c.birthdate, optIn: c.optIn, lastVisit: c.lastVisit, treatments: c.treatments })),
+      campaigns: camps.sort((a, b) => b.id - a.id).map((c) => ({
+        id: c.id, name: c.name, subject: c.subject, status: c.status,
+        scheduledAt: c.scheduledAt, sentAt: c.sentAt, totalRecipients: c.totalRecipients, opens: c.opens, clicks: c.clicks,
+      })),
+    });
+  } catch (err) { logger.error({ err, projectId }, "[studio] marketing failed"); res.status(500).json({ error: "Laden mislukt." }); }
+});
+
+// Upsert a contact's marketing fields (opt-in + birthday). Creates the row if new.
+router.post("/projects/:id/studio/contacts", body, async (req, res) => {
+  const u = await authed(req, res); if (!u) return;
+  if (u.role !== "admin") { res.status(403).json({ error: "Geen rechten." }); return; }
+  const projectId = pid(req as any); const b = req.body || {};
+  const email = String(b.email || "").toLowerCase().trim();
+  if (!email || email.indexOf("@") < 0) { res.status(400).json({ error: "Ongeldig e-mailadres." }); return; }
+  const birthdate = /^\d{4}-\d{2}-\d{2}$/.test(String(b.birthdate || "")) ? String(b.birthdate) : (b.birthdate === "" ? "" : undefined);
+  const optIn = typeof b.marketingOptIn === "boolean" ? (b.marketingOptIn ? "true" : "false") : undefined;
+  const name = typeof b.name === "string" ? b.name.trim().slice(0, 120) : undefined;
+  try {
+    const [ex] = await db.select().from(studioContacts).where(and(eq(studioContacts.projectId, projectId), eq(studioContacts.email, email)));
+    if (ex) {
+      const patch: Record<string, unknown> = {};
+      if (birthdate !== undefined) patch.birthdate = birthdate;
+      if (optIn !== undefined) patch.marketingOptIn = optIn;
+      if (name !== undefined && name) patch.name = name;
+      if (Object.keys(patch).length) await db.update(studioContacts).set(patch).where(eq(studioContacts.id, ex.id));
+    } else {
+      await db.insert(studioContacts).values({ projectId, email, name: name || "", birthdate: birthdate || "", marketingOptIn: optIn || "false" });
+    }
+    res.json({ ok: true });
+  } catch (err) { logger.error({ err, projectId }, "[studio] contact upsert failed"); res.status(500).json({ error: "Opslaan mislukt." }); }
+});
+
+// Live segment count: how many customers a filter matches, and how many of those are mailable (opt-in).
+router.post("/projects/:id/studio/campaigns/count", body, async (req, res) => {
+  const u = await authed(req, res); if (!u) return;
+  if (u.role !== "admin") { res.status(403).json({ error: "Geen rechten." }); return; }
+  const projectId = pid(req as any);
+  try { res.json(await segmentCounts(projectId, parseSegment(req.body?.filter || req.body))); }
+  catch (err) { logger.error({ err, projectId }, "[studio] campaign count failed"); res.status(500).json({ error: "Tellen mislukt." }); }
+});
+
+// Create a campaign; send now, or schedule for later (picked up by the scheduler).
+router.post("/projects/:id/studio/campaigns", body, async (req, res) => {
+  const u = await authed(req, res); if (!u) return;
+  if (u.role !== "admin") { res.status(403).json({ error: "Geen rechten." }); return; }
+  const projectId = pid(req as any); const b = req.body || {};
+  const subject = String(b.subject || "").trim().slice(0, 200);
+  const bodyTxt = String(b.body || "").trim().slice(0, 8000);
+  const name = String(b.name || subject || "Campagne").trim().slice(0, 160);
+  if (!subject || !bodyTxt) { res.status(400).json({ error: "Onderwerp en bericht zijn verplicht." }); return; }
+  const seg = parseSegment(b.filter || {});
+  const when = String(b.when || "now");
+  let scheduledAt: Date | null = null;
+  if (when !== "now") { const d = new Date(when); if (isNaN(d.getTime())) { res.status(400).json({ error: "Ongeldige geplande tijd." }); return; } if (d.getTime() > Date.now() + 60000) scheduledAt = d; }
+  try {
+    const cfg = await resolveSmtpConfig(projectId);
+    if (!cfg) { res.status(400).json({ error: "Stel eerst je e-mail in (Instellingen) voordat je een campagne verstuurt." }); return; }
+    const [camp] = await db.insert(studioCampaigns).values({
+      projectId, name, subject, body: bodyTxt, filter: JSON.stringify(seg),
+      status: scheduledAt ? "scheduled" : "draft", scheduledAt,
+    }).returning();
+    if (scheduledAt) { res.json({ ok: true, id: camp.id, scheduled: true, at: scheduledAt }); return; }
+    const r = await sendCampaign(projectId, camp.id);
+    res.json({ ok: true, id: camp.id, sent: r.sent, total: r.total });
+  } catch (err) { logger.error({ err, projectId }, "[studio] campaign create failed"); res.status(500).json({ error: "Versturen mislukt." }); }
+});
+
+// ── Public tracking (no auth): open pixel, click redirect, unsubscribe ──
+const PIXEL = Buffer.from("R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7", "base64");
+async function bumpOpen(token: string) {
+  const [r] = await db.select().from(studioCampaignRecipients).where(eq(studioCampaignRecipients.token, token));
+  if (r && !r.openedAt) {
+    await db.update(studioCampaignRecipients).set({ openedAt: new Date().toISOString() }).where(eq(studioCampaignRecipients.id, r.id));
+    await db.update(studioCampaigns).set({ opens: sql`${studioCampaigns.opens} + 1` }).where(eq(studioCampaigns.id, r.campaignId));
+  }
+}
+router.get("/projects/:id/studio/m/o/:token", async (req, res) => {
+  try { await bumpOpen(String(req.params.token)); } catch { /* never block the pixel */ }
+  res.set("Content-Type", "image/gif").set("Cache-Control", "no-store, no-cache, must-revalidate, private").send(PIXEL);
+});
+router.get("/projects/:id/studio/m/c/:token", async (req, res) => {
+  const token = String(req.params.token); const url = String(req.query.u || "");
+  try {
+    const [r] = await db.select().from(studioCampaignRecipients).where(eq(studioCampaignRecipients.token, token));
+    if (r) {
+      await bumpOpen(token); // a click implies an open
+      if (!r.clickedAt) {
+        await db.update(studioCampaignRecipients).set({ clickedAt: new Date().toISOString() }).where(eq(studioCampaignRecipients.id, r.id));
+        await db.update(studioCampaigns).set({ clicks: sql`${studioCampaigns.clicks} + 1` }).where(eq(studioCampaigns.id, r.campaignId));
+      }
+    }
+  } catch { /* still redirect */ }
+  if (/^https?:\/\//i.test(url)) { res.redirect(302, url); return; }
+  res.status(400).send("Ongeldige link.");
+});
+router.get("/projects/:id/studio/m/u/:token", async (req, res) => {
+  const projectId = pid(req as any); const token = String(req.params.token);
+  const page = (msg: string) => `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Uitschrijven</title><body style="font-family:system-ui,-apple-system,Segoe UI,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#f4f4fb"><div style="max-width:420px;text-align:center;padding:34px;background:#fff;border-radius:16px;box-shadow:0 10px 40px rgba(0,0,0,.1)"><h2 style="margin:0 0 8px">${msg}</h2><p style="color:#6b7280;margin:0">Je ontvangt geen marketing-e-mails meer van ons.</p></div>`;
+  try {
+    const [r] = await db.select().from(studioCampaignRecipients).where(and(eq(studioCampaignRecipients.projectId, projectId), eq(studioCampaignRecipients.token, token)));
+    if (r && r.email) {
+      const [ex] = await db.select().from(studioContacts).where(and(eq(studioContacts.projectId, projectId), eq(studioContacts.email, r.email)));
+      if (ex) await db.update(studioContacts).set({ marketingOptIn: "false" }).where(eq(studioContacts.id, ex.id));
+      else await db.insert(studioContacts).values({ projectId, email: r.email, marketingOptIn: "false" });
+    }
+    res.set("Content-Type", "text/html; charset=utf-8").send(page("Uitgeschreven ✓"));
+  } catch { res.set("Content-Type", "text/html; charset=utf-8").send(page("Uitgeschreven")); }
 });
 
 export default router;
