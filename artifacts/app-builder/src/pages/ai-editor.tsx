@@ -12,7 +12,7 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { ArrowRight, Globe, Loader2, FileCode, MessageSquare, Clock, Trash2, Sparkles, CalendarCheck, Rocket, User as UserIcon, LogOut, X, CreditCard, Check } from "lucide-react";
+import { ArrowRight, Globe, Loader2, FileCode, MessageSquare, Clock, Trash2, Sparkles, Palette, Rocket, User as UserIcon, LogOut, X, CreditCard, Check } from "lucide-react";
 import logoUrl from "../assets/nebula-logo.png";
 import { getToken, setToken, clearToken, type PlatformUser } from "@/lib/session";
 
@@ -210,7 +210,7 @@ export function AiEditor() {
             <div className="p-8">
               <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Jouw project</p>
               <h1 className="mt-1 text-3xl font-bold tracking-tight pr-10">{project.name}</h1>
-              <p className="mt-2 text-muted-foreground line-clamp-2">{project.description || "Je website + boekingssysteem."}</p>
+              <p className="mt-2 text-muted-foreground line-clamp-2">{project.description || "Je website."}</p>
               <div className="mt-5 flex flex-wrap gap-5 text-sm text-muted-foreground">
                 <span className="flex items-center gap-1.5"><FileCode className="w-4 h-4" />{project.fileCount} bestanden</span>
                 <span className="flex items-center gap-1.5"><MessageSquare className="w-4 h-4" />{project.messageCount} berichten</span>
@@ -235,10 +235,10 @@ export function AiEditor() {
           {error && (<p className="mt-3 text-sm text-destructive text-center" data-testid="text-import-error">{error}</p>)}
           <div className="mt-8 rounded-2xl border border-border bg-card shadow-lg p-8 text-center">
             <h2 className="text-2xl font-bold tracking-tight">Begin je project</h2>
-            <p className="mt-2 text-muted-foreground">Importeer je bestaande website hierboven — Nebula bouwt 'm om tot een slimme, bewerkbare site mét boekingssysteem.</p>
+            <p className="mt-2 text-muted-foreground">Importeer je bestaande website hierboven — Nebula bouwt 'm om tot een slimme, volledig bewerkbare website.</p>
             <div className="mt-7 grid gap-4 sm:grid-cols-3 text-left">
               <div className="rounded-xl border border-border/70 p-4"><Sparkles className="h-6 w-6 text-primary" /><h3 className="mt-2 font-semibold text-sm">Slim bewerken</h3><p className="text-xs text-muted-foreground mt-1">Pas je site aan met gewone taal of klik-en-bewerk — geen code nodig.</p></div>
-              <div className="rounded-xl border border-border/70 p-4"><CalendarCheck className="h-6 w-6 text-primary" /><h3 className="mt-2 font-semibold text-sm">Boekingssysteem</h3><p className="text-xs text-muted-foreground mt-1">Lessen, abonnementen, betalingen, presentielijst en video's — ingebouwd.</p></div>
+              <div className="rounded-xl border border-border/70 p-4"><Palette className="h-6 w-6 text-primary" /><h3 className="mt-2 font-semibold text-sm">Op maat ontworpen</h3><p className="text-xs text-muted-foreground mt-1">Elke pagina uniek — jouw merk, kleuren en uitstraling. Geen sjabloon.</p></div>
               <div className="rounded-xl border border-border/70 p-4"><Rocket className="h-6 w-6 text-primary" /><h3 className="mt-2 font-semibold text-sm">Direct online</h3><p className="text-xs text-muted-foreground mt-1">Publiceer op een gratis Nebula-adres of je eigen domein met SSL.</p></div>
             </div>
           </div>
@@ -404,7 +404,7 @@ function ProfileDialog({ open, onClose, user, onSaved, onDeleted }: { open: bool
         <h4 className="font-medium text-sm text-destructive mb-1">Gevarenzone</h4>
         {!delOpen ? (
           <>
-            <p className="text-xs text-muted-foreground mb-2">Verwijder je account en alles wat erbij hoort (je project, website, boekingen) — definitief.</p>
+            <p className="text-xs text-muted-foreground mb-2">Verwijder je account en alles wat erbij hoort (je project en website) — definitief.</p>
             <Button size="sm" variant="outline" className="border-destructive/50 text-destructive hover:bg-destructive/10" onClick={() => { setDelOpen(true); setDelErr(null); }} data-testid="button-delete-account">Account verwijderen</Button>
           </>
         ) : (

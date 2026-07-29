@@ -1,6 +1,5 @@
 import { useState, type FormEvent } from "react";
 import logoUrl from "../assets/nebula-logo-home.png";
-import whereStarsUrl from "../assets/where-stars.png";
 
 function ContactForm() {
   const [phone, setPhone] = useState("");
@@ -38,9 +37,9 @@ function ContactForm() {
   if (status === "done") {
     return (
       <div className="rounded-2xl border border-border/60 bg-card/50 p-6 text-center">
-        <div className="text-lg font-semibold text-foreground">Je staat op de wachtlijst! 🎉</div>
+        <div className="text-lg font-semibold text-foreground">Bedankt — we bellen je snel! 🎉</div>
         <p className="text-sm text-muted-foreground mt-1">
-          We laten van ons horen zodra Nebula live gaat.
+          We nemen zo snel mogelijk contact op voor een vrijblijvend gesprek over jouw website.
         </p>
       </div>
     );
@@ -49,10 +48,10 @@ function ContactForm() {
   return (
     <form onSubmit={onSubmit} className="rounded-2xl border border-border/60 bg-card/50 p-6 text-left space-y-4">
       <div>
-        <div className="text-xs font-semibold uppercase tracking-wider text-primary">Binnenkort live 🚀</div>
-        <div className="text-lg font-semibold text-foreground mt-1">Schrijf je in voor de wachtlijst</div>
+        <div className="text-xs font-semibold uppercase tracking-wider text-primary">Gratis &amp; vrijblijvend</div>
+        <div className="text-lg font-semibold text-foreground mt-1">Klaar voor een nieuwe website?</div>
         <p className="text-sm text-muted-foreground mt-1">
-          Nebula lanceert binnenkort. Vul je telefoonnummer in en je hoort als eerste wanneer we live gaan.
+          Laat je telefoonnummer achter, dan bellen we je voor een vrijblijvend gesprek over jouw nieuwe site.
         </p>
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
@@ -77,7 +76,7 @@ function ContactForm() {
         disabled={status === "sending"}
         className="w-full rounded-xl bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground transition hover:opacity-90 disabled:opacity-60"
       >
-        {status === "sending" ? "Inschrijven…" : "Zet me op de wachtlijst"}
+        {status === "sending" ? "Versturen…" : "Bel me terug"}
       </button>
     </form>
   );
@@ -91,41 +90,39 @@ export function Home() {
         <ContactForm />
       </div>
       <img src={logoUrl} alt="Nebula" className="h-64 md:h-96 w-auto" />
-      <img
-        src={whereStarsUrl}
-        alt="Where stars are born and develop"
-        className="w-full max-w-md"
-      />
+      <p className="text-sm md:text-base uppercase tracking-[0.25em] text-muted-foreground text-center">
+        Web design bureau
+      </p>
 
       {/* Purpose */}
       <div className="w-full max-w-2xl text-center space-y-5">
         <h1 className="text-2xl md:text-3xl font-semibold text-foreground">
-          Waar studio's groeien.
+          Waar merken groeien.
         </h1>
         <p className="text-base md:text-lg text-muted-foreground leading-relaxed">
-          Nebula is het platform waarmee yoga-, pilates- en wellnessstudio's in
-          minuten een professionele website mét boekingssysteem bouwen — met AI.
-          Importeer je bestaande site of bouw een nieuwe, neem online boekingen en
-          betalingen aan, beheer lessen en abonnementen, en word automatisch beter
-          gevonden in Google. Alles op één plek, op je eigen domein.
+          Nebula is een web design bureau dat merken online laat stralen. We ontwerpen en
+          bouwen professionele websites — razendsnel met AI, maar met de smaak en afwerking
+          van een echte designer. Van een frisse nieuwe site tot een complete redesign,
+          inclusief SEO zodat nieuwe klanten je vinden. Alles op je eigen domein, volledig uit
+          handen genomen.
         </p>
         <div className="grid gap-4 sm:grid-cols-3 pt-2 text-left">
           <div className="rounded-2xl border border-border/60 bg-card/50 p-4">
-            <div className="text-sm font-semibold text-foreground">Bouw met AI</div>
+            <div className="text-sm font-semibold text-foreground">Ontworpen met AI</div>
             <p className="text-xs text-muted-foreground mt-1">
-              Beschrijf wat je wilt en Nebula bouwt of past je site aan — geen code nodig.
+              We bouwen supersnel met AI — met de smaak en afwerking van een echte designer.
             </p>
           </div>
           <div className="rounded-2xl border border-border/60 bg-card/50 p-4">
-            <div className="text-sm font-semibold text-foreground">Boeken &amp; betalen</div>
+            <div className="text-sm font-semibold text-foreground">Volledig op maat</div>
             <p className="text-xs text-muted-foreground mt-1">
-              Online boekingen, abonnementen en betalingen — direct geïntegreerd in je site.
+              Elke website uniek: jouw merk, kleuren en uitstraling. Geen sjabloon van de plank.
             </p>
           </div>
           <div className="rounded-2xl border border-border/60 bg-card/50 p-4">
-            <div className="text-sm font-semibold text-foreground">Groei automatisch</div>
+            <div className="text-sm font-semibold text-foreground">Gevonden in Google</div>
             <p className="text-xs text-muted-foreground mt-1">
-              Automatische SEO-blogs en Google-koppeling zodat nieuwe klanten je vinden.
+              SEO ingebouwd, zodat nieuwe klanten je vanzelf online vinden.
             </p>
           </div>
         </div>
