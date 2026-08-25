@@ -9,7 +9,9 @@ import crypto from "node:crypto";
 
 export type SmtpConfig = { host: string; port: number; user: string; pass: string; from: string; secure?: boolean };
 export type Attachment = { filename: string; content: string /* base64 */; contentType: string };
-export type Mail = { to: string; subject: string; html: string; text?: string; fromName?: string; attachments?: Attachment[] };
+// `bulk` marks commercial mail (campaigns/broadcasts). Only bulk mail carries List-Unsubscribe —
+// on a transactional mail that header is what pushes Gmail to file it under Promotions.
+export type Mail = { to: string; subject: string; html: string; text?: string; fromName?: string; attachments?: Attachment[]; bulk?: boolean };
 
 function b64(s: string) { return Buffer.from(s, "utf8").toString("base64"); }
 // RFC 2047 encoded-word for headers with non-ASCII (e.g. accented studio names).
@@ -39,7 +41,9 @@ function expect(r: { code: number; text: string }, ok: number | number[]) {
 }
 
 export async function sendMail(cfg: SmtpConfig, mail: Mail): Promise<void> {
-  const secure = cfg.secure ?? cfg.port === 465;
+  // ?? never fires here: both config sources always set a real boolean, so the port fallback was
+  // dead code. Keep it reachable for a config that genuinely leaves `secure` unset.
+  const secure = typeof cfg.secure === "boolean" ? cfg.secure : cfg.port === 465;
   await new Promise<void>((resolve, reject) => {
     const fail = (e: Error) => reject(e);
     const onReady = async (c: ReturnType<typeof conn>) => {
@@ -53,8 +57,9 @@ export async function sendMail(cfg: SmtpConfig, mail: Mail): Promise<void> {
         await c.send("MAIL FROM:<" + fromAddr + ">").then((r) => expect(r, 250));
         await c.send("RCPT TO:<" + mail.to + ">").then((r) => expect(r, [250, 251]));
         await c.send("DATA").then((r) => expect(r, 354));
-        // Proper, non-spammy headers: real Message-ID, Reply-To, friendly From name, List-Unsubscribe.
-        const stuff = (s: string) => s.replace(/\r?\n/g, "\r\n").replace(/\r\n\./g, "\r\n..");
+        // Proper, non-spammy headers: real Message-ID, Reply-To, friendly From name, and
+        // List-Unsubscribe on bulk only (see the Mail type).
+        const stuff = (s: string) => s.replace(/\r?\n/g, "\r\n").replace(/^\./, "..").replace(/\r\n\./g, "\r\n..");
         const hasAtt = !!(mail.attachments && mail.attachments.length);
         let headers =
           "From: " + fromHeader + "\r\n" +
@@ -63,14 +68,27 @@ export async function sendMail(cfg: SmtpConfig, mail: Mail): Promise<void> {
           "Subject: " + encodeHeader(mail.subject) + "\r\n" +
           "Message-ID: <" + crypto.randomBytes(16).toString("hex") + "@" + domain + ">\r\n" +
           "Date: " + new Date().toUTCString() + "\r\n" +
-          "List-Unsubscribe: <mailto:" + fromAddr + "?subject=unsubscribe>\r\n" +
+          (mail.bulk
+            ? "List-Unsubscribe: <mailto:" + fromAddr + "?subject=unsubscribe>\r\n"
+            : "Auto-Submitted: auto-generated\r\nX-Auto-Response-Suppress: OOF, AutoReply\r\n") +
           "MIME-Version: 1.0\r\n";
+        // The visible content: text/html, or multipart/alternative when a plain-text twin exists.
+        // Every caller builds that twin; it used to be dropped here, leaving HTML-only mail.
+        const altBnd = mail.text ? "alt_" + crypto.randomBytes(12).toString("hex") : "";
+        const contentHeader = mail.text
+          ? `Content-Type: multipart/alternative; boundary="${altBnd}"\r\n`
+          : "Content-Type: text/html; charset=utf-8\r\nContent-Transfer-Encoding: 8bit\r\n";
+        const contentBody = mail.text
+          ? `--${altBnd}\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n${stuff(mail.text)}\r\n` +
+            `--${altBnd}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n${stuff(mail.html)}\r\n` +
+            `--${altBnd}--`
+          : stuff(mail.html);
         let bodyMsg: string;
         if (hasAtt) {
-          // multipart/mixed: the HTML body + each attachment (base64, wrapped at 76 chars).
+          // multipart/mixed: the body (html or alternative) + each attachment (base64, wrapped at 76 chars).
           const bnd = "mix_" + crypto.randomBytes(12).toString("hex");
           headers += `Content-Type: multipart/mixed; boundary="${bnd}"\r\n\r\n`;
-          let m = `--${bnd}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n${stuff(mail.html)}\r\n`;
+          let m = `--${bnd}\r\n${contentHeader}\r\n${contentBody}\r\n`;
           for (const att of mail.attachments!) {
             const b64 = (att.content.match(/.{1,76}/g) || []).join("\r\n");
             m += `--${bnd}\r\nContent-Type: ${att.contentType}; name="${att.filename}"\r\nContent-Transfer-Encoding: base64\r\nContent-Disposition: attachment; filename="${att.filename}"\r\n\r\n${b64}\r\n`;
@@ -78,8 +96,8 @@ export async function sendMail(cfg: SmtpConfig, mail: Mail): Promise<void> {
           m += `--${bnd}--`;
           bodyMsg = m;
         } else {
-          headers += "Content-Type: text/html; charset=utf-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n";
-          bodyMsg = stuff(mail.html);
+          headers += contentHeader + "\r\n";
+          bodyMsg = contentBody;
         }
         c.write(headers + bodyMsg + "\r\n.\r\n");
         await c.read().then((r) => expect(r, 250));

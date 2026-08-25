@@ -234,7 +234,7 @@ export async function sendBroadcast(projectId: number, recipients: string[], sub
   const text = `${subject}\n\n${body}\n\n— ${brand.studio}`;
   let sent = 0;
   for (const to of recipients) {
-    try { await sendMail(cfg, { to, subject, html, text, fromName: brand.studio }); sent++; } catch { /* skip a bad address, keep going */ }
+    try { await sendMail(cfg, { to, subject, html, text, fromName: brand.studio, bulk: true }); sent++; } catch { /* skip a bad address, keep going */ }
   }
   return { configured: true, sent, total: recipients.length };
 }

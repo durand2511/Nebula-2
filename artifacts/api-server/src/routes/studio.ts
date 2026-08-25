@@ -225,7 +225,15 @@ router.post("/projects/:id/studio/reset", body, async (req, res) => {
       if (u) {
         const np = Math.random().toString(36).slice(2, 6) + Math.random().toString(36).slice(2, 6);
         await db.update(studioUsers).set({ passwordHash: hashPassword(np) }).where(eq(studioUsers.id, u.id));
-        try { await sendBookingEmail(projectId, email, "reset", { name: u.name, password: np }); } catch { /* best-effort */ }
+        // Log the outcome: the response is deliberately identical either way (no account leak),
+        // so without this a failed reset mail is invisible — the password is already rewritten.
+        let sent = false;
+        try { sent = await sendBookingEmail(projectId, email, "reset", { name: u.name, password: np }); }
+        catch (err) { logger.warn({ err, projectId, userId: u.id }, "[studio] reset mail failed"); }
+        if (!sent) logger.warn({ projectId, userId: u.id }, "[studio] reset mail not sent (SMTP not configured?)");
+        else logger.info({ projectId, userId: u.id }, "[studio] reset mail sent");
+      } else {
+        logger.info({ projectId }, "[studio] reset requested for an address with no account");
       }
     }
     res.json({ ok: true });

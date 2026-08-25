@@ -142,7 +142,7 @@ export async function sendCampaign(projectId: number, campaignId: number): Promi
     const text = `${bodyText}\n\n— ${salon}\nUitschrijven: ${unsub}`;
     try {
       await db.insert(studioCampaignRecipients).values({ projectId, campaignId, email: c.email, token });
-      await sendMail(cfg, { to: c.email, subject, html: finalHtml, text, fromName: salon });
+      await sendMail(cfg, { to: c.email, subject, html: finalHtml, text, fromName: salon, bulk: true });
       sent++;
     } catch (e) { logger.warn({ err: e, projectId, email: c.email }, "[campaign] recipient send failed"); }
   }
