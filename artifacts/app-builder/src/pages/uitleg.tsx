@@ -156,9 +156,6 @@ export function Uitleg() {
           <p className="text-xs text-muted-foreground mt-4">Tip: typ <span className="font-mono">/exit</span> om Claude te stoppen. De volgende keer start-ie vanzelf weer op.</p>
         </section>
 
-        <div className="mt-8 flex justify-center">
-          <Button size="lg" onClick={() => setLocation("/claude")} className="gap-2" data-testid="button-start-connect">Nu koppelen <ArrowRight className="h-4 w-4" /></Button>
-        </div>
       </div>
     </div>
   );
