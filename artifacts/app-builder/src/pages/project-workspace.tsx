@@ -2969,34 +2969,6 @@ export function ProjectWorkspace() {
                 )}
                 {!isStreaming && activeTab === "preview" && (
                   <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-8 text-muted-foreground hover:text-foreground"
-                    disabled={seoBusy}
-                    title="Genereer nu een SEO/AEO-artikel voor deze site"
-                    onClick={async () => {
-                      if (seoBusy) return;
-                      setSeoBusy(true);
-                      try {
-                        const r = await fetch(`/api/projects/${projectId}/seo/article`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
-                        const d = await r.json();
-                        if (r.ok && d.ok) {
-                          const notes = (d.notes && d.notes.length) ? `\n\nVerbeterpunten:\n• ${d.notes.slice(0, 4).join("\n• ")}` : "";
-                          if (d.status === "published") { window.alert(`✅ Gepubliceerd: "${d.title}"\nKwaliteitsscore: ${d.score}/100 · ${d.wordCount} woorden.\nOpen blog.html in de preview.`); setPreviewKey((k) => k + 1); }
-                          else if (d.status === "draft") window.alert(`📝 Concept opgeslagen (niet gepubliceerd) — score ${d.score}/100.\nTe laag voor automatische publicatie of nieuwe site.${notes}`);
-                          else window.alert(`⛔ Afgekeurd — score ${d.score}/100 (te generiek of te veel overlap). Niet gepubliceerd.${notes}`);
-                        }
-                        else window.alert(d.error || "Genereren mislukt.");
-                      } catch { window.alert("Genereren mislukt."); }
-                      finally { setSeoBusy(false); }
-                    }}
-                  >
-                    {seoBusy ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5 mr-1.5" />}
-                    SEO-artikel
-                  </Button>
-                )}
-                {!isStreaming && activeTab === "preview" && (
-                  <Button
                     variant={seoAuto ? "default" : "ghost"}
                     size="sm"
                     className="h-8"

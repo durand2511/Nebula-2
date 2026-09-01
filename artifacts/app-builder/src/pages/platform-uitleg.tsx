@@ -68,10 +68,6 @@ export function PlatformUitleg() {
             </ul>
           </Feature>
 
-          <Feature icon={<FileText className="h-5 w-5 text-primary" />} title="SEO-artikel — nu een artikel schrijven">
-            <p>Wil je zelf op een moment een artikel laten schrijven? Klik op <strong>SEO-artikel</strong> boven de preview. Nebula schrijft dan direct een nieuw, op jouw site afgestemd artikel en zet het klaar.</p>
-          </Feature>
-
           <Feature icon={<Search className="h-5 w-5 text-primary" />} title="Google Search Console koppelen">
             <p>In het publiceer-venster kun je met één klik <strong>Google Search Console</strong> koppelen. Daarmee wordt je site automatisch bij Google geverifieerd en je sitemap ingediend, zodat je sneller in Google verschijnt — zonder gedoe met DNS.</p>
           </Feature>
