@@ -1251,6 +1251,9 @@ export function ProjectWorkspace() {
   const [termGen, setTermGen] = useState(0);
   const [termStatus, setTermStatus] = useState<TerminalStatus>("connecting");
   const [claudeConnected, setClaudeConnected] = useState(false);
+  const claudeConnectedRef = useRef(false);
+  claudeConnectedRef.current = claudeConnected;
+  const [pointSent, setPointSent] = useState(false);
   const [claudeDisc, setClaudeDisc] = useState(false);
   const disconnectClaudeCode = async () => {
     if (!window.confirm("Claude ontkoppelen? Je logt uit en kunt daarna opnieuw inloggen met je Claude-account.")) return;
@@ -1551,9 +1554,15 @@ export function ProjectWorkspace() {
           const t = (d.text ?? "").replace(/\s+/g, " ").trim().slice(0, 80);
           msg = `Op pagina "${page}", het ${d.tag || "element"}${t ? ` met de tekst "${t}"` : ""}: `;
         }
+        if (!claudeConnectedRef.current) {
+          setSelectMode(false);
+          window.alert("Koppel eerst je Claude-account (klik op 'Claude koppelen' of open de Uitleg). Daarna kun je elementen aanwijzen.");
+          return;
+        }
         const sent = termHandleRef.current?.send(msg);
         setSelectMode(false);
-        if (!sent) window.alert("Koppel eerst Claude (klik op 'Claude koppelen') om dit te kunnen gebruiken.");
+        if (sent) { setPointSent(true); window.setTimeout(() => setPointSent(false), 3500); }
+        else window.alert("De terminal is niet klaar. Klik op 'Opnieuw starten' boven de terminal en probeer het nog eens.");
         return;
       }
       // Imported multi-page navigation: the preview asks to render a sibling page.
@@ -2715,30 +2724,6 @@ export function ProjectWorkspace() {
                     {selectMode ? "Klaar met aanwijzen" : "Aanwijzen"}
                   </Button>
                 )}
-                {/* Sectie toevoegen (zonder AI) — de rest gaat via Claude Code */}
-                {!isStreaming && activeTab === "preview" && previewHtml && (
-                  <select
-                    className="h-8 w-[104px] rounded-md border border-border bg-background px-2 text-sm text-muted-foreground truncate"
-                    value=""
-                    title="Voeg een sectie toe aan deze pagina (zonder AI)"
-                    data-testid="select-add-section"
-                    onChange={async (e) => {
-                      const kind = e.target.value;
-                      e.currentTarget.selectedIndex = 0;
-                      if (!kind) return;
-                      const ok = await postAction({ action: "add_section", page: currentPagePath(), kind });
-                      if (!ok) { window.alert("Sectie toevoegen mislukt."); return; }
-                      await refreshAfterEdit();
-                    }}
-                  >
-                    <option value="">+ Sectie…</option>
-                    <option value="heading">Titel + tekst</option>
-                    <option value="text">Tekstblok</option>
-                    <option value="image-text">Afbeelding + tekst</option>
-                    <option value="gallery">Galerij (3 foto's)</option>
-                    <option value="cta">Oproep (knop)</option>
-                  </select>
-                )}
                 {!isStreaming && activeTab === "preview" && previewHtml && (
                   <Button
                     variant="ghost"
@@ -3163,7 +3148,12 @@ export function ProjectWorkspace() {
                   {/* Select & edit mode: hint banner + click-to-edit popover */}
                   {selectMode && !selection && (
                     <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[60] rounded-full bg-primary text-primary-foreground text-xs font-medium px-4 py-2 shadow-lg pointer-events-none">
-                      Klik op een element — Claude weet dan precies wat je bedoelt
+                      {claudeConnected ? "Klik op een element — het gaat naar Claude" : "Koppel eerst Claude om elementen aan te wijzen"}
+                    </div>
+                  )}
+                  {pointSent && (
+                    <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[60] rounded-full bg-emerald-600 text-white text-xs font-medium px-4 py-2 shadow-lg pointer-events-none">
+                      Naar Claude gestuurd — typ in de terminal wat er moet veranderen en druk op Enter
                     </div>
                   )}
                   {selection && (
