@@ -73,7 +73,7 @@ export const ClaudeTerminal = forwardRef<ClaudeTerminalHandle, Props>(function C
       fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace",
       fontSize: 12,
       lineHeight: 1.2,
-      scrollback: 5000,
+      scrollback: 1500,
       allowProposedApi: true,
       theme: {
         background: "#0f0e14", foreground: "#e8e6f0", cursor: "#e8e6f0", selectionBackground: "#3b3654",
