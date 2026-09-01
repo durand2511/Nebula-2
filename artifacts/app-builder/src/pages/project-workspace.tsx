@@ -1535,10 +1535,9 @@ export function ProjectWorkspace() {
         }
         return;
       }
+      // Editing runs through Claude Code now — the old runtime-error banner + auto-fix are obsolete
+      // and only added noise on fresh builds, so preview JS errors are ignored here.
       if (!d.__buildlyError || typeof d.message !== "string") return;
-      const file = d.source ? d.source.split("/").pop() : "";
-      const detail = file ? `${d.message} (${file}:${d.line ?? "?"})` : d.message;
-      setPreviewErrors((prev) => (prev.includes(detail) ? prev : [...prev, detail].slice(-4)));
     }
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
