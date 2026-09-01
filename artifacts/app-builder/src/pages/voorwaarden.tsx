@@ -7,7 +7,7 @@ export function Voorwaarden() {
         <p className="mt-2 text-sm text-foreground/50">Laatst bijgewerkt: 1 september 2026</p>
 
         <p className="mt-6 text-foreground/80 leading-relaxed">
-          Deze algemene voorwaarden zijn van toepassing op alle offertes, opdrachten en
+          Deze algemene voorwaarden zijn van toepassing op alle opdrachten en
           overeenkomsten van Nebula, een web design bureau van Durand van Konijnenburg
           (KVK 70776857), bereikbaar via nebulabookings.com.
         </p>
@@ -26,8 +26,9 @@ export function Voorwaarden() {
             Nebula ontwerpt en bouwt websites, webapplicaties en andere digitale producten op maat.
             Nebula werkt daarbij met AI-ontwikkeltools, in het bijzonder <strong>Claude Code</strong>,
             waarmee vrijwel alles gemaakt kan worden: van een eenvoudige zakelijke website tot
-            complete webapplicaties met eigen functionaliteit, koppelingen en SEO. De exacte omvang
-            van een opdracht wordt per project vastgelegd in een offerte of schriftelijke afspraak.
+            complete webapplicaties met eigen functionaliteit, koppelingen en SEO. Het ontwerpen en
+            bouwen zelf brengt Nebula niet apart in rekening: de Klant betaalt per opdracht alleen
+            een vast maandbedrag voor het gebruik van Claude Code (zie artikel 5).
           </p>
         </Section>
 
@@ -58,19 +59,19 @@ export function Voorwaarden() {
           </p>
         </Section>
 
-        <Section title="5. Offerte, prijs en betaling">
+        <Section title="5. Prijs en betaling">
           <ul className="space-y-1">
-            <li>Nebula werkt op basis van een offerte of een schriftelijk bevestigde prijsafspraak per project.</li>
-            <li>Prijzen zijn exclusief btw, tenzij anders vermeld.</li>
-            <li>Tenzij anders afgesproken geldt een aanbetaling bij de start van de opdracht en het restant bij oplevering; facturen worden binnen 14 dagen betaald.</li>
-            <li>Onderhoud, hosting, doorontwikkeling of andere doorlopende diensten worden alleen geleverd als dat apart is afgesproken en worden apart in rekening gebracht.</li>
-            <li>Meerwerk buiten de afgesproken omvang wordt vooraf gemeld en na akkoord in rekening gebracht.</li>
+            <li>Nebula werkt niet met offertes of uurtarieven. Per opdracht betaalt de Klant uitsluitend een <strong>vast bedrag per maand voor Claude Code</strong>, de AI-ontwikkeltool waarmee de Website wordt gebouwd.</li>
+            <li>Het ontwerp- en bouwwerk van Nebula zelf wordt niet apart in rekening gebracht.</li>
+            <li>Het maandbedrag wordt per maand vooraf betaald en is <strong>maandelijks opzegbaar</strong>; na opzegging blijft de Klant eigenaar en beheerder van alles wat tot dan toe is opgeleverd.</li>
+            <li>Prijzen zijn inclusief btw, tenzij anders vermeld.</li>
+            <li>Kosten van derden die de Klant zelf afneemt (zoals domeinregistratie of hosting bij een externe partij) vallen buiten het maandbedrag.</li>
           </ul>
         </Section>
 
         <Section title="6. Oplevering en feedback">
           <p>
-            Nebula levert de Website op zoals afgesproken in de offerte. De Klant krijgt de gelegenheid
+            Nebula levert de Website op zoals met de Klant afgesproken. De Klant krijgt de gelegenheid
             om de Website te beoordelen en binnen de afgesproken feedbackrondes wijzigingen door te
             geven. Als de Klant niet binnen 14 dagen na oplevering reageert, geldt de Website als
             geaccepteerd.
@@ -90,7 +91,8 @@ export function Voorwaarden() {
         <Section title="8. Aansprakelijkheid">
           <p>
             De aansprakelijkheid van Nebula is beperkt tot directe schade en tot maximaal het bedrag
-            dat de Klant voor de betreffende opdracht heeft betaald. Nebula is niet aansprakelijk voor
+            dat de Klant in de drie maanden voorafgaand aan de schadeveroorzakende gebeurtenis voor
+            de betreffende opdracht heeft betaald. Nebula is niet aansprakelijk voor
             indirecte schade, gevolgschade, gederfde winst, gemiste besparingen of schade door uitval
             of fouten van ingeschakelde derden, noch voor wijzigingen die de Klant of derden na
             oplevering aan de Website aanbrengen. Deze beperkingen gelden niet bij opzet of bewuste
@@ -111,8 +113,8 @@ export function Voorwaarden() {
 
         <Section title="10. Wijzigingen">
           <p>
-            Nebula mag deze voorwaarden van tijd tot tijd aanpassen. Op een opdracht zijn de
-            voorwaarden van toepassing zoals die golden op het moment van de offerte of opdrachtbevestiging.
+            Nebula mag deze voorwaarden en het maandbedrag van tijd tot tijd aanpassen. Wezenlijke
+            wijzigingen worden vooraf aangekondigd; de Klant kan de opdracht dan maandelijks opzeggen.
           </p>
         </Section>
 

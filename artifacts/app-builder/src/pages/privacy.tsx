@@ -35,7 +35,7 @@ export function Privacy() {
           <p className="mt-3 font-semibold text-foreground">Klanten en opdrachtgevers</p>
           <ul className="mt-1 space-y-1">
             <li>Naam, e-mailadres en telefoonnummer</li>
-            <li>Bedrijfsnaam, adres, KVK- en btw-nummer (voor offertes en facturen)</li>
+            <li>Bedrijfsnaam, adres, KVK- en btw-nummer (voor facturen)</li>
             <li>Correspondentie over het project (e-mails, briefings, feedback)</li>
             <li>Inloggegevens of toegang tot systemen die je ons voor het project tijdelijk verstrekt (bijvoorbeeld domein- of hostingaccounts)</li>
           </ul>
@@ -57,7 +57,7 @@ export function Privacy() {
 
         <Section title="3. Waarvoor gebruiken wij uw gegevens">
           <ul className="space-y-1">
-            <li>Het opstellen van offertes en het uitvoeren van de opdracht (ontwerpen, bouwen en opleveren van je website);</li>
+            <li>Het uitvoeren van de opdracht (ontwerpen, bouwen en opleveren van je website);</li>
             <li>Communicatie over het project, feedbackrondes en oplevering;</li>
             <li>Facturatie en administratie;</li>
             <li>Het beveiligen van onze systemen en het voorkomen van misbruik;</li>
@@ -84,7 +84,7 @@ export function Privacy() {
           <ul className="space-y-1">
             <li>Projectgegevens en correspondentie: tot 2 jaar na oplevering, zodat wij je bij vragen of vervolgopdrachten kunnen helpen;</li>
             <li>Tijdelijk verstrekte toegangsgegevens: direct na oplevering verwijderd of teruggegeven;</li>
-            <li>Financiële gegevens (offertes, facturen): 7 jaar, conform de wettelijke boekhoudplicht;</li>
+            <li>Financiële gegevens (facturen): 7 jaar, conform de wettelijke boekhoudplicht;</li>
             <li>Serverlogs van nebulabookings.com: maximaal 90 dagen.</li>
           </ul>
         </Section>
@@ -98,7 +98,7 @@ export function Privacy() {
             <li><strong>Anthropic (Claude Code)</strong> — AI-ontwikkeltool waarmee wij websites bouwen;</li>
             <li><strong>Render</strong> en <strong>Neon</strong> — hosting en databaseopslag van nebulabookings.com en, indien afgesproken, van opgeleverde websites;</li>
             <li><strong>Resend</strong> — verzenden van e-mails;</li>
-            <li><strong>Stripe</strong> — betalingsverwerking, uitsluitend wanneer je online bij ons betaalt.</li>
+            <li><strong>Stripe</strong> — verwerking van de maandelijkse betaling voor Claude Code.</li>
           </ul>
           <p className="mt-3">
             Daarnaast kunnen wij gegevens delen wanneer wij daartoe wettelijk verplicht zijn.
