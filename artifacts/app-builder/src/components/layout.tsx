@@ -1,5 +1,14 @@
 import { Link, useLocation } from "wouter";
-import bgUrl from "@assets/AdobeStock_352407837_1781027880746.jpeg";
+import bg1 from "@assets/nebula-bg-1.jpeg";
+import bg2 from "@assets/nebula-bg-2.jpeg";
+import bg3 from "@assets/nebula-bg-3.jpeg";
+import bg4 from "@assets/nebula-bg-4.jpeg";
+import bg5 from "@assets/nebula-bg-5.jpeg";
+import bg6 from "@assets/nebula-bg-6.jpeg";
+
+// A different nature background every 3 hours, for variety.
+const BACKGROUNDS = [bg1, bg2, bg3, bg4, bg5, bg6];
+const bgUrl = BACKGROUNDS[Math.floor(Date.now() / (3 * 60 * 60 * 1000)) % BACKGROUNDS.length];
 
 export function Layout({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
@@ -14,7 +23,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
             style={{ backgroundImage: `url(${bgUrl})` }}
             aria-hidden="true"
           />
-          <div className="fixed inset-0 -z-10 bg-white/30" aria-hidden="true" />
+          <div className="fixed inset-0 -z-10 bg-white/55" aria-hidden="true" />
         </>
       )}
       {!isWorkspace && (
