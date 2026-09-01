@@ -678,7 +678,9 @@ router.post("/billing/subscribe", async (req, res) => {
         customer,
         items: [{ price: priceId }],
         payment_behavior: "default_incomplete",
-        payment_settings: { payment_method_types: ["card", "ideal"], save_default_payment_method: "on_subscription" },
+        // iDEAL on a recurring subscription must pair with SEPA Direct Debit: iDEAL collects the first
+        // payment and sets up a SEPA mandate for renewals. Including sepa_debit makes iDEAL allowed.
+        payment_settings: { payment_method_types: ["card", "ideal", "sepa_debit"], save_default_payment_method: "on_subscription" },
         expand: ["latest_invoice.payment_intent"],
         metadata: { platformUserId: String(u.id) },
       });
