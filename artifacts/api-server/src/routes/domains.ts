@@ -6,6 +6,7 @@ import { logger } from "../lib/logger";
 import { addDomain, listDomains, deleteDomain, verifyDomain, publishSubdomain, getSubdomain, CUSTOMERS_TARGET, PLATFORM_HOST } from "../lib/domains.js";
 import { publishSite, isPublished, hasUnpublishedChanges } from "../lib/site-publish.js";
 import { rebuildBookingApp } from "../lib/actions.js";
+import { hasPlatformAccess } from "../lib/billing.js";
 
 const router = Router();
 
@@ -17,7 +18,7 @@ async function ownerSubscribed(projectId: number): Promise<boolean> {
   const [p] = await db.select().from(projects).where(eq(projects.id, projectId));
   if (!p?.ownerId) return false;
   const [u] = await db.select().from(platformUsers).where(eq(platformUsers.id, p.ownerId));
-  return u?.subscriptionStatus === "active";
+  return hasPlatformAccess(u);
 }
 
 async function refreshBookingApp(projectId: number): Promise<void> {
@@ -66,7 +67,7 @@ router.post("/projects/:id/domains", json({ limit: "16kb" }), async (req, res) =
   const projectId = Number(req.params.id);
   if (isNaN(projectId)) { res.status(400).json({ error: "Invalid project ID" }); return; }
   try {
-    if (!(await ownerSubscribed(projectId))) { res.status(402).json({ error: "Een eigen domein koppelen kan met een abonnement (€69,99/maand). Gratis publiceer je op een Nebula-adres. Abonneer je in je profiel." }); return; }
+    if (!(await ownerSubscribed(projectId))) { res.status(402).json({ error: "Een eigen domein koppelen zit in het abonnement (€50/maand). Gratis publiceer je op een Nebula-adres (met watermerk). Abonneer je in je profiel." }); return; }
     const row = await addDomain(projectId, String(req.body?.domain ?? ""));
     res.json({ ok: true, domain: row, instruction: `Voeg bij je DNS-provider een CNAME-record toe: ${row.domain} → ${CUSTOMERS_TARGET}`, target: CUSTOMERS_TARGET });
   } catch (err) { res.status(400).json({ error: (err as Error)?.message || "Toevoegen mislukt." }); }

@@ -637,15 +637,26 @@ async function billingUser(req: unknown) {
   return getSessionUser(tokenFrom(req as { headers: Record<string, unknown>; query?: Record<string, unknown> }));
 }
 
-// Start the €69,99/mo subscription checkout (on the PLATFORM account — no Connect header).
+// Start the €50/mo platform subscription checkout (PLATFORM account — no Connect header). Uses a
+// fixed Stripe price when configured; otherwise builds the €50/mo price inline. Accepts iDEAL and
+// card, and collects name + billing address so a proper invoice can be issued.
 router.post("/billing/subscribe", async (req, res) => {
   const u = await billingUser(req); if (!u) { res.status(401).json({ error: "Niet ingelogd." }); return; }
   try {
     const customer = await ensureCustomer(u);
     const base = baseUrl(req as any);
+    const useFixedPrice = /^price_/.test(NEBULA_PRICE);
+    const lineItem = useFixedPrice
+      ? { price: NEBULA_PRICE, quantity: 1 }
+      : { quantity: 1, price_data: { currency: "eur", unit_amount: Math.round(SUBSCRIPTION_PRICE_EUR * 100), recurring: { interval: "month" }, product_data: { name: "Nebula — volledige toegang" } } };
     const session = await stripeReq("POST", "checkout/sessions", {
       mode: "subscription", customer, client_reference_id: String(u.id),
-      line_items: [{ price: NEBULA_PRICE, quantity: 1 }],
+      "payment_method_types[0]": "card",
+      "payment_method_types[1]": "ideal",
+      billing_address_collection: "required",
+      "customer_update[address]": "auto",
+      "customer_update[name]": "auto",
+      line_items: [lineItem],
       subscription_data: { metadata: { platformUserId: String(u.id) } },
       success_url: `${base}/ai-editor?sub=ok`, cancel_url: `${base}/ai-editor?sub=cancel`,
     });

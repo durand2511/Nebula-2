@@ -22,6 +22,7 @@ type Props = {
   onFilesChanged?: (e: { changed: string[]; created: string[]; deleted: string[] }) => void;
   onConnected?: (connected: boolean) => void;
   onStatus?: (s: TerminalStatus) => void;
+  onLocked?: (message: string) => void;
 };
 
 function wsUrl(projectId: number): string {
@@ -37,7 +38,7 @@ export type ClaudeTerminalHandle = {
 };
 
 export const ClaudeTerminal = forwardRef<ClaudeTerminalHandle, Props>(function ClaudeTerminal(
-  { projectId, className, onFilesChanged, onConnected, onStatus }: Props,
+  { projectId, className, onFilesChanged, onConnected, onStatus, onLocked }: Props,
   ref,
 ) {
   const hostRef = useRef<HTMLDivElement>(null);
@@ -59,8 +60,8 @@ export const ClaudeTerminal = forwardRef<ClaudeTerminalHandle, Props>(function C
   const [gen, setGen] = useState(0); // bump to force a fresh connection ("Opnieuw starten")
 
   // Keep latest callbacks without re-subscribing the socket.
-  const cb = useRef({ onFilesChanged, onConnected, onStatus });
-  cb.current = { onFilesChanged, onConnected, onStatus };
+  const cb = useRef({ onFilesChanged, onConnected, onStatus, onLocked });
+  cb.current = { onFilesChanged, onConnected, onStatus, onLocked };
 
   const setStat = useCallback((s: TerminalStatus) => { statusRef.current = s; setStatus(s); cb.current.onStatus?.(s); }, []);
 
@@ -127,6 +128,7 @@ export const ClaudeTerminal = forwardRef<ClaudeTerminalHandle, Props>(function C
         case "status": cb.current.onConnected?.(!!m.connected); break;
         case "files": cb.current.onFilesChanged?.({ changed: m.changed || [], created: m.created || [], deleted: m.deleted || [] }); break;
         case "exit": term.writeln(`\r\n\x1b[2m» Claude Code is gestopt (code ${m.code}). Klik op "Opnieuw starten" om verder te gaan.\x1b[0m`); setStat("closed"); break;
+        case "locked": cb.current.onLocked?.(String(m.message || "")); setErrMsg(String(m.message || "Abonnement vereist.")); setStat("error"); break;
         case "err": setErrMsg(String(m.message || "Onbekende fout")); setStat("error"); break;
       }
     };

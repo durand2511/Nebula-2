@@ -30,6 +30,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import { db, platformUsers, projectFiles, projects } from "@workspace/db";
 import { eq, sql } from "drizzle-orm";
 import { getSessionUser } from "./platform-auth.js";
+import { hasPlatformAccess } from "./billing.js";
 import { encryptSecret, decryptSecret } from "./email-config.js";
 import { logger } from "./logger";
 
@@ -669,7 +670,14 @@ export function attachClaudeTerminal(server: HttpServer): void {
         if (!p || (p.ownerId != null && p.ownerId !== user.id)) { socket.write("HTTP/1.1 403 Forbidden\r\n\r\n"); socket.destroy(); return; }
         projectName = p.name;
       }
-      wss.handleUpgrade(req, socket, head, (ws) => void onConnection(ws, user.id, projectId, projectName));
+      // Paywall: setting up / using Claude Code is locked until the €50/mo platform subscription is
+      // active (the platform owner always has access). Complete the upgrade so we can send a friendly
+      // message the UI shows as an unlock prompt, then close.
+      const paid = hasPlatformAccess(user);
+      wss.handleUpgrade(req, socket, head, (ws) => {
+        if (!paid) { try { ws.send(JSON.stringify({ t: "locked", message: "Bewerken met Claude Code is onderdeel van het abonnement. Sluit een abonnement af (€50/maand) om te koppelen en je website te bewerken." })); } catch { /* ignore */ } ws.close(4402, "subscription-required"); return; }
+        void onConnection(ws, user.id, projectId, projectName);
+      });
     })().catch((err) => { logger.error({ err }, "[claude-terminal] upgrade failed"); socket.destroy(); });
   });
 

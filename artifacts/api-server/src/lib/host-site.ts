@@ -4,6 +4,7 @@
  * return it. Simple MVP renderer — serves the stored files as-is.
  */
 import { db, projectFiles, projects, platformUsers, importAssets, projectGsc, seoArticles } from "@workspace/db";
+import { hasPlatformAccess } from "./billing.js";
 import { eq, and } from "drizzle-orm";
 import type { Request, Response } from "express";
 import { getPublishedFiles } from "./site-publish.js";
@@ -14,13 +15,17 @@ import { INDEXNOW_KEY } from "./indexnow.js";
 // subscribing (€69,99/mo) removes it entirely.
 const NEBULA_BADGE = `<a href="https://nebulabookings.com" target="_blank" rel="noopener" style="position:fixed;right:24px;bottom:24px;z-index:2147483647;display:flex;flex-direction:column;align-items:flex-start;gap:2px;background:#fff;color:#111827;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;padding:18px 26px;border-radius:20px;box-shadow:0 10px 40px rgba(0,0,0,.30);text-decoration:none;border:3px solid #7a00df"><span style="font:800 30px/1.05 system-ui,-apple-system,Segoe UI,Roboto,sans-serif">⚡ Gemaakt met <span style="color:#7a00df">Nebula</span></span><span style="font:600 14px/1.2 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:#6b7280">Maak gratis je eigen site op nebulabookings.com</span></a>`;
 
-// Is the project's owner a paying subscriber? (ownerless/legacy projects count as NOT subscribed.)
+// Is the project's owner a paying subscriber (or the platform owner)? (ownerless/legacy = NOT.)
 async function ownerSubscribed(projectId: number): Promise<boolean> {
   const [p] = await db.select().from(projects).where(eq(projects.id, projectId));
   if (!p?.ownerId) return false;
   const [u] = await db.select().from(platformUsers).where(eq(platformUsers.id, p.ownerId));
-  return u?.subscriptionStatus === "active";
+  return hasPlatformAccess(u);
 }
+
+// Big, non-removable watermark on FREE (unsubscribed) sites: a large diagonal band across the page
+// plus the clickable corner badge. Disappears once the owner subscribes (€50/mo).
+const NEBULA_WATERMARK = `<div aria-hidden="true" style="position:fixed;inset:0;z-index:2147483646;pointer-events:none;overflow:hidden;display:flex;align-items:center;justify-content:center"><span style="transform:rotate(-24deg);font:800 min(11vw,120px)/1 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:rgba(122,0,223,.14);white-space:nowrap;letter-spacing:.02em">Gemaakt met Nebula</span></div>`;
 
 const TYPES: Record<string, string> = {
   html: "text/html; charset=utf-8", css: "text/css; charset=utf-8", js: "application/javascript; charset=utf-8",
@@ -339,9 +344,10 @@ export async function serveProjectSite(projectId: number, req: Request, res: Res
     if (!isBookingApp && rows.some((r) => r.path === "booking-app.html") && showBookButtonOn(file.path, rows.find((r) => r.path === ".nebula-book-scope")?.content)) {
       content = /<\/body>/i.test(content) ? content.replace(/<\/body>/i, BOOK_FLOAT_BUTTON + "</body>") : content + BOOK_FLOAT_BUTTON;
     }
-    // Free (unsubscribed) sites carry a non-removable Nebula badge bottom-right.
+    // Free (unsubscribed) sites carry a big non-removable Nebula watermark + a clickable corner badge.
     if (!(await ownerSubscribed(projectId))) {
-      content = /<\/body>/i.test(content) ? content.replace(/<\/body>/i, NEBULA_BADGE + "</body>") : content + NEBULA_BADGE;
+      const mark = NEBULA_WATERMARK + NEBULA_BADGE;
+      content = /<\/body>/i.test(content) ? content.replace(/<\/body>/i, mark + "</body>") : content + mark;
     }
   }
   res.send(content);

@@ -7,7 +7,7 @@ import { db, platformUsers, platformAiUsage, projects, type PlatformUser } from 
 import { eq, sql, desc } from "drizzle-orm";
 import { logger } from "./logger";
 
-export const SUBSCRIPTION_PRICE_EUR = 69.99;
+export const SUBSCRIPTION_PRICE_EUR = 50;
 export const MONTHLY_AI_CREDIT_EUR = 7.5;     // included each billing month
 export const AI_MARKUP = 2;                   // charge 100% on top of cost (×2)
 const EUR_PER_USD = 0.92;
@@ -37,6 +37,13 @@ export function isSubscribed(u: Pick<PlatformUser, "subscriptionStatus"> | null 
 const PLATFORM_OWNER_EMAILS = new Set(
   (process.env.PLATFORM_OWNER_EMAILS || "durand2511@gmail.com").toLowerCase().split(/[,\s]+/).filter(Boolean),
 );
+
+/** Full platform access for a user: the €50/mo subscription is active, or they are the platform owner. */
+export function hasPlatformAccess(u: Pick<PlatformUser, "email" | "subscriptionStatus"> | null | undefined): boolean {
+  if (!u) return false;
+  if (u.email && PLATFORM_OWNER_EMAILS.has(u.email.toLowerCase())) return true;
+  return u.subscriptionStatus === "active";
+}
 
 /** Is the project's owner a paying subscriber (or the platform owner)? Ownerless projects = NOT subscribed. */
 export async function projectOwnerSubscribed(projectId: number): Promise<boolean> {
