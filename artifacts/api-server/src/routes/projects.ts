@@ -3189,10 +3189,18 @@ router.post("/projects", async (req, res) => {
         source: "jordy",
       })
       .returning();
+    // Seed a starter index.html so a brand-new project isn't blank in the preview. The
+    // <!--nebula-new--> marker lets the editor show the "build your website with Claude" panel until
+    // Claude actually builds the site (which replaces this file).
+    const starter = `<!doctype html><!--nebula-new-->
+<html lang="nl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${(parsed.data.name || "Nieuwe website").replace(/[<>&]/g, "")}</title>
+<style>body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#f7f4ee;color:#241f1a;text-align:center;padding:24px}.b{max-width:520px}.b h1{font-size:30px;margin:0 0 10px}.b p{color:#6b6456;line-height:1.6;margin:0}</style>
+</head><body><div class="b"><h1>Je nieuwe website</h1><p>Beschrijf hiernaast wat voor website je wilt — Claude Code bouwt 'm voor je.</p></div></body></html>`;
+    await db.insert(projectFiles).values({ projectId: project.id, path: "index.html", content: starter, language: "html" });
     res.status(201).json({
       ...project,
       messageCount: 0,
-      fileCount: 0,
+      fileCount: 1,
     });
   } catch (err) {
     req.log.error({ err }, "Failed to create project");

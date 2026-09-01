@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useLocation } from "wouter";
 import {
-  useImportProjectFromUrl, useListProjects, useDeleteProject,
+  useImportProjectFromUrl, useCreateProject, useListProjects, useDeleteProject,
   getListProjectsQueryKey, getGetRecentProjectsQueryKey,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -87,6 +87,13 @@ export function AiEditor() {
 
   const { data: projects } = useListProjects({ query: { enabled: !!user } });
   const importProject = useImportProjectFromUrl();
+  const createProject = useCreateProject();
+  const handleCreateBlank = () => {
+    if (createProject.isPending) return;
+    createProject.mutate({ data: { name: "Mijn nieuwe website", description: "" } }, {
+      onSuccess: (p) => { refresh(); setLocation(`/projects/${p.id}`); },
+    });
+  };
   const deleteProject = useDeleteProject();
   const project = user && projects && projects.length > 0
     ? [...projects].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())[0]
@@ -271,6 +278,10 @@ export function AiEditor() {
             </Button>
           </div>
           {error && (<p className="mt-3 text-sm text-destructive text-center" data-testid="text-import-error">{error}</p>)}
+          <div className="mt-3 flex items-center gap-3 text-xs text-muted-foreground"><div className="h-px flex-1 bg-border" /> of <div className="h-px flex-1 bg-border" /></div>
+          <Button variant="outline" size="lg" className="mt-3 w-full h-12 font-semibold gap-2" disabled={createProject.isPending} onClick={handleCreateBlank} data-testid="button-new-website">
+            {createProject.isPending ? (<><Loader2 className="h-5 w-5 animate-spin" /> Aanmaken…</>) : (<><Sparkles className="h-5 w-5" /> Nieuwe website vanaf nul met Claude Code</>)}
+          </Button>
           <ClaudeStatusCard />
           <div className="mt-8 rounded-2xl border border-border bg-card shadow-lg p-8 text-center">
             <h2 className="text-2xl font-bold tracking-tight">Begin je project</h2>

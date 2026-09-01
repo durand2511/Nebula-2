@@ -1260,6 +1260,10 @@ export function ProjectWorkspace() {
   const [shots, setShots] = useState<Shot[]>([]);
   const [marquee, setMarquee] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const [sendingShots, setSendingShots] = useState(false);
+  // Brand-new (empty) project: the starter index.html carries a <!--nebula-new--> marker until Claude
+  // actually builds the site. Show a "build with Claude" panel on the preview while it's there.
+  const [buildPrompt, setBuildPrompt] = useState("");
+  const [buildDismissed, setBuildDismissed] = useState(false);
   const [dropActive, setDropActive] = useState(false);
   const dragRef = useRef<{ x: number; y: number } | null>(null);
   const dropDepth = useRef(0);
@@ -2656,6 +2660,18 @@ export function ProjectWorkspace() {
     }
   }, [files, project?.name]);
   const previewHtml = buildPreviewHtml(files, isImported, previewPage);
+  const isNewProject = useMemo(() => {
+    const idx = files?.find((f) => f.path === "index.html");
+    return !!idx && idx.content.includes("nebula-new");
+  }, [files]);
+  const startBuild = () => {
+    const t = buildPrompt.trim();
+    if (!t) return;
+    const msg = `Bouw een complete, verzorgde website voor mij: ${t}. Maak mooie pagina's met nette navigatie en een professioneel ontwerp, en vervang de placeholder index.html volledig.\r`;
+    const sent = termHandleRef.current?.send(msg);
+    if (sent) { setBuildDismissed(true); setBuildPrompt(""); }
+    else window.alert("Koppel eerst Claude Code — log in de terminal links in.");
+  };
 
   // Computed from streamedText — handles FILE: and PATCH: blocks interleaved with narration text.
   const streamSegments = useMemo(() => parseStreamSegments(streamedText), [streamedText]);
@@ -3355,6 +3371,29 @@ export function ProjectWorkspace() {
                           style={{ left: marquee.x, top: marquee.y, width: marquee.w, height: marquee.h }}
                         />
                       )}
+                    </div>
+                  )}
+                  {/* Brand-new project: build-with-Claude island */}
+                  {isNewProject && !buildDismissed && (
+                    <div className="absolute inset-0 z-[67] flex items-center justify-center bg-background/75 backdrop-blur-sm p-4">
+                      <div className="w-[min(460px,94%)] rounded-2xl border border-border bg-card shadow-2xl p-6 text-center">
+                        <div className="h-11 w-11 rounded-xl bg-primary/10 flex items-center justify-center mx-auto"><Wand2 className="h-5 w-5 text-primary" /></div>
+                        <h3 className="mt-3 text-lg font-bold tracking-tight">Maak je website met Claude Code</h3>
+                        {claudeConnected ? (
+                          <>
+                            <p className="mt-1 text-sm text-muted-foreground">Beschrijf wat voor website je wilt — Claude Code bouwt 'm voor je.</p>
+                            <textarea value={buildPrompt} onChange={(e) => setBuildPrompt(e.target.value)} rows={3} placeholder="bijv. een strakke website voor mijn kapsalon met openingstijden, prijzen en een contactpagina" className="mt-3 w-full rounded-xl border border-border bg-background px-3 py-2 text-sm resize-none outline-none focus:border-primary" data-testid="input-build-prompt" />
+                            <Button className="mt-3 w-full h-11 font-bold gap-2" disabled={!buildPrompt.trim()} onClick={startBuild} data-testid="button-build-site"><Wand2 className="h-4 w-4" /> Bouw mijn website</Button>
+                            <button type="button" className="mt-2 text-xs text-muted-foreground hover:text-foreground" onClick={() => setBuildDismissed(true)}>Ik doe het zelf in de terminal</button>
+                          </>
+                        ) : (
+                          <>
+                            <p className="mt-1 text-sm text-muted-foreground">Koppel eerst Claude Code: log links in de terminal in. Daarna typ je hier wat voor website je wilt.</p>
+                            <div className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-amber-50 border border-amber-300/60 text-amber-900 text-xs font-medium px-3 py-1.5"><TerminalIcon className="h-3.5 w-3.5" /> Nog niet gekoppeld</div>
+                            <div className="mt-3"><a href="/uitleg" target="_blank" rel="noreferrer" className="text-sm font-medium text-primary hover:underline">Hoe koppel ik Claude Code?</a></div>
+                          </>
+                        )}
+                      </div>
                     </div>
                   )}
                   {/* Loading overlay while a marked-area screenshot is being made */}
