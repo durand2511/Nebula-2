@@ -43,6 +43,7 @@ import {
   Unplug,
 } from "lucide-react";
 import JSZip from "jszip";
+import html2canvas from "html2canvas";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 // ScrollArea removed — using a plain div for scroll control
@@ -1254,13 +1255,19 @@ export function ProjectWorkspace() {
   const claudeConnectedRef = useRef(false);
   claudeConnectedRef.current = claudeConnected;
   const [pointSent, setPointSent] = useState(false);
-  // "Markeren": drag a blue rectangle over the preview → screenshot → send to Claude. Plus uploads.
-  type Shot = { id: string; dataUrl: string; path?: string; sending?: boolean };
+  // Attachments the user gives Claude: a "Markeren" screenshot, a pasted image, or any dragged file.
+  type Shot = { id: string; dataUrl: string; name: string; isImage: boolean; path?: string };
   const [shots, setShots] = useState<Shot[]>([]);
   const [marquee, setMarquee] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const [sendingShots, setSendingShots] = useState(false);
+  const [dropActive, setDropActive] = useState(false);
   const dragRef = useRef<{ x: number; y: number } | null>(null);
-  const shotUploadRef = useRef<HTMLInputElement>(null);
+  const dropDepth = useRef(0);
+  const addFileShot = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = () => setShots((prev) => [...prev, { id: `f${Date.now()}${Math.random().toString(36).slice(2, 6)}`, dataUrl: String(reader.result), name: file.name || (file.type.startsWith("image/") ? "afbeelding.png" : "bestand"), isImage: file.type.startsWith("image/") }]);
+    reader.readAsDataURL(file);
+  };
   const [claudeDisc, setClaudeDisc] = useState(false);
   const disconnectClaudeCode = async () => {
     if (!window.confirm("Claude ontkoppelen? Je logt uit en kunt daarna opnieuw inloggen met je Claude-account.")) return;
@@ -1627,9 +1634,8 @@ export function ProjectWorkspace() {
           if (!file) continue;
           e.preventDefault();
           e.stopPropagation();
-          const reader = new FileReader();
-          reader.onload = () => { setShots((prev) => [...prev, { id: `p${Date.now()}${Math.random().toString(36).slice(2, 6)}`, dataUrl: String(reader.result) }]); setActiveTab("preview"); };
-          reader.readAsDataURL(file);
+          addFileShot(file);
+          setActiveTab("preview");
           return;
         }
       }
@@ -1654,53 +1660,60 @@ export function ProjectWorkspace() {
     const s = dragRef.current;
     setMarquee({ x: Math.min(s.x, p.x), y: Math.min(s.y, p.y), w: Math.abs(p.x - s.x), h: Math.abs(p.y - s.y) });
   };
-  // On release: read the marked region's elements from the preview DOM (instant, no heavy rendering)
-  // and send Claude a precise description of what's there. No screenshot rasterizing (that froze the
-  // browser on real sites) — for an actual image, use the "Afbeelding" button.
-  const endMarquee = () => {
+  // On release: make a REAL screenshot of just the marked area and drop it in the tray (to send to
+  // Claude). We render only the smallest element that covers the selection — never the whole page —
+  // so it's fast and doesn't freeze the browser, then crop to the exact rectangle.
+  const [capturing, setCapturing] = useState(false);
+  const endMarquee = async () => {
     const rect = marquee;
     dragRef.current = null;
-    setMarquee(null);
-    if (!rect || rect.w < 8 || rect.h < 8) return;
-    if (!claudeConnectedRef.current) { setSelectMode(false); window.alert("Koppel eerst je Claude-account (klik op 'Claude koppelen' of open de Uitleg)."); return; }
+    if (!rect || rect.w < 8 || rect.h < 8) { setMarquee(null); return; }
     const iframe = previewIframeRef.current;
     const doc = iframe?.contentDocument;
-    if (!doc) { setSelectMode(false); return; }
-    // Sample a grid of points inside the rectangle (client coords) to find the elements there.
-    const found = new Set<Element>();
-    const cols = 5, rows = 5;
-    for (let i = 0; i < cols; i++) for (let j = 0; j < rows; j++) {
-      const px = rect.x + (rect.w * (i + 0.5)) / cols;
-      const py = rect.y + (rect.h * (j + 0.5)) / rows;
-      const el = doc.elementFromPoint(px, py);
-      if (el && el.tagName !== "HTML" && el.tagName !== "BODY") found.add(el);
+    if (!doc) { setMarquee(null); return; }
+    setCapturing(true);
+    try {
+      // Smallest element (walking up from the selection centre) whose box covers the marquee — capped
+      // so we never rasterise the entire document.
+      const cx = rect.x + rect.w / 2, cy = rect.y + rect.h / 2;
+      let node = (doc.elementFromPoint(cx, cy) as HTMLElement) || doc.body;
+      for (let i = 0; i < 10 && node.parentElement && node !== doc.body; i++) {
+        const r = node.getBoundingClientRect();
+        if (r.left <= rect.x && r.top <= rect.y && r.right >= rect.x + rect.w && r.bottom >= rect.y + rect.h) break;
+        node = node.parentElement;
+      }
+      const nb = node.getBoundingClientRect();
+      const scale = Math.min(2, iframe?.contentWindow?.devicePixelRatio || 1);
+      const rendered: HTMLCanvasElement = await Promise.race([
+        html2canvas(node, { useCORS: true, backgroundColor: "#ffffff", scale, logging: false, imageTimeout: 3000 } as Parameters<typeof html2canvas>[1]),
+        new Promise<HTMLCanvasElement>((_, rej) => setTimeout(() => rej(new Error("timeout")), 8000)),
+      ]);
+      // Crop the rendered element-canvas down to the marquee (both in the same client space × scale).
+      const sx = Math.max(0, (rect.x - nb.left) * scale);
+      const sy = Math.max(0, (rect.y - nb.top) * scale);
+      const sw = Math.min(rendered.width - sx, rect.w * scale);
+      const sh = Math.min(rendered.height - sy, rect.h * scale);
+      if (sw < 4 || sh < 4) throw new Error("empty");
+      const out = document.createElement("canvas");
+      out.width = Math.round(sw); out.height = Math.round(sh);
+      out.getContext("2d")!.drawImage(rendered, sx, sy, sw, sh, 0, 0, sw, sh);
+      const dataUrl = out.toDataURL("image/png");
+      setShots((prev) => [...prev, { id: `s${Date.now()}${Math.random().toString(36).slice(2, 6)}`, dataUrl, name: "markering.png", isImage: true }]);
+    } catch {
+      window.alert("Kon geen schermafbeelding van dit gebied maken. Tip: markeer een kleiner deel, of maak zelf een screenshot (⌘⇧4) en plak 'm — dan gaat-ie ook naar Claude.");
+    } finally {
+      setMarquee(null);
+      setCapturing(false);
     }
-    const parts: string[] = [];
-    for (const el of found) {
-      const tag = el.tagName.toLowerCase();
-      if (tag === "img") { const alt = (el as HTMLImageElement).getAttribute("alt") || ""; parts.push(alt ? `een afbeelding ("${alt}")` : "een afbeelding"); continue; }
-      const txt = (el.textContent || "").replace(/\s+/g, " ").trim().slice(0, 60);
-      if (txt) parts.push(`${tag} "${txt}"`);
-      else parts.push(tag);
-    }
-    const uniq = [...new Set(parts)].slice(0, 6);
-    const page = (previewPageRef.current ?? "index.html").replace(/^pages\//, "").replace(/\.html$/, "") || "index";
-    const desc = uniq.length ? ` Daar staat onder andere: ${uniq.join("; ")}.` : "";
-    const msg = `Op pagina "${page}" heb ik een gebied gemarkeerd dat ik wil aanpassen.${desc} Wat ik wil: `;
-    const sent = termHandleRef.current?.send(msg);
-    setSelectMode(false);
-    if (sent) { setPointSent(true); window.setTimeout(() => setPointSent(false), 4000); }
-    else window.alert("De terminal is niet klaar. Klik op 'Opnieuw starten' boven de terminal en probeer het nog eens.");
   };
-  const onShotUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files ?? []);
-    e.target.value = "";
-    for (const f of files.slice(0, 6)) {
-      if (!f.type.startsWith("image/")) continue;
-      const reader = new FileReader();
-      reader.onload = () => setShots((prev) => [...prev, { id: `u${Date.now()}${Math.random().toString(36).slice(2, 6)}`, dataUrl: String(reader.result) }]);
-      reader.readAsDataURL(f);
-    }
+  // Drag any file(s) onto the editor → they become attachments for Claude.
+  const onDropFiles = (e: React.DragEvent) => {
+    e.preventDefault();
+    dropDepth.current = 0;
+    setDropActive(false);
+    const files = Array.from(e.dataTransfer?.files ?? []);
+    for (const f of files.slice(0, 12)) addFileShot(f);
+    if (files.length) setActiveTab("preview");
   };
   const deleteShot = async (id: string) => {
     const shot = shots.find((s) => s.id === id);
@@ -1719,17 +1732,17 @@ export function ProjectWorkspace() {
       for (const s of shots) {
         if (s.path) { paths.push(s.path); updated.push(s); continue; }
         try {
-          const r = await fetch("/api/claude/ref", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ projectId, dataUrl: s.dataUrl }) });
+          const r = await fetch("/api/claude/ref", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ projectId, dataUrl: s.dataUrl, name: s.name }) });
           const d = await r.json().catch(() => ({}));
           if (r.ok && d.path) { paths.push(d.path); updated.push({ ...s, path: d.path }); }
           else { updated.push(s); }
         } catch { updated.push(s); }
       }
-      if (!paths.length) { window.alert("Kon de afbeelding(en) niet naar Claude sturen. Is Claude gekoppeld en klaar?"); setShots(updated); return; }
+      if (!paths.length) { window.alert("Kon de bestand(en) niet naar Claude sturen. Is Claude gekoppeld en klaar?"); setShots(updated); return; }
       const list = paths.join(", ");
       const msg = paths.length > 1
-        ? `Bekijk deze afbeeldingen (${list}) — ze tonen delen van mijn website die ik wil aanpassen: `
-        : `Bekijk deze afbeelding (${list}) — die toont het deel van mijn website dat ik wil aanpassen: `;
+        ? `Ik heb deze bestanden toegevoegd (${list}). Bekijk ze en gebruik ze voor mijn website: `
+        : `Ik heb dit bestand toegevoegd (${list}). Bekijk het en gebruik het voor mijn website: `;
       const sent = termHandleRef.current?.send(msg);
       if (sent) {
         setShots([]);
@@ -2779,7 +2792,22 @@ export function ProjectWorkspace() {
       )}
 
       {/* Main Workspace */}
-      <div className="flex-1 flex overflow-hidden">
+      <div
+        className="flex-1 flex overflow-hidden relative"
+        onDragEnter={(e) => { if (Array.from(e.dataTransfer?.types ?? []).includes("Files")) { e.preventDefault(); dropDepth.current++; setDropActive(true); } }}
+        onDragOver={(e) => { if (Array.from(e.dataTransfer?.types ?? []).includes("Files")) { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; } }}
+        onDragLeave={(e) => { if (Array.from(e.dataTransfer?.types ?? []).includes("Files")) { dropDepth.current = Math.max(0, dropDepth.current - 1); if (dropDepth.current === 0) setDropActive(false); } }}
+        onDrop={onDropFiles}
+      >
+        {dropActive && (
+          <div className="absolute inset-0 z-[95] flex items-center justify-center bg-primary/10 border-2 border-dashed border-primary pointer-events-none">
+            <div className="rounded-2xl bg-background/95 shadow-xl px-6 py-4 text-center">
+              <ImagePlus className="h-7 w-7 text-primary mx-auto" />
+              <p className="mt-2 font-semibold text-foreground">Laat los om naar Claude te sturen</p>
+              <p className="text-xs text-muted-foreground">Elk bestandstype — afbeeldingen, PDF's, teksten…</p>
+            </div>
+          </div>
+        )}
         {/* Left Panel: Claude Code terminal (the editor) */}
         <div className="w-[600px] max-w-[46vw] min-w-[440px] border-r border-border bg-[#0f0e14] flex flex-col shrink-0">
           <div className="flex items-center gap-2 px-3 py-2 border-b border-white/10 text-xs text-white/70">
@@ -2859,19 +2887,6 @@ export function ProjectWorkspace() {
                   >
                     <MousePointerClick className="h-3.5 w-3.5 mr-1.5" />
                     {selectMode ? "Klaar met markeren" : "Markeren"}
-                  </Button>
-                )}
-                {!isStreaming && activeTab === "preview" && previewHtml && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-8 text-muted-foreground hover:text-foreground"
-                    onClick={() => shotUploadRef.current?.click()}
-                    title="Voeg een afbeelding/screenshot toe die naar Claude gaat"
-                    data-testid="button-add-image"
-                  >
-                    <ImagePlus className="h-3.5 w-3.5 mr-1.5" />
-                    Afbeelding
                   </Button>
                 )}
                 {!isStreaming && activeTab === "preview" && previewHtml && (
@@ -3306,7 +3321,7 @@ export function ProjectWorkspace() {
                       data-testid="marquee-overlay"
                     >
                       <div className="absolute top-3 left-1/2 -translate-x-1/2 rounded-full bg-primary text-primary-foreground text-xs font-medium px-4 py-2 shadow-lg pointer-events-none">
-                        {claudeConnected ? "Houd ingedrukt en sleep een kader om het gebied — laat los om naar Claude te sturen" : "Koppel eerst Claude om een gebied te markeren"}
+                        {capturing ? "Schermafbeelding maken…" : "Houd ingedrukt en sleep een kader — laat los voor een schermafbeelding"}
                       </div>
                       {marquee && (
                         <div
@@ -3316,14 +3331,13 @@ export function ProjectWorkspace() {
                       )}
                     </div>
                   )}
-                  {/* Tray of captured/uploaded screenshots waiting to go to Claude */}
+                  {/* Tray of attachments (screenshots / pasted images / dragged files) for Claude */}
                   {shots.length > 0 && (
                     <div className="absolute bottom-3 left-3 right-3 z-[66] rounded-xl border border-border bg-background/95 backdrop-blur shadow-xl p-3">
                       <div className="flex items-center gap-2 mb-2">
-                        <span className="text-xs font-semibold text-foreground">{shots.length} schermafbeelding{shots.length > 1 ? "en" : ""}</span>
-                        <span className="text-[11px] text-muted-foreground">— gaan naar Claude</span>
+                        <span className="text-xs font-semibold text-foreground">{shots.length} bestand{shots.length > 1 ? "en" : ""} klaar</span>
+                        <span className="text-[11px] text-muted-foreground">— sleep bestanden hierheen of plak een screenshot</span>
                         <div className="ml-auto flex items-center gap-2">
-                          <Button size="sm" variant="ghost" className="h-7" onClick={() => shotUploadRef.current?.click()} data-testid="button-upload-shot"><ImagePlus className="h-3.5 w-3.5 mr-1" /> Afbeelding toevoegen</Button>
                           <Button size="sm" className="h-7" disabled={sendingShots || !claudeConnected} onClick={sendShotsToClaude} data-testid="button-send-shots">
                             {sendingShots ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Send className="h-3.5 w-3.5 mr-1" />} Stuur naar Claude
                           </Button>
@@ -3332,7 +3346,9 @@ export function ProjectWorkspace() {
                       <div className="flex gap-2 overflow-x-auto">
                         {shots.map((s) => (
                           <div key={s.id} className="relative shrink-0">
-                            <img src={s.dataUrl} alt="" className="h-16 w-auto max-w-[160px] rounded-md border border-border object-cover" />
+                            {s.isImage
+                              ? <img src={s.dataUrl} alt="" className="h-16 w-auto max-w-[160px] rounded-md border border-border object-cover" />
+                              : <div className="h-16 w-[140px] rounded-md border border-border bg-muted/50 flex flex-col items-center justify-center px-2 text-center"><FileCode className="h-5 w-5 text-muted-foreground" /><span className="mt-1 text-[10px] text-muted-foreground truncate max-w-full">{s.name}</span></div>}
                             <button type="button" onClick={() => deleteShot(s.id)} className="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full bg-background border border-border shadow flex items-center justify-center text-muted-foreground hover:text-destructive" title="Verwijderen" data-testid="button-delete-shot"><X className="h-3 w-3" /></button>
                           </div>
                         ))}
@@ -3340,7 +3356,6 @@ export function ProjectWorkspace() {
                       {!claudeConnected && <p className="text-[11px] text-amber-600 mt-2">Koppel eerst Claude om deze naar de editor te sturen.</p>}
                     </div>
                   )}
-                  <input ref={shotUploadRef} type="file" accept="image/*" multiple className="hidden" onChange={onShotUpload} data-testid="input-shot-upload" />
                   {pointSent && (
                     <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[60] rounded-full bg-emerald-600 text-white text-xs font-medium px-4 py-2 shadow-lg pointer-events-none">
                       Naar Claude gestuurd — typ in de terminal wat er moet veranderen en druk op Enter

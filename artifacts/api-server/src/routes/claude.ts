@@ -37,7 +37,8 @@ router.post("/claude/ref", express.json({ limit: "12mb" }), async (req, res) => 
   const projectId = Number(req.body?.projectId) || 0;
   if (!(await ownsProject(u.id, projectId))) { res.status(403).json({ error: "Geen toegang tot dit project." }); return; }
   const dataUrl = String(req.body?.dataUrl || "");
-  const r = await writeSessionRef(u.id, projectId, dataUrl);
+  const name = req.body?.name ? String(req.body.name) : undefined;
+  const r = await writeSessionRef(u.id, projectId, dataUrl, name);
   if ("error" in r) { res.status(400).json(r); return; }
   res.json({ ok: true, path: r.path });
 });

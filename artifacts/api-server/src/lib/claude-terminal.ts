@@ -565,28 +565,40 @@ function liveSessionFor(userId: number, projectId: number): Session | null {
   return s && !s.exited && s.projectId === projectId ? s : null;
 }
 
-const REF_EXT: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif": "gif" };
+const MIME_EXT: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif": "gif", "image/svg+xml": "svg", "application/pdf": "pdf", "text/plain": "txt", "text/csv": "csv", "application/json": "json", "text/html": "html", "application/zip": "zip" };
 
-export async function writeSessionRef(userId: number, projectId: number, dataUrl: string): Promise<{ path: string } | { error: string }> {
+function sanitizeBase(name: string): string {
+  const base = (name || "").split(/[\\/]/).pop() || "";
+  const cleaned = base.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^[-.]+/, "").slice(0, 80);
+  return cleaned;
+}
+
+// Save any file the user gives Claude (screenshot, dropped file of any type, pasted image) into the
+// live session workspace under _refs/. Accepts a data: URL of any mime type; keeps the original file
+// name when provided. Returns the workspace-relative path to reference in the prompt.
+export async function writeSessionRef(userId: number, projectId: number, dataUrl: string, name?: string): Promise<{ path: string } | { error: string }> {
   const s = liveSessionFor(userId, projectId);
   if (!s) return { error: "Geen actieve Claude-sessie. Open eerst je project en wacht tot Claude klaar is." };
-  const m = /^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/.exec(dataUrl);
-  if (!m) return { error: "Ongeldige afbeelding." };
-  const ext = REF_EXT[m[1].toLowerCase()] || "png";
+  const m = /^data:([a-zA-Z0-9.+/-]+)?;base64,(.+)$/.exec(dataUrl);
+  if (!m) return { error: "Ongeldig bestand." };
+  const mime = (m[1] || "application/octet-stream").toLowerCase();
   const buf = Buffer.from(m[2], "base64");
-  if (buf.length > 8 * 1024 * 1024) return { error: "Afbeelding is te groot (max 8 MB)." };
+  if (buf.length > 25 * 1024 * 1024) return { error: "Bestand is te groot (max 25 MB)." };
   const dir = path.join(s.cwd, REFS_DIR);
   await fs.mkdir(dir, { recursive: true });
-  // Next free _refs/shotN.ext
+  const given = sanitizeBase(name || "");
+  const ext = (given.includes(".") ? given.split(".").pop()! : (MIME_EXT[mime] || "bin")).toLowerCase();
+  const stem = given.includes(".") ? given.slice(0, given.lastIndexOf(".")) : (given || "bestand");
+  // Find a free name, keeping the given stem where possible.
+  let rel = `${REFS_DIR}/${stem || "bestand"}.${ext}`;
   let n = 1;
-  for (;;) { const rel = `${REFS_DIR}/shot${n}.${ext}`; if (!fsSync.existsSync(path.join(s.cwd, rel))) break; n++; if (n > 999) return { error: "Te veel afbeeldingen." }; }
-  const rel = `${REFS_DIR}/shot${n}.${ext}`;
+  while (fsSync.existsSync(path.join(s.cwd, rel))) { rel = `${REFS_DIR}/${stem || "bestand"}-${n}.${ext}`; n++; if (n > 999) return { error: "Te veel bestanden." }; }
   const abs = safeJoin(s.cwd, rel);
   if (!abs) return { error: "Ongeldig pad." };
   await fs.writeFile(abs, buf);
   const u = unixUser(userId);
   if (u) { try { execFileSync("chown", [`${u.uid}:${u.gid}`, abs], { stdio: "ignore" }); } catch { /* best effort */ } }
-  logger.info({ key: s.key, rel, bytes: buf.length }, "[claude-terminal] saved reference image");
+  logger.info({ key: s.key, rel, bytes: buf.length, mime }, "[claude-terminal] saved reference file");
   return { path: rel };
 }
 
