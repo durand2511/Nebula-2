@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useLocation } from "wouter";
 import {
   useImportProjectFromUrl, useCreateProject, useListProjects, useDeleteProject,
@@ -335,7 +335,31 @@ function BillingDialog({ open, onClose }: { open: boolean; onClose: () => void }
   useEffect(() => { if (open) { setData(null); load(); } }, [open]);
   if (!open) return null;
 
-  const subscribe = async () => { setBusy(true); const r = await billingApi("/subscribe", {}); setBusy(false); if (r.ok && r.d.url) window.location.href = r.d.url; else alert(r.d.error || "Abonneren mislukt."); };
+  const [checkoutOpen, setCheckoutOpen] = useState(false);
+  const embedRef = useRef<HTMLDivElement | null>(null);
+  const checkoutInst = useRef<{ mount: (el: HTMLElement) => void; destroy: () => void } | null>(null);
+  const subscribe = async () => {
+    setBusy(true);
+    const r = await billingApi("/subscribe", {});
+    setBusy(false);
+    if (!r.ok) { alert(r.d.error || "Abonneren mislukt."); return; }
+    if (r.d.clientSecret && r.d.publishableKey) {
+      try {
+        const { loadStripe } = await import("@stripe/stripe-js");
+        const stripe = await loadStripe(r.d.publishableKey);
+        if (!stripe) throw new Error("stripe");
+        setCheckoutOpen(true);
+        const checkout = await (stripe as any).initEmbeddedCheckout({ clientSecret: r.d.clientSecret });
+        checkoutInst.current = checkout;
+        // wait a tick for the mount div to render
+        setTimeout(() => { if (embedRef.current) checkout.mount(embedRef.current); }, 30);
+        return;
+      } catch { /* fall through to hosted */ }
+    }
+    if (r.d.url) window.location.href = r.d.url;
+    else alert("Abonneren mislukt.");
+  };
+  const closeCheckout = () => { try { checkoutInst.current?.destroy(); } catch { /* ignore */ } checkoutInst.current = null; setCheckoutOpen(false); };
   const cancel = async () => { if (!window.confirm("Je abonnement opzeggen? Je houdt toegang tot het einde van de periode.")) return; setBusy(true); const r = await billingApi("/cancel", {}); setBusy(false); if (r.ok) load(); else alert(r.d.error || "Opzeggen mislukt."); };
   const price = data?.priceEur ?? 50;
 
@@ -367,6 +391,17 @@ function BillingDialog({ open, onClose }: { open: boolean; onClose: () => void }
           </div>
         )}
       </div>
+      {checkoutOpen && (
+        <div className="fixed inset-0 z-[95] flex items-start justify-center overflow-y-auto bg-black/50 p-4" onClick={closeCheckout}>
+          <div className="w-[min(560px,96%)] my-8 rounded-2xl bg-white shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-3 border-b border-neutral-200">
+              <span className="font-semibold text-neutral-900">Afrekenen — €{price}/maand</span>
+              <button onClick={closeCheckout} className="h-8 w-8 rounded-full hover:bg-neutral-100 flex items-center justify-center text-neutral-500" data-testid="button-close-checkout"><X className="h-4 w-4" /></button>
+            </div>
+            <div ref={embedRef} className="p-2" />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

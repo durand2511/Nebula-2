@@ -40,6 +40,9 @@ services:
         sync: false
       - key: STRIPE_SECRET_KEY
         sync: false
+      # Publishable key (pk_...) — enables the nicer in-app (embedded) subscription checkout.
+      - key: STRIPE_PUBLISHABLE_KEY
+        sync: false
       - key: STRIPE_WEBHOOK_SECRET
         sync: false
       - key: ANTHROPIC_API_KEY

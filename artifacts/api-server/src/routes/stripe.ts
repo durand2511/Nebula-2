@@ -645,19 +645,34 @@ router.post("/billing/subscribe", async (req, res) => {
   try {
     const customer = await ensureCustomer(u);
     const base = baseUrl(req as any);
-    const useFixedPrice = /^price_/.test(NEBULA_PRICE);
-    const lineItem = useFixedPrice
-      ? { price: NEBULA_PRICE, quantity: 1 }
+    // Only use a fixed Stripe price when one is EXPLICITLY configured via env — otherwise build the
+    // €50/mo price inline (the old hardcoded fallback was €69,99).
+    const envPrice = process.env.STRIPE_NEBULA_PRICE || "";
+    const lineItem = /^price_/.test(envPrice)
+      ? { price: envPrice, quantity: 1 }
       : { quantity: 1, price_data: { currency: "eur", unit_amount: Math.round(SUBSCRIPTION_PRICE_EUR * 100), recurring: { interval: "month" }, product_data: { name: "Nebula — volledige toegang" } } };
-    const session = await stripeReq("POST", "checkout/sessions", {
+    const common: Record<string, unknown> = {
       mode: "subscription", customer, client_reference_id: String(u.id),
-      "payment_method_types[0]": "card",
-      "payment_method_types[1]": "ideal",
+      payment_method_types: ["card", "ideal"],
       billing_address_collection: "required",
-      "customer_update[address]": "auto",
-      "customer_update[name]": "auto",
+      customer_update: { address: "auto", name: "auto" },
       line_items: [lineItem],
       subscription_data: { metadata: { platformUserId: String(u.id) } },
+    };
+    const pk = process.env.STRIPE_PUBLISHABLE_KEY || "";
+    if (pk) {
+      // Nicer in-app (embedded) checkout — rendered inside the app, supports iDEAL + card.
+      const session = await stripeReq("POST", "checkout/sessions", {
+        ...common,
+        ui_mode: "embedded",
+        return_url: `${base}/ai-editor?sub=done&session_id={CHECKOUT_SESSION_ID}`,
+      });
+      res.json({ clientSecret: session.client_secret, publishableKey: pk });
+      return;
+    }
+    // Fallback: hosted Stripe Checkout (redirect).
+    const session = await stripeReq("POST", "checkout/sessions", {
+      ...common,
       success_url: `${base}/ai-editor?sub=ok`, cancel_url: `${base}/ai-editor?sub=cancel`,
     });
     res.json({ url: session.url });
