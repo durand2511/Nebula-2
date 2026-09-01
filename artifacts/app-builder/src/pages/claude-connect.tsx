@@ -43,6 +43,7 @@ export function ClaudeConnect() {
                 Je website wordt bewerkt door Claude Code, met jouw eigen Claude-abonnement. Koppelen doe je één keer:
                 Claude start hieronder, geeft je een link, je logt in bij Claude en plakt de code terug in de terminal. Daarna is alles gekoppeld.
               </p>
+              <button type="button" onClick={() => setLocation("/uitleg")} className="mt-3 inline-flex items-center gap-1.5 text-sm font-medium text-primary hover:underline" data-testid="link-full-guide">Bekijk de volledige uitleg (stap voor stap) <ArrowRight className="h-3.5 w-3.5" /></button>
               <ol className="mt-4 space-y-1.5 text-sm text-foreground/80 list-decimal pl-5">
                 <li>Nog geen abonnement? <a className="text-primary font-medium hover:underline inline-flex items-center gap-1" href="https://claude.ai/upgrade" target="_blank" rel="noreferrer">Koop een Claude-abonnement <ExternalLink className="h-3 w-3" /></a> (Pro of Max).</li>
                 <li>Kies in de terminal <span className="font-mono text-xs bg-muted px-1.5 py-0.5 rounded">Claude account with subscription</span> en open de link.</li>

@@ -10,6 +10,7 @@ import { ProjectWorkspace } from "@/pages/project-workspace";
 import { Privacy } from "@/pages/privacy";
 import { Voorwaarden } from "@/pages/voorwaarden";
 import { ClaudeConnect } from "@/pages/claude-connect";
+import { Uitleg } from "@/pages/uitleg";
 import NotFound from "@/pages/not-found";
 
 const queryClient = new QueryClient({
@@ -30,6 +31,7 @@ function Router() {
       <Route path="/privacy" component={Privacy} />
       <Route path="/voorwaarden" component={Voorwaarden} />
       <Route path="/claude" component={ClaudeConnect} />
+      <Route path="/uitleg" component={Uitleg} />
       <Route path="/projects/:id" component={ProjectWorkspace} />
       <Route component={NotFound} />
     </Switch>

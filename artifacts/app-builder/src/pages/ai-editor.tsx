@@ -40,9 +40,15 @@ function ClaudeStatusCard() {
         </p>
       </div>
       {connected ? (
-        <button type="button" onClick={disconnect} disabled={busy} className="text-xs text-muted-foreground hover:text-destructive inline-flex items-center gap-1" data-testid="button-claude-disconnect"><Unplug className="h-3.5 w-3.5" /> Ontkoppelen</button>
+        <div className="flex items-center gap-3">
+          <button type="button" onClick={() => setLocation("/uitleg")} className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2" data-testid="link-uitleg">Uitleg</button>
+          <button type="button" onClick={disconnect} disabled={busy} className="text-xs text-muted-foreground hover:text-destructive inline-flex items-center gap-1" data-testid="button-claude-disconnect"><Unplug className="h-3.5 w-3.5" /> Ontkoppelen</button>
+        </div>
       ) : (
-        <Button onClick={() => setLocation("/claude")} className="gap-2" data-testid="button-claude-connect">Claude koppelen <ArrowRight className="h-4 w-4" /></Button>
+        <div className="flex flex-col items-end gap-1.5">
+          <Button onClick={() => setLocation("/claude")} className="gap-2" data-testid="button-claude-connect">Claude koppelen <ArrowRight className="h-4 w-4" /></Button>
+          <button type="button" onClick={() => setLocation("/uitleg")} className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2" data-testid="link-uitleg">Hoe werkt dit? Bekijk de uitleg</button>
+        </div>
       )}
     </div>
   );
