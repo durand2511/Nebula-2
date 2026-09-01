@@ -26,6 +26,9 @@ export function Layout({ children }: { children: React.ReactNode }) {
             <Link href="/ai-editor" className={`rounded-full px-3.5 py-1 text-xs font-medium transition-colors ${(location === "/ai-editor" || location === "/projects") ? "bg-foreground text-background" : "text-foreground/60 hover:text-foreground hover:bg-foreground/5"}`}>
               Nebula
             </Link>
+            <Link href="/help" className={`rounded-full px-3.5 py-1 text-xs font-medium transition-colors ${(location === "/help" || location === "/uitleg" || location === "/platform-uitleg") ? "bg-foreground text-background" : "text-foreground/60 hover:text-foreground hover:bg-foreground/5"}`}>
+              Uitleg
+            </Link>
           </nav>
         </header>
       )}

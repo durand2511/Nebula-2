@@ -11,6 +11,8 @@ import { Privacy } from "@/pages/privacy";
 import { Voorwaarden } from "@/pages/voorwaarden";
 import { ClaudeConnect } from "@/pages/claude-connect";
 import { Uitleg } from "@/pages/uitleg";
+import { Help } from "@/pages/help";
+import { PlatformUitleg } from "@/pages/platform-uitleg";
 import NotFound from "@/pages/not-found";
 
 const queryClient = new QueryClient({
@@ -32,6 +34,8 @@ function Router() {
       <Route path="/voorwaarden" component={Voorwaarden} />
       <Route path="/claude" component={ClaudeConnect} />
       <Route path="/uitleg" component={Uitleg} />
+      <Route path="/help" component={Help} />
+      <Route path="/platform-uitleg" component={PlatformUitleg} />
       <Route path="/projects/:id" component={ProjectWorkspace} />
       <Route component={NotFound} />
     </Switch>
