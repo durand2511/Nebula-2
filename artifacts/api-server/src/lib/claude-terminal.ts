@@ -58,12 +58,17 @@ const CRED_POLL_MS = 2000;
 const MAX_FILE_BYTES = 5 * 1024 * 1024;
 const UID_BASE = 20000;                   // unix uid = UID_BASE + platform user id
 
+// Folder for reference images (screenshots / uploads) the user gives Claude — never synced to the DB.
+const REFS_DIR = "_refs";
 // Files/dirs in the workspace that are ours (never written back to the DB).
-const SYNC_IGNORE = new Set(["CLAUDE.md", ".claude", "_refs", "node_modules", ".git", ".DS_Store"]);
+const SYNC_IGNORE = new Set(["CLAUDE.md", ".claude", REFS_DIR, "node_modules", ".git", ".DS_Store"]);
 const BINARY_EXT = new Set(["png", "jpg", "jpeg", "gif", "webp", "ico", "pdf", "woff", "woff2", "ttf", "otf", "eot", "zip", "mp4", "mp3", "webm"]);
 
-// Tools a customer's Claude may never use inside our container (files only — no shell, no network).
-const DENIED_TOOLS = ["Bash", "WebFetch", "WebSearch", "Agent", "Task", "NotebookEdit", "KillShell", "BashOutput", "TaskOutput"];
+// Tools a customer's Claude may use: file tools + internet (WebFetch/WebSearch are allowed — handy
+// for fetching content/inspiration). Shell (Bash) and git stay off for now (a separate, opt-in
+// decision). Cross-tenant isolation is enforced at the OS level (own unix uid, 0700 home/workspace,
+// and a child env that carries NO platform secrets), independent of which tools are on.
+const DENIED_TOOLS = ["Bash", "Agent", "Task", "NotebookEdit", "KillShell", "BashOutput", "TaskOutput"];
 
 export const SESSION_SETTINGS = {
   permissions: { deny: DENIED_TOOLS, defaultMode: "acceptEdits", disableBypassPermissionsMode: "disable" },
@@ -187,8 +192,13 @@ function claudeMd(projectName: string): string {
     "- Pas het bestand aan dat de eigenaar is van de wijziging: styling → CSS, gedrag → JS, tekst → de HTML van die pagina.",
     "- Laat bestaande layout, secties, navigatie en content intact tenzij de wijziging dat vereist.",
     "- Nieuwe pagina = nieuw `.html`-bestand in de hoofdmap; koppel 'm in de navigatie van de andere pagina's.",
-    "- Je kunt GEEN shell-commando's uitvoeren en niets van internet ophalen; je werkt alleen met de bestanden hier.",
+    "- Je mag dingen van internet ophalen (WebFetch/WebSearch) als dat helpt. Shell-commando's kun je (nog) niet uitvoeren; je werkt met de bestanden hier.",
     "- Elke opgeslagen wijziging verschijnt automatisch in de preview naast de terminal en wordt direct bewaard.",
+    "",
+    "## HEEL BELANGRIJK — isolatie (nooit overtreden)",
+    "- Deze map is UITSLUITEND het project van deze ene klant. Er is hier geen enkele toegang tot andere klanten, andere projecten, de gedeelde database of het Nebula-platform, en die komt er ook niet.",
+    "- Beantwoord NOOIT vragen over andere klanten, andere websites, of gegevens buiten dit project, en probeer daar ook nooit bij te komen. Zeg dan vriendelijk dat je alleen met dit project mag werken.",
+    "- Werk alleen binnen deze map. Ga niet buiten deze map zoeken of lezen.",
     "",
     "## Geïmporteerde sites",
     "Sommige bestanden zijn grote, geminificeerde HTML van een geïmporteerde site — herschrijf die niet. Voor een site-brede restyle: schrijf/verleng `.nebula-restyle.css` (wordt automatisch op elke pagina na de eigen CSS geladen) en richt je op de echte selectors van de site.",
@@ -544,6 +554,50 @@ export async function stopProjectSession(projectId: number): Promise<void> {
 export function hasLiveSession(projectId: number): boolean {
   for (const s of sessions.values()) if (s.projectId === projectId && !s.exited) return true;
   return false;
+}
+
+// ── Reference images ("aanwijzen"/upload) ───────────────────────────────────────────────────────
+// The user marks an area of the preview (screenshot) or uploads an image; we drop it into the live
+// session's workspace under _refs/ (never synced to the DB) so Claude can Read it. Requires a live
+// session for that (user, project). Returns the workspace-relative path to reference in the prompt.
+function liveSessionFor(userId: number, projectId: number): Session | null {
+  const s = sessions.get(sessionKey(userId, projectId));
+  return s && !s.exited && s.projectId === projectId ? s : null;
+}
+
+const REF_EXT: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif": "gif" };
+
+export async function writeSessionRef(userId: number, projectId: number, dataUrl: string): Promise<{ path: string } | { error: string }> {
+  const s = liveSessionFor(userId, projectId);
+  if (!s) return { error: "Geen actieve Claude-sessie. Open eerst je project en wacht tot Claude klaar is." };
+  const m = /^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/.exec(dataUrl);
+  if (!m) return { error: "Ongeldige afbeelding." };
+  const ext = REF_EXT[m[1].toLowerCase()] || "png";
+  const buf = Buffer.from(m[2], "base64");
+  if (buf.length > 8 * 1024 * 1024) return { error: "Afbeelding is te groot (max 8 MB)." };
+  const dir = path.join(s.cwd, REFS_DIR);
+  await fs.mkdir(dir, { recursive: true });
+  // Next free _refs/shotN.ext
+  let n = 1;
+  for (;;) { const rel = `${REFS_DIR}/shot${n}.${ext}`; if (!fsSync.existsSync(path.join(s.cwd, rel))) break; n++; if (n > 999) return { error: "Te veel afbeeldingen." }; }
+  const rel = `${REFS_DIR}/shot${n}.${ext}`;
+  const abs = safeJoin(s.cwd, rel);
+  if (!abs) return { error: "Ongeldig pad." };
+  await fs.writeFile(abs, buf);
+  const u = unixUser(userId);
+  if (u) { try { execFileSync("chown", [`${u.uid}:${u.gid}`, abs], { stdio: "ignore" }); } catch { /* best effort */ } }
+  logger.info({ key: s.key, rel, bytes: buf.length }, "[claude-terminal] saved reference image");
+  return { path: rel };
+}
+
+export async function deleteSessionRef(userId: number, projectId: number, rel: string): Promise<{ ok: boolean }> {
+  const s = liveSessionFor(userId, projectId);
+  if (!s) return { ok: false };
+  if (!/^_refs\/[A-Za-z0-9._-]+$/.test(rel)) return { ok: false };
+  const abs = safeJoin(s.cwd, rel);
+  if (!abs) return { ok: false };
+  await fs.rm(abs, { force: true }).catch(() => {});
+  return { ok: true };
 }
 
 // ── WebSocket endpoint ────────────────────────────────────────────────────────────────────────

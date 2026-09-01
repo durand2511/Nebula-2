@@ -3,11 +3,14 @@
  * subscription → account → the exact on-screen login flow) and how to edit the site afterwards.
  * Reached from the "Uitleg" button above the terminal (not inside the terminal).
  */
+import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
+import { ClaudeTerminal } from "@/components/claude-terminal";
+import { getToken } from "@/lib/session";
 import {
-  ArrowLeft, ArrowRight, ExternalLink, ShoppingCart, UserPlus, Terminal as TerminalIcon,
-  MousePointerClick, ClipboardPaste, Check, Wand2, Eye, Rocket, KeyRound, LogIn, AlertTriangle,
+  ArrowLeft, ArrowDown, ExternalLink, ShoppingCart, UserPlus, Terminal as TerminalIcon,
+  MousePointerClick, ClipboardPaste, Check, Wand2, Eye, Rocket, KeyRound, LogIn, AlertTriangle, Unplug,
 } from "lucide-react";
 
 function StepRow({ n, last, icon, title, children }: { n: number; last?: boolean; icon: React.ReactNode; title: string; children: React.ReactNode }) {
@@ -31,6 +34,24 @@ const Kbd = ({ children }: { children: React.ReactNode }) => (
 
 export function Uitleg() {
   const [, setLocation] = useLocation();
+  const [connected, setConnected] = useState<boolean | null>(null);
+  const [busy, setBusy] = useState(false);
+  const loggedIn = !!getToken();
+
+  useEffect(() => {
+    if (!loggedIn) return;
+    fetch("/api/claude/status").then((r) => r.json()).then((d) => setConnected(!!d.connected)).catch(() => setConnected(false));
+  }, [loggedIn]);
+
+  const scrollToTerminal = () => {
+    const el = document.getElementById("koppel-terminal");
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+  const disconnect = async () => {
+    if (!window.confirm("Claude ontkoppelen? Je kunt daarna opnieuw inloggen met je Claude-account.")) return;
+    setBusy(true);
+    try { await fetch("/api/claude/disconnect", { method: "POST" }); setConnected(false); } finally { setBusy(false); }
+  };
   return (
     <div className="flex-1 w-full px-4 py-8 pb-20">
       <div className="mx-auto max-w-3xl">
@@ -60,10 +81,10 @@ export function Uitleg() {
             <span className="font-semibold text-sm">Abonnement kopen</span>
             <span className="text-xs text-muted-foreground inline-flex items-center gap-1">Claude Pro of Max <ExternalLink className="h-3 w-3" /></span>
           </a>
-          <button type="button" onClick={() => setLocation("/claude")} className="rounded-xl border border-primary bg-primary/5 p-4 hover:bg-primary/10 transition flex flex-col gap-1.5 text-left" data-testid="cta-connect">
+          <button type="button" onClick={scrollToTerminal} className="rounded-xl border border-primary bg-primary/5 p-4 hover:bg-primary/10 transition flex flex-col gap-1.5 text-left" data-testid="cta-connect">
             <TerminalIcon className="h-5 w-5 text-primary" />
-            <span className="font-semibold text-sm">Nu koppelen</span>
-            <span className="text-xs text-muted-foreground inline-flex items-center gap-1">Open het koppel-venster <ArrowRight className="h-3 w-3" /></span>
+            <span className="font-semibold text-sm">Open het koppel-venster</span>
+            <span className="text-xs text-muted-foreground inline-flex items-center gap-1">Onderaan deze pagina <ArrowDown className="h-3 w-3" /></span>
           </button>
         </div>
 
@@ -87,8 +108,9 @@ export function Uitleg() {
               <a href="https://claude.ai/upgrade" target="_blank" rel="noreferrer"><Button size="sm" variant="outline" className="gap-1.5">Naar claude.ai/upgrade <ExternalLink className="h-3.5 w-3.5" /></Button></a>
             </StepRow>
 
-            <StepRow n={3} icon={<TerminalIcon className="h-4 w-4 text-primary" />} title="Open het koppel-venster">
-              <p>Klik op <strong className="text-foreground">Nu koppelen</strong> hierboven (of op <strong className="text-foreground">Claude koppelen</strong> op je startscherm). Er opent een zwart venster — de terminal. Na een paar seconden verschijnt daar <strong className="text-foreground">vanzelf</strong> een menu met de titel <em>"Select login method"</em>.</p>
+            <StepRow n={3} icon={<TerminalIcon className="h-4 w-4 text-primary" />} title="Open het koppel-venster (onderaan deze pagina)">
+              <p>Scroll naar het zwarte venster onderaan deze pagina — of klik op <strong className="text-foreground">Open het koppel-venster</strong> bovenaan. Na een paar seconden verschijnt daar <strong className="text-foreground">vanzelf</strong> een menu met de titel <em>"Select login method"</em>.</p>
+              <Button size="sm" variant="outline" className="gap-1.5" onClick={scrollToTerminal} data-testid="button-jump-terminal">Naar het koppel-venster <ArrowDown className="h-3.5 w-3.5" /></Button>
             </StepRow>
 
             <StepRow n={4} icon={<LogIn className="h-4 w-4 text-primary" />} title="Kies de eerste optie en druk op Enter">
@@ -154,6 +176,37 @@ export function Uitleg() {
           </ol>
 
           <p className="text-xs text-muted-foreground mt-4">Tip: typ <span className="font-mono">/exit</span> om Claude te stoppen. De volgende keer start-ie vanzelf weer op.</p>
+        </section>
+
+        {/* Koppel-venster onderaan de pagina */}
+        <section id="koppel-terminal" className="mt-8 rounded-2xl border border-border bg-card shadow-sm overflow-hidden scroll-mt-4">
+          <div className="p-6 md:p-7 border-b border-border/60 flex flex-wrap items-center gap-4">
+            <div className="flex-1 min-w-[240px]">
+              <div className="text-xs font-bold uppercase tracking-wider text-primary">Koppel-venster</div>
+              <h2 className="mt-1 text-2xl font-bold tracking-tight">Koppel hier je Claude-account</h2>
+              <p className="text-muted-foreground mt-1 text-sm">Volg de stappen hierboven in dit venster. Eén keer doen.</p>
+            </div>
+            {loggedIn && connected !== null && (
+              connected ? (
+                <div className="rounded-xl border border-emerald-300/60 bg-emerald-50 px-4 py-3">
+                  <div className="flex items-center gap-2 text-emerald-800 font-semibold text-sm"><Check className="h-4 w-4" /> Gekoppeld</div>
+                  <button type="button" onClick={disconnect} disabled={busy} className="mt-1 text-xs text-muted-foreground hover:text-destructive inline-flex items-center gap-1" data-testid="button-uitleg-disconnect"><Unplug className="h-3 w-3" /> Ontkoppelen</button>
+                </div>
+              ) : (
+                <div className="rounded-xl border border-amber-300/60 bg-amber-50 px-4 py-3 text-amber-900 text-sm font-medium">Nog niet gekoppeld</div>
+              )
+            )}
+          </div>
+          <div className="p-3 md:p-4 bg-[#0f0e14]">
+            {loggedIn ? (
+              <ClaudeTerminal projectId={0} className="h-[460px]" onConnected={(c) => { if (c) setConnected(true); }} />
+            ) : (
+              <div className="h-[200px] flex flex-col items-center justify-center text-center text-white/70 gap-3">
+                <p>Log eerst in op je Nebula-account om te kunnen koppelen.</p>
+                <Button onClick={() => setLocation("/ai-editor")} data-testid="button-login-first">Inloggen</Button>
+              </div>
+            )}
+          </div>
         </section>
 
       </div>

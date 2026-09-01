@@ -43,6 +43,7 @@ import {
   Unplug,
 } from "lucide-react";
 import JSZip from "jszip";
+import html2canvas from "html2canvas";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 // ScrollArea removed — using a plain div for scroll control
@@ -1254,6 +1255,14 @@ export function ProjectWorkspace() {
   const claudeConnectedRef = useRef(false);
   claudeConnectedRef.current = claudeConnected;
   const [pointSent, setPointSent] = useState(false);
+  // "Markeren": drag a blue rectangle over the preview → screenshot → send to Claude. Plus uploads.
+  type Shot = { id: string; dataUrl: string; path?: string; sending?: boolean };
+  const [shots, setShots] = useState<Shot[]>([]);
+  const [marquee, setMarquee] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+  const [capturing, setCapturing] = useState(false);
+  const [sendingShots, setSendingShots] = useState(false);
+  const dragRef = useRef<{ x: number; y: number } | null>(null);
+  const shotUploadRef = useRef<HTMLInputElement>(null);
   const [claudeDisc, setClaudeDisc] = useState(false);
   const disconnectClaudeCode = async () => {
     if (!window.confirm("Claude ontkoppelen? Je logt uit en kunt daarna opnieuw inloggen met je Claude-account.")) return;
@@ -1598,14 +1607,116 @@ export function ProjectWorkspace() {
     return () => window.removeEventListener("message", onMessage);
   }, []);
 
-  // Tell the preview iframe to enter/leave select mode. Also re-sent on iframe load (below).
+  // The old in-iframe element-outline is no longer used (we mark areas from the parent). Keep it OFF.
   useEffect(() => {
-    try { previewIframeRef.current?.contentWindow?.postMessage({ __buildlySelectMode: selectMode }, "*"); } catch { /* ignore */ }
-    if (!selectMode) setSelection(null);
+    try { previewIframeRef.current?.contentWindow?.postMessage({ __buildlySelectMode: false }, "*"); } catch { /* ignore */ }
+    if (!selectMode) { setSelection(null); setMarquee(null); dragRef.current = null; }
   }, [selectMode, previewKey, previewPage]);
 
   // Leaving select mode (or turning it off) clears any open edit popover.
   const closeSelection = () => setSelection(null);
+
+  // ── "Markeren": drag → screenshot → naar Claude ────────────────────────────────────────────────
+  const overlayXY = (e: React.MouseEvent, host: HTMLElement) => {
+    const r = host.getBoundingClientRect();
+    return { x: Math.max(0, e.clientX - r.left), y: Math.max(0, e.clientY - r.top) };
+  };
+  const startMarquee = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (capturing) return;
+    const p = overlayXY(e, e.currentTarget);
+    dragRef.current = p;
+    setMarquee({ x: p.x, y: p.y, w: 0, h: 0 });
+  };
+  const moveMarquee = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!dragRef.current) return;
+    const p = overlayXY(e, e.currentTarget);
+    const s = dragRef.current;
+    setMarquee({ x: Math.min(s.x, p.x), y: Math.min(s.y, p.y), w: Math.abs(p.x - s.x), h: Math.abs(p.y - s.y) });
+  };
+  const endMarquee = async () => {
+    const rect = marquee;
+    dragRef.current = null;
+    if (!rect || rect.w < 8 || rect.h < 8) { setMarquee(null); return; }
+    setCapturing(true);
+    try {
+      const iframe = previewIframeRef.current;
+      const cw = iframe?.contentWindow;
+      const doc = iframe?.contentDocument;
+      if (!iframe || !cw || !doc) throw new Error("no-frame");
+      const scale = Math.min(2, cw.devicePixelRatio || 1);
+      const canvas = await html2canvas(doc.documentElement, {
+        x: rect.x + (cw.scrollX || 0),
+        y: rect.y + (cw.scrollY || 0),
+        width: rect.w,
+        height: rect.h,
+        scale,
+        useCORS: true,
+        backgroundColor: "#ffffff",
+        logging: false,
+        windowWidth: doc.documentElement.scrollWidth,
+        windowHeight: doc.documentElement.scrollHeight,
+      } as Parameters<typeof html2canvas>[1]);
+      const dataUrl = canvas.toDataURL("image/png");
+      setShots((prev) => [...prev, { id: `s${Date.now()}${Math.random().toString(36).slice(2, 6)}`, dataUrl }]);
+    } catch {
+      window.alert("Kon geen schermafbeelding maken van dit gebied. Probeer een ander deel, of voeg een afbeelding toe met de knop.");
+    } finally {
+      setMarquee(null);
+      setCapturing(false);
+    }
+  };
+  const onShotUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
+    e.target.value = "";
+    for (const f of files.slice(0, 6)) {
+      if (!f.type.startsWith("image/")) continue;
+      const reader = new FileReader();
+      reader.onload = () => setShots((prev) => [...prev, { id: `u${Date.now()}${Math.random().toString(36).slice(2, 6)}`, dataUrl: String(reader.result) }]);
+      reader.readAsDataURL(f);
+    }
+  };
+  const deleteShot = async (id: string) => {
+    const shot = shots.find((s) => s.id === id);
+    setShots((prev) => prev.filter((s) => s.id !== id));
+    if (shot?.path) {
+      try { await fetch("/api/claude/ref/delete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ projectId, path: shot.path }) }); } catch { /* ignore */ }
+    }
+  };
+  const sendShotsToClaude = async () => {
+    if (!shots.length || sendingShots) return;
+    if (!claudeConnectedRef.current) { window.alert("Koppel eerst je Claude-account (klik op 'Claude koppelen' of open de Uitleg)."); return; }
+    setSendingShots(true);
+    try {
+      const paths: string[] = [];
+      const updated: Shot[] = [];
+      for (const s of shots) {
+        if (s.path) { paths.push(s.path); updated.push(s); continue; }
+        try {
+          const r = await fetch("/api/claude/ref", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ projectId, dataUrl: s.dataUrl }) });
+          const d = await r.json().catch(() => ({}));
+          if (r.ok && d.path) { paths.push(d.path); updated.push({ ...s, path: d.path }); }
+          else { updated.push(s); }
+        } catch { updated.push(s); }
+      }
+      if (!paths.length) { window.alert("Kon de afbeelding(en) niet naar Claude sturen. Is Claude gekoppeld en klaar?"); setShots(updated); return; }
+      const list = paths.join(", ");
+      const msg = paths.length > 1
+        ? `Bekijk deze afbeeldingen (${list}) — ze tonen delen van mijn website die ik wil aanpassen: `
+        : `Bekijk deze afbeelding (${list}) — die toont het deel van mijn website dat ik wil aanpassen: `;
+      const sent = termHandleRef.current?.send(msg);
+      if (sent) {
+        setShots([]);
+        setSelectMode(false);
+        setPointSent(true);
+        window.setTimeout(() => setPointSent(false), 4000);
+      } else {
+        setShots(updated);
+        window.alert("De terminal is niet klaar. Klik op 'Opnieuw starten' boven de terminal en probeer het nog eens.");
+      }
+    } finally {
+      setSendingShots(false);
+    }
+  };
 
   // Post a single deterministic action to the (AI-free) /action endpoint.
   const postAction = async (action: Record<string, unknown>): Promise<boolean> => {
@@ -2716,11 +2827,11 @@ export function ProjectWorkspace() {
                     className="h-8 text-muted-foreground hover:text-foreground data-[active=true]:text-primary-foreground"
                     data-active={selectMode}
                     onClick={() => setSelectMode((v) => !v)}
-                    title="Wijs een element in de preview aan; de verwijzing wordt automatisch naar Claude gestuurd"
+                    title="Sleep een kader over de preview om er een schermafbeelding van te maken en naar Claude te sturen"
                     data-testid="button-select-edit"
                   >
                     <MousePointerClick className="h-3.5 w-3.5 mr-1.5" />
-                    {selectMode ? "Klaar met aanwijzen" : "Aanwijzen"}
+                    {selectMode ? "Klaar met markeren" : "Markeren"}
                   </Button>
                 )}
                 {!isStreaming && activeTab === "preview" && previewHtml && (
@@ -3067,7 +3178,7 @@ export function ProjectWorkspace() {
                     ref={previewIframeRef}
                     {...(isImported
                       ? {
-                          src: `/api/projects/${projectId}/preview-page?page=${encodeURIComponent(previewPage ?? "index.html")}&sid=${previewSessionId}&k=${previewKey}${selectMode ? "&edit=1" : ""}`,
+                          src: `/api/projects/${projectId}/preview-page?page=${encodeURIComponent(previewPage ?? "index.html")}&sid=${previewSessionId}&k=${previewKey}`,
                           sandbox: "allow-scripts allow-same-origin allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-presentation",
                         }
                       : {
@@ -3080,7 +3191,7 @@ export function ProjectWorkspace() {
                     title="App Preview"
                     onLoad={() => {
                       // Re-sync select mode after every (re)load of the preview document.
-                      try { previewIframeRef.current?.contentWindow?.postMessage({ __buildlySelectMode: selectModeRef.current }, "*"); } catch { /* ignore */ }
+                      try { previewIframeRef.current?.contentWindow?.postMessage({ __buildlySelectMode: false }, "*"); } catch { /* ignore */ }
                       // Restore the scroll position captured before an edit-triggered reload, so
                       // you keep looking at the element you just changed. Retry a few times because
                       // the page grows taller as images/fonts finish loading.
@@ -3144,12 +3255,52 @@ export function ProjectWorkspace() {
                     </div>
                   )}
 
-                  {/* Select & edit mode: hint banner + click-to-edit popover */}
-                  {selectMode && !selection && (
-                    <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[60] rounded-full bg-primary text-primary-foreground text-xs font-medium px-4 py-2 shadow-lg pointer-events-none">
-                      {claudeConnected ? "Klik op een element — het gaat naar Claude" : "Koppel eerst Claude om elementen aan te wijzen"}
+                  {/* Markeren: drag a blue rectangle over the preview → screenshot for Claude */}
+                  {selectMode && (
+                    <div
+                      className="absolute inset-0 z-[64] cursor-crosshair select-none"
+                      onMouseDown={startMarquee}
+                      onMouseMove={moveMarquee}
+                      onMouseUp={endMarquee}
+                      onMouseLeave={() => { if (dragRef.current) endMarquee(); }}
+                      data-testid="marquee-overlay"
+                    >
+                      <div className="absolute top-3 left-1/2 -translate-x-1/2 rounded-full bg-primary text-primary-foreground text-xs font-medium px-4 py-2 shadow-lg pointer-events-none">
+                        {capturing ? "Schermafbeelding maken…" : "Houd ingedrukt en sleep een kader — laat los voor een schermafbeelding"}
+                      </div>
+                      {marquee && (
+                        <div
+                          className="absolute border-2 border-blue-500 bg-blue-500/15 pointer-events-none"
+                          style={{ left: marquee.x, top: marquee.y, width: marquee.w, height: marquee.h }}
+                        />
+                      )}
                     </div>
                   )}
+                  {/* Tray of captured/uploaded screenshots waiting to go to Claude */}
+                  {shots.length > 0 && (
+                    <div className="absolute bottom-3 left-3 right-3 z-[66] rounded-xl border border-border bg-background/95 backdrop-blur shadow-xl p-3">
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="text-xs font-semibold text-foreground">{shots.length} schermafbeelding{shots.length > 1 ? "en" : ""}</span>
+                        <span className="text-[11px] text-muted-foreground">— gaan naar Claude</span>
+                        <div className="ml-auto flex items-center gap-2">
+                          <Button size="sm" variant="ghost" className="h-7" onClick={() => shotUploadRef.current?.click()} data-testid="button-upload-shot"><ImagePlus className="h-3.5 w-3.5 mr-1" /> Afbeelding toevoegen</Button>
+                          <Button size="sm" className="h-7" disabled={sendingShots || !claudeConnected} onClick={sendShotsToClaude} data-testid="button-send-shots">
+                            {sendingShots ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Send className="h-3.5 w-3.5 mr-1" />} Stuur naar Claude
+                          </Button>
+                        </div>
+                      </div>
+                      <div className="flex gap-2 overflow-x-auto">
+                        {shots.map((s) => (
+                          <div key={s.id} className="relative shrink-0">
+                            <img src={s.dataUrl} alt="" className="h-16 w-auto max-w-[160px] rounded-md border border-border object-cover" />
+                            <button type="button" onClick={() => deleteShot(s.id)} className="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full bg-background border border-border shadow flex items-center justify-center text-muted-foreground hover:text-destructive" title="Verwijderen" data-testid="button-delete-shot"><X className="h-3 w-3" /></button>
+                          </div>
+                        ))}
+                      </div>
+                      {!claudeConnected && <p className="text-[11px] text-amber-600 mt-2">Koppel eerst Claude om deze naar de editor te sturen.</p>}
+                    </div>
+                  )}
+                  <input ref={shotUploadRef} type="file" accept="image/*" multiple className="hidden" onChange={onShotUpload} data-testid="input-shot-upload" />
                   {pointSent && (
                     <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[60] rounded-full bg-emerald-600 text-white text-xs font-medium px-4 py-2 shadow-lg pointer-events-none">
                       Naar Claude gestuurd — typ in de terminal wat er moet veranderen en druk op Enter

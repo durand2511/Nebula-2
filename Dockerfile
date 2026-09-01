@@ -16,11 +16,11 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/* \
  && npm install -g @anthropic-ai/claude-code
 
-# Managed (root-owned) Claude Code policy: customers' sessions may only use file tools — no shell,
-# no network — and file edits inside their workspace are auto-accepted. Users run as their own uid
-# and cannot change this file. Mirrors SESSION_SETTINGS in api-server/src/lib/claude-terminal.ts.
+# Managed (root-owned) Claude Code policy: customers' sessions use file tools + internet
+# (WebFetch/WebSearch) — no shell — and file edits inside their workspace are auto-accepted. Users
+# run as their own uid and cannot change this file. Mirrors SESSION_SETTINGS in claude-terminal.ts.
 RUN mkdir -p /etc/claude-code /nebula/home /nebula/ws \
- && printf '%s' '{"permissions":{"deny":["Bash","WebFetch","WebSearch","Agent","Task","NotebookEdit","KillShell","BashOutput","TaskOutput"],"defaultMode":"acceptEdits","disableBypassPermissionsMode":"disable"},"includeCoAuthoredBy":false}' > /etc/claude-code/managed-settings.json \
+ && printf '%s' '{"permissions":{"deny":["Bash","Agent","Task","NotebookEdit","KillShell","BashOutput","TaskOutput"],"defaultMode":"acceptEdits","disableBypassPermissionsMode":"disable"},"includeCoAuthoredBy":false}' > /etc/claude-code/managed-settings.json \
  && chmod 644 /etc/claude-code/managed-settings.json && chmod 755 /nebula /nebula/home /nebula/ws
 
 # Exact pnpm version that generated pnpm-lock.yaml (overrides live in pnpm-workspace.yaml, pnpm 10+ style).

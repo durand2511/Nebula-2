@@ -44,7 +44,7 @@ const standardJson = express.json({ limit: "1mb" });
 app.use((req, res, next) => {
   // /messages/stream uses its own large parser; /stripe/webhook needs the RAW body for
   // Stripe signature verification — both opt out of the standard JSON parser here.
-  if (req.path.endsWith("/messages/stream") || req.path.endsWith("/stripe/webhook") || req.path.endsWith("/import/mindbody")) return next();
+  if (req.path.endsWith("/messages/stream") || req.path.endsWith("/stripe/webhook") || req.path.endsWith("/import/mindbody") || req.path.endsWith("/claude/ref")) return next();
   return standardJson(req, res, next);
 });
 app.use(express.urlencoded({ extended: true, limit: "1mb" }));
