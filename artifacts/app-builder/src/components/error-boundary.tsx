@@ -1,20 +1,23 @@
-import { Component, type ReactNode } from "react";
+import { Component, type ReactNode, type ErrorInfo } from "react";
 
 /**
  * App-wide error boundary: a render/runtime error in any component shows a friendly recovery screen
- * (with the error text, so problems are diagnosable) instead of a blank/black page.
+ * (with the error text + which component failed, so problems are diagnosable) instead of a blank page.
  */
-export class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
+export class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null; where: string }> {
   constructor(props: { children: ReactNode }) {
     super(props);
-    this.state = { error: null };
+    this.state = { error: null, where: "" };
   }
   static getDerivedStateFromError(error: Error) {
-    return { error };
+    return { error, where: "" };
   }
-  componentDidCatch(error: Error) {
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    // The component stack pinpoints the failing component (top few frames).
+    const where = (info?.componentStack || "").split("\n").map((l) => l.trim()).filter(Boolean).slice(0, 6).join("\n");
+    this.setState({ where });
     // eslint-disable-next-line no-console
-    console.error("[Nebula] app error:", error);
+    console.error("[Nebula] app error:", error, info?.componentStack);
   }
   render() {
     if (this.state.error) {
@@ -32,7 +35,7 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, { error: E
             </button>
             <details style={{ marginTop: 14, textAlign: "left" }}>
               <summary style={{ fontSize: 12, color: "#8b8577", cursor: "pointer" }}>Technische details</summary>
-              <pre style={{ marginTop: 8, fontSize: 11, color: "#8b8577", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{String(this.state.error?.message || this.state.error)}</pre>
+              <pre style={{ marginTop: 8, fontSize: 11, color: "#8b8577", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{String(this.state.error?.message || this.state.error)}{this.state.where ? "\n\n" + this.state.where : ""}</pre>
             </details>
           </div>
         </div>
