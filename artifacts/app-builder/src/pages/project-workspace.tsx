@@ -1640,8 +1640,29 @@ export function ProjectWorkspace() {
         }
       }
     };
+    // Safari often doesn't expose a pasted image via the paste event's clipboardData, so also read the
+    // clipboard directly on ⌘V / Ctrl+V (needs the keypress as the user gesture). We never preventDefault,
+    // so text paste into the terminal keeps working; we only pull out an image if one is present.
+    const onKeyDown = async (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || (e.key !== "v" && e.key !== "V")) return;
+      const anyNav = navigator as unknown as { clipboard?: { read?: () => Promise<Array<{ types: string[]; getType: (t: string) => Promise<Blob> }>> } };
+      if (!anyNav.clipboard?.read) return;
+      try {
+        const items = await anyNav.clipboard.read();
+        for (const it of items) {
+          const imgType = it.types.find((t) => t.startsWith("image/"));
+          if (imgType) {
+            const blob = await it.getType(imgType);
+            addFileShot(new File([blob], "screenshot.png", { type: imgType }));
+            setActiveTab("preview");
+            return;
+          }
+        }
+      } catch { /* clipboard not readable or no image — ignore */ }
+    };
     document.addEventListener("paste", onPaste, true);
-    return () => document.removeEventListener("paste", onPaste, true);
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => { document.removeEventListener("paste", onPaste, true); document.removeEventListener("keydown", onKeyDown, true); };
   }, []);
 
   // ── "Markeren": drag → screenshot → naar Claude ────────────────────────────────────────────────

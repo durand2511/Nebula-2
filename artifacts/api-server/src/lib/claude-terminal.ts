@@ -28,7 +28,7 @@ import type { IncomingMessage, Server as HttpServer } from "node:http";
 import type { Duplex } from "node:stream";
 import { WebSocketServer, WebSocket } from "ws";
 import { db, platformUsers, projectFiles, projects } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { getSessionUser } from "./platform-auth.js";
 import { encryptSecret, decryptSecret } from "./email-config.js";
 import { logger } from "./logger";
@@ -60,8 +60,17 @@ const UID_BASE = 20000;                   // unix uid = UID_BASE + platform user
 
 // Folder for reference images (screenshots / uploads) the user gives Claude — never synced to the DB.
 const REFS_DIR = "_refs";
+// Folder holding a read-only export of THIS project's own data (scoped by project_id) — informational
+// for Claude, never synced back to projectFiles.
+const DB_DIR = "database";
+// Per-project data tables (all keyed by project_id). Fixed allowlist — never user input.
+const PROJECT_DATA_TABLES = [
+  "studio_settings", "studio_locations", "studio_classes", "studio_members", "studio_bookings",
+  "studio_purchases", "studio_products", "studio_codes", "studio_videos", "studio_video_plans",
+  "studio_contacts", "studio_campaigns", "studio_wallets", "studio_credit_lots",
+];
 // Files/dirs in the workspace that are ours (never written back to the DB).
-const SYNC_IGNORE = new Set(["CLAUDE.md", ".claude", REFS_DIR, "node_modules", ".git", ".DS_Store"]);
+const SYNC_IGNORE = new Set(["CLAUDE.md", ".claude", REFS_DIR, DB_DIR, "node_modules", ".git", ".DS_Store"]);
 const BINARY_EXT = new Set(["png", "jpg", "jpeg", "gif", "webp", "ico", "pdf", "woff", "woff2", "ttf", "otf", "eot", "zip", "mp4", "mp3", "webm"]);
 
 // Tools a customer's Claude may use: file tools + internet (WebFetch/WebSearch are allowed — handy
@@ -194,6 +203,7 @@ function claudeMd(projectName: string): string {
     "- Nieuwe pagina = nieuw `.html`-bestand in de hoofdmap; koppel 'm in de navigatie van de andere pagina's.",
     "- Je mag dingen van internet ophalen (WebFetch/WebSearch) als dat helpt. Shell-commando's kun je (nog) niet uitvoeren; je werkt met de bestanden hier.",
     "- Elke opgeslagen wijziging verschijnt automatisch in de preview naast de terminal en wordt direct bewaard.",
+    "- In de map `database/` staat een alleen-lezen momentopname van de EIGEN gegevens van dit project (JSON). Gebruik die om mee te denken; wijzigingen daarin veranderen de echte database niet.",
     "",
     "## HEEL BELANGRIJK — isolatie (nooit overtreden)",
     "- Deze map is UITSLUITEND het project van deze ene klant. Er is hier geen enkele toegang tot andere klanten, andere projecten, de gedeelde database of het Nebula-platform, en die komt er ook niet.",
@@ -321,7 +331,36 @@ async function materialise(s: Session, projectName: string): Promise<void> {
     }
     await fs.writeFile(path.join(s.cwd, "CLAUDE.md"), claudeMd(projectName), "utf8");
   }
+  if (s.projectId > 0) await exportDatabase(s).catch((err) => logger.warn({ err, key: s.key }, "[claude-terminal] db export failed"));
   await ownDir(s.cwd, u);
+}
+
+// Write this project's OWN data (scoped strictly by project_id) as read-only JSON so Claude can see
+// and reason about it. NEVER queries without the project_id filter → other customers are unreachable.
+async function exportDatabase(s: Session): Promise<void> {
+  const dir = path.join(s.cwd, DB_DIR);
+  await fs.mkdir(dir, { recursive: true });
+  const written: string[] = [];
+  for (const table of PROJECT_DATA_TABLES) {
+    try {
+      // table names come from the fixed allowlist above (not user input); project_id is a bound param.
+      const res = await db.execute(sql.raw(`SELECT * FROM ${table} WHERE project_id = ${Number(s.projectId)} LIMIT 2000`));
+      const rows = (res as unknown as { rows?: unknown[] }).rows ?? (Array.isArray(res) ? (res as unknown[]) : []);
+      if (rows.length) { await fs.writeFile(path.join(dir, `${table}.json`), JSON.stringify(rows, null, 2), "utf8"); written.push(`${table} (${rows.length})`); }
+    } catch { /* table absent / query failed → skip */ }
+  }
+  const readme = [
+    "# Database — de gegevens van DIT project (alleen-lezen export)",
+    "",
+    written.length
+      ? `Hier staan de gegevens van jouw eigen project als JSON:\n${written.map((w) => `- ${w}`).join("\n")}`
+      : "Dit project heeft nog geen opgeslagen gegevens (bijv. boekingen of leden).",
+    "",
+    "Dit is een momentopname, alleen om te bekijken en mee te denken. Wijzigingen in deze bestanden",
+    "veranderen de echte database NIET. Je ziet hier uitsluitend de gegevens van dit ene project —",
+    "gegevens van andere klanten zijn hier niet en zijn nergens bereikbaar.",
+  ].join("\n");
+  await fs.writeFile(path.join(dir, "README.md"), readme, "utf8");
 }
 
 function scheduleSync(s: Session) {
