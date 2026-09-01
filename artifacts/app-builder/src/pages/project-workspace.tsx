@@ -2652,9 +2652,6 @@ export function ProjectWorkspace() {
               }}
             />
           </div>
-          <div className="px-3 py-2 border-t border-white/10 text-[11px] text-white/45 leading-relaxed">
-            Typ wat er anders moet, bijv. <span className="text-white/70">"maak de kopregel op de homepage groter"</span>. Elke wijziging staat direct in de preview en is meteen opgeslagen. <span className="text-white/60">/exit</span> stopt Claude.
-          </div>
         </div>
 
         {/* Center/Right Panel: Code & Preview */}
