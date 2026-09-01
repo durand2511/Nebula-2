@@ -659,18 +659,7 @@ router.post("/billing/subscribe", async (req, res) => {
       line_items: [lineItem],
       subscription_data: { metadata: { platformUserId: String(u.id) } },
     };
-    const pk = process.env.STRIPE_PUBLISHABLE_KEY || "";
-    if (pk) {
-      // Nicer in-app (embedded) checkout — rendered inside the app, supports iDEAL + card.
-      const session = await stripeReq("POST", "checkout/sessions", {
-        ...common,
-        ui_mode: "embedded",
-        return_url: `${base}/ai-editor?sub=done&session_id={CHECKOUT_SESSION_ID}`,
-      });
-      res.json({ clientSecret: session.client_secret, publishableKey: pk });
-      return;
-    }
-    // Fallback: hosted Stripe Checkout (redirect).
+    // Hosted Stripe Checkout (redirect) — reliable, €50/mo, card + iDEAL, name+address for the invoice.
     const session = await stripeReq("POST", "checkout/sessions", {
       ...common,
       success_url: `${base}/ai-editor?sub=ok`, cancel_url: `${base}/ai-editor?sub=cancel`,
