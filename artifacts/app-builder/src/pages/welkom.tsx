@@ -34,23 +34,10 @@ export function Welkom() {
           </ul>
         </div>
 
-        <div className="mt-6 grid gap-4 sm:grid-cols-2">
-          <button type="button" onClick={() => setLocation("/platform-uitleg")} className="group text-left rounded-2xl border border-border bg-card shadow-sm p-6 hover:border-primary/60 hover:shadow-md transition" data-testid="welkom-platform">
-            <div className="h-11 w-11 rounded-xl bg-primary/10 flex items-center justify-center"><BookOpen className="h-5 w-5 text-primary" /></div>
-            <h3 className="mt-3 font-bold tracking-tight">Uitleg over het platform</h3>
-            <p className="mt-1 text-sm text-muted-foreground">Alle functies uitgelegd.</p>
-            <span className="mt-2 inline-flex items-center gap-1 text-sm font-medium text-primary">Lezen <ArrowRight className="h-4 w-4 group-hover:translate-x-0.5 transition-transform" /></span>
-          </button>
-          <button type="button" onClick={() => setLocation("/uitleg")} className="group text-left rounded-2xl border border-border bg-card shadow-sm p-6 hover:border-primary/60 hover:shadow-md transition" data-testid="welkom-claude">
-            <div className="h-11 w-11 rounded-xl bg-primary/10 flex items-center justify-center"><TerminalIcon className="h-5 w-5 text-primary" /></div>
-            <h3 className="mt-3 font-bold tracking-tight">Claude Code instellen</h3>
-            <p className="mt-1 text-sm text-muted-foreground">Koppelen en je site bouwen.</p>
-            <span className="mt-2 inline-flex items-center gap-1 text-sm font-medium text-primary">Openen <ArrowRight className="h-4 w-4 group-hover:translate-x-0.5 transition-transform" /></span>
-          </button>
-        </div>
-
-        <div className="mt-8 flex justify-center">
-          <button type="button" onClick={() => setLocation("/ai-editor")} className="inline-flex items-center gap-1.5 text-sm font-medium text-primary hover:underline" data-testid="welkom-start">Ik ben er klaar voor — naar mijn websites <ArrowRight className="h-4 w-4" /></button>
+        <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
+          <button type="button" onClick={() => setLocation("/help")} className="inline-flex items-center gap-1.5 text-sm font-medium text-primary hover:underline" data-testid="welkom-back-help"><ArrowLeft className="h-4 w-4" /> Terug naar de handleidingen</button>
+          <span className="text-muted-foreground">·</span>
+          <button type="button" onClick={() => setLocation("/ai-editor")} className="inline-flex items-center gap-1.5 text-sm font-medium text-primary hover:underline" data-testid="welkom-start">Naar mijn websites <ArrowRight className="h-4 w-4" /></button>
         </div>
       </div>
     </div>
