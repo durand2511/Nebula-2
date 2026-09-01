@@ -16,6 +16,13 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/* \
  && npm install -g @anthropic-ai/claude-code
 
+# Headless Chromium for server-side region screenshots (puppeteer-core drives it). Guarded with
+# `|| true` so an install hiccup never breaks the image — the screenshot endpoint then degrades to a
+# "make one yourself + paste" hint instead of failing the deploy.
+RUN (apt-get update && apt-get install -y --no-install-recommends chromium fonts-liberation \
+ && rm -rf /var/lib/apt/lists/*) || true
+ENV CHROMIUM_PATH=/usr/bin/chromium
+
 # Managed (root-owned) Claude Code policy: customers' sessions use file tools + internet
 # (WebFetch/WebSearch) — no shell — and file edits inside their workspace are auto-accepted. Users
 # run as their own uid and cannot change this file. Mirrors SESSION_SETTINGS in claude-terminal.ts.

@@ -33,6 +33,7 @@ async function buildAll() {
       "@anthropic-ai/claude-agent-sdk",
       // Native pty bindings (build/Release/pty.node) — must be loaded from node_modules at runtime.
       "node-pty",
+      "puppeteer-core",
       "sharp",
       "better-sqlite3",
       "sqlite3",

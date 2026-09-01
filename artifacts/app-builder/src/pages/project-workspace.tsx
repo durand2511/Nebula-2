@@ -43,7 +43,6 @@ import {
   Unplug,
 } from "lucide-react";
 import JSZip from "jszip";
-import html2canvas from "html2canvas";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 // ScrollArea removed — using a plain div for scroll control
@@ -1691,15 +1690,6 @@ export function ProjectWorkspace() {
   // images can't be rasterised in-browser) and then point the user to the always-reliable paste path.
   const [capturing, setCapturing] = useState(false);
   const nextFrame = () => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
-  const isBlankCanvas = (cv: HTMLCanvasElement): boolean => {
-    try {
-      const ctx = cv.getContext("2d"); if (!ctx) return false;
-      const { data } = ctx.getImageData(0, 0, cv.width, cv.height);
-      let nonWhite = 0, samples = 0;
-      for (let i = 0; i < data.length; i += 4 * 97) { samples++; const r = data[i], g = data[i + 1], b = data[i + 2]; if (r < 245 || g < 245 || b < 245) nonWhite++; }
-      return samples > 0 && nonWhite / samples < 0.02;
-    } catch { return false; }
-  };
   const endMarquee = async () => {
     const rect = marquee;
     dragRef.current = null;
@@ -1709,57 +1699,32 @@ export function ProjectWorkspace() {
     if (!doc) { setMarquee(null); return; }
     setCapturing(true);
     setMarquee(null);
-    await nextFrame(); // let the loading overlay paint before html2canvas blocks the thread
+    await nextFrame(); // let the loading overlay paint
     try {
-      const cx = rect.x + rect.w / 2, cy = rect.y + rect.h / 2;
-      let node = (doc.elementFromPoint(cx, cy) as HTMLElement) || doc.body;
-      for (let i = 0; i < 10 && node.parentElement && node !== doc.body; i++) {
-        const r = node.getBoundingClientRect();
-        if (r.left <= rect.x && r.top <= rect.y && r.right >= rect.x + rect.w && r.bottom >= rect.y + rect.h) break;
-        node = node.parentElement;
+      const cw = iframe?.contentWindow;
+      // The marked area in the preview's CONTENT coordinates (add scroll), plus the content width so
+      // the server renders the same layout. The server (headless Chromium) captures real pixels —
+      // including cross-origin/CDN images the browser can't rasterise — so it never comes out blank.
+      const clip = {
+        x: rect.x + (cw?.scrollX || 0),
+        y: rect.y + (cw?.scrollY || 0),
+        width: rect.w,
+        height: rect.h,
+      };
+      const viewport = {
+        width: doc.documentElement.clientWidth || cw?.innerWidth || 1200,
+        height: Math.max(doc.documentElement.scrollHeight || 0, (cw?.innerHeight || 900)),
+      };
+      const page = previewPageRef.current ?? "index.html";
+      const r = await fetch("/api/claude/shot", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ projectId, page, clip, viewport }) });
+      const d = await r.json().catch(() => ({}));
+      if (r.ok && d.dataUrl) {
+        setShots((prev) => [...prev, { id: `s${Date.now()}${Math.random().toString(36).slice(2, 6)}`, dataUrl: d.dataUrl, name: "markering.png", isImage: true }]);
+      } else {
+        window.alert("Kon geen schermafbeelding maken. Maak zelf een screenshot (⌘⇧4) en plak 'm met ⌘V — die gaat wél mee naar Claude.");
       }
-      const nb = node.getBoundingClientRect();
-      const scale = 0.7; // low scale → much faster; plenty sharp for a reference
-      const rendered: HTMLCanvasElement = await Promise.race([
-        html2canvas(node, {
-          useCORS: true,
-          allowTaint: false,
-          backgroundColor: "#ffffff",
-          scale,
-          logging: false,
-          imageTimeout: 4000,
-          removeContainer: true,
-          // Force lazy-loaded / data-src images to load in the clone — the usual reason a capture
-          // comes out blank on imported sites.
-          onclone: (cloned: Document) => {
-            cloned.querySelectorAll("img").forEach((img) => {
-              const el = img as HTMLImageElement & { dataset: DOMStringMap };
-              el.loading = "eager";
-              const ds = el.dataset.src || el.getAttribute("data-lazy-src") || el.getAttribute("data-original");
-              if (ds && (!el.getAttribute("src") || el.getAttribute("src")!.startsWith("data:"))) el.setAttribute("src", ds);
-              const dss = el.getAttribute("data-srcset") || el.getAttribute("data-lazy-srcset");
-              if (dss && !el.getAttribute("srcset")) el.setAttribute("srcset", dss);
-            });
-          },
-        } as Parameters<typeof html2canvas>[1]),
-        new Promise<HTMLCanvasElement>((_, rej) => setTimeout(() => rej(new Error("timeout")), 9000)),
-      ]);
-      const sx = Math.max(0, (rect.x - nb.left) * scale);
-      const sy = Math.max(0, (rect.y - nb.top) * scale);
-      const sw = Math.min(rendered.width - sx, rect.w * scale);
-      const sh = Math.min(rendered.height - sy, rect.h * scale);
-      if (sw < 4 || sh < 4) throw new Error("empty");
-      const out = document.createElement("canvas");
-      out.width = Math.round(sw); out.height = Math.round(sh);
-      out.getContext("2d")!.drawImage(rendered, sx, sy, sw, sh, 0, 0, sw, sh);
-      if (isBlankCanvas(out)) throw new Error("blank");
-      const dataUrl = out.toDataURL("image/png");
-      setShots((prev) => [...prev, { id: `s${Date.now()}${Math.random().toString(36).slice(2, 6)}`, dataUrl, name: "markering.png", isImage: true }]);
-    } catch (err) {
-      const blank = (err as Error).message === "blank";
-      window.alert(blank
-        ? "Van dit gebied lukt geen automatische schermafbeelding (foto's van de site kunnen in de browser niet worden meegepakt). Maak zelf even een screenshot met ⌘⇧4 en plak 'm met ⌘V — die gaat wél mee naar Claude."
-        : "Kon geen schermafbeelding maken. Maak zelf een screenshot (⌘⇧4) en plak 'm met ⌘V, dan gaat-ie naar Claude.");
+    } catch {
+      window.alert("Kon geen schermafbeelding maken. Maak zelf een screenshot (⌘⇧4) en plak 'm met ⌘V — die gaat wél mee naar Claude.");
     } finally {
       setCapturing(false);
     }

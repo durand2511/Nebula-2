@@ -2,6 +2,7 @@
 import { Router, type IRouter } from "express";
 import { getSessionUser, tokenFrom } from "../lib/platform-auth.js";
 import { isClaudeConnected, disconnectClaude, writeSessionRef, deleteSessionRef } from "../lib/claude-terminal.js";
+import { captureRegion, screenshotAvailable } from "../lib/screenshot.js";
 import { db, projects } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { logger } from "../lib/logger";
@@ -41,6 +42,31 @@ router.post("/claude/ref", express.json({ limit: "12mb" }), async (req, res) => 
   const r = await writeSessionRef(u.id, projectId, dataUrl, name);
   if ("error" in r) { res.status(400).json(r); return; }
   res.json({ ok: true, path: r.path });
+});
+
+// Server-side region screenshot (headless Chromium) — captures real pixels incl. cross-origin/CDN
+// images, which an in-browser screenshot can't. Returns a data URL for the attachment tray.
+router.post("/claude/shot", express.json({ limit: "1mb" }), async (req, res) => {
+  const u = await getSessionUser(tokenFrom(req as any));
+  if (!u) { res.status(401).json({ error: "Niet ingelogd." }); return; }
+  const projectId = Number(req.body?.projectId) || 0;
+  if (!(await ownsProject(u.id, projectId))) { res.status(403).json({ error: "Geen toegang tot dit project." }); return; }
+  const page = String(req.body?.page || "index.html").slice(0, 200);
+  const clip = req.body?.clip || {};
+  const viewport = req.body?.viewport || {};
+  try {
+    if (!screenshotAvailable()) { res.status(503).json({ error: "no-chromium" }); return; }
+    const buf = await captureRegion({
+      projectId, page,
+      clip: { x: Number(clip.x) || 0, y: Number(clip.y) || 0, width: Number(clip.width) || 0, height: Number(clip.height) || 0 },
+      viewport: { width: Number(viewport.width) || 1200, height: Number(viewport.height) || 900 },
+    });
+    res.json({ ok: true, dataUrl: `data:image/png;base64,${buf.toString("base64")}` });
+  } catch (err) {
+    const msg = (err as Error).message === "no-chromium" ? "no-chromium" : "Screenshot mislukt.";
+    logger.warn({ err, projectId }, "[claude] server screenshot failed");
+    res.status(msg === "no-chromium" ? 503 : 500).json({ error: msg });
+  }
 });
 
 router.post("/claude/ref/delete", async (req, res) => {
