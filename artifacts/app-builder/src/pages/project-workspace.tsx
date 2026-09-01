@@ -43,7 +43,6 @@ import {
   Unplug,
 } from "lucide-react";
 import JSZip from "jszip";
-import html2canvas from "html2canvas";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 // ScrollArea removed — using a plain div for scroll control
@@ -1259,7 +1258,6 @@ export function ProjectWorkspace() {
   type Shot = { id: string; dataUrl: string; path?: string; sending?: boolean };
   const [shots, setShots] = useState<Shot[]>([]);
   const [marquee, setMarquee] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
-  const [capturing, setCapturing] = useState(false);
   const [sendingShots, setSendingShots] = useState(false);
   const dragRef = useRef<{ x: number; y: number } | null>(null);
   const shotUploadRef = useRef<HTMLInputElement>(null);
@@ -1616,13 +1614,36 @@ export function ProjectWorkspace() {
   // Leaving select mode (or turning it off) clears any open edit popover.
   const closeSelection = () => setSelection(null);
 
+  // Paste an image from the clipboard (e.g. a macOS ⌘⇧4 screenshot) anywhere in the editor → it lands
+  // in the screenshot tray to send to Claude. A terminal/pty can't accept pasted images itself, so we
+  // intercept image pastes here (capture phase, before xterm) and leave text pastes untouched.
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (const it of Array.from(items)) {
+        if (it.kind === "file" && it.type.startsWith("image/")) {
+          const file = it.getAsFile();
+          if (!file) continue;
+          e.preventDefault();
+          e.stopPropagation();
+          const reader = new FileReader();
+          reader.onload = () => { setShots((prev) => [...prev, { id: `p${Date.now()}${Math.random().toString(36).slice(2, 6)}`, dataUrl: String(reader.result) }]); setActiveTab("preview"); };
+          reader.readAsDataURL(file);
+          return;
+        }
+      }
+    };
+    document.addEventListener("paste", onPaste, true);
+    return () => document.removeEventListener("paste", onPaste, true);
+  }, []);
+
   // ── "Markeren": drag → screenshot → naar Claude ────────────────────────────────────────────────
   const overlayXY = (e: React.MouseEvent, host: HTMLElement) => {
     const r = host.getBoundingClientRect();
     return { x: Math.max(0, e.clientX - r.left), y: Math.max(0, e.clientY - r.top) };
   };
   const startMarquee = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (capturing) return;
     const p = overlayXY(e, e.currentTarget);
     dragRef.current = p;
     setMarquee({ x: p.x, y: p.y, w: 0, h: 0 });
@@ -1633,37 +1654,43 @@ export function ProjectWorkspace() {
     const s = dragRef.current;
     setMarquee({ x: Math.min(s.x, p.x), y: Math.min(s.y, p.y), w: Math.abs(p.x - s.x), h: Math.abs(p.y - s.y) });
   };
-  const endMarquee = async () => {
+  // On release: read the marked region's elements from the preview DOM (instant, no heavy rendering)
+  // and send Claude a precise description of what's there. No screenshot rasterizing (that froze the
+  // browser on real sites) — for an actual image, use the "Afbeelding" button.
+  const endMarquee = () => {
     const rect = marquee;
     dragRef.current = null;
-    if (!rect || rect.w < 8 || rect.h < 8) { setMarquee(null); return; }
-    setCapturing(true);
-    try {
-      const iframe = previewIframeRef.current;
-      const cw = iframe?.contentWindow;
-      const doc = iframe?.contentDocument;
-      if (!iframe || !cw || !doc) throw new Error("no-frame");
-      const scale = Math.min(2, cw.devicePixelRatio || 1);
-      const canvas = await html2canvas(doc.documentElement, {
-        x: rect.x + (cw.scrollX || 0),
-        y: rect.y + (cw.scrollY || 0),
-        width: rect.w,
-        height: rect.h,
-        scale,
-        useCORS: true,
-        backgroundColor: "#ffffff",
-        logging: false,
-        windowWidth: doc.documentElement.scrollWidth,
-        windowHeight: doc.documentElement.scrollHeight,
-      } as Parameters<typeof html2canvas>[1]);
-      const dataUrl = canvas.toDataURL("image/png");
-      setShots((prev) => [...prev, { id: `s${Date.now()}${Math.random().toString(36).slice(2, 6)}`, dataUrl }]);
-    } catch {
-      window.alert("Kon geen schermafbeelding maken van dit gebied. Probeer een ander deel, of voeg een afbeelding toe met de knop.");
-    } finally {
-      setMarquee(null);
-      setCapturing(false);
+    setMarquee(null);
+    if (!rect || rect.w < 8 || rect.h < 8) return;
+    if (!claudeConnectedRef.current) { setSelectMode(false); window.alert("Koppel eerst je Claude-account (klik op 'Claude koppelen' of open de Uitleg)."); return; }
+    const iframe = previewIframeRef.current;
+    const doc = iframe?.contentDocument;
+    if (!doc) { setSelectMode(false); return; }
+    // Sample a grid of points inside the rectangle (client coords) to find the elements there.
+    const found = new Set<Element>();
+    const cols = 5, rows = 5;
+    for (let i = 0; i < cols; i++) for (let j = 0; j < rows; j++) {
+      const px = rect.x + (rect.w * (i + 0.5)) / cols;
+      const py = rect.y + (rect.h * (j + 0.5)) / rows;
+      const el = doc.elementFromPoint(px, py);
+      if (el && el.tagName !== "HTML" && el.tagName !== "BODY") found.add(el);
     }
+    const parts: string[] = [];
+    for (const el of found) {
+      const tag = el.tagName.toLowerCase();
+      if (tag === "img") { const alt = (el as HTMLImageElement).getAttribute("alt") || ""; parts.push(alt ? `een afbeelding ("${alt}")` : "een afbeelding"); continue; }
+      const txt = (el.textContent || "").replace(/\s+/g, " ").trim().slice(0, 60);
+      if (txt) parts.push(`${tag} "${txt}"`);
+      else parts.push(tag);
+    }
+    const uniq = [...new Set(parts)].slice(0, 6);
+    const page = (previewPageRef.current ?? "index.html").replace(/^pages\//, "").replace(/\.html$/, "") || "index";
+    const desc = uniq.length ? ` Daar staat onder andere: ${uniq.join("; ")}.` : "";
+    const msg = `Op pagina "${page}" heb ik een gebied gemarkeerd dat ik wil aanpassen.${desc} Wat ik wil: `;
+    const sent = termHandleRef.current?.send(msg);
+    setSelectMode(false);
+    if (sent) { setPointSent(true); window.setTimeout(() => setPointSent(false), 4000); }
+    else window.alert("De terminal is niet klaar. Klik op 'Opnieuw starten' boven de terminal en probeer het nog eens.");
   };
   const onShotUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
@@ -2839,6 +2866,19 @@ export function ProjectWorkspace() {
                     variant="ghost"
                     size="sm"
                     className="h-8 text-muted-foreground hover:text-foreground"
+                    onClick={() => shotUploadRef.current?.click()}
+                    title="Voeg een afbeelding/screenshot toe die naar Claude gaat"
+                    data-testid="button-add-image"
+                  >
+                    <ImagePlus className="h-3.5 w-3.5 mr-1.5" />
+                    Afbeelding
+                  </Button>
+                )}
+                {!isStreaming && activeTab === "preview" && previewHtml && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 text-muted-foreground hover:text-foreground"
                     onClick={() => setPreviewFullscreen(true)}
                     title="Bekijk op volledig scherm"
                     data-testid="button-fullscreen"
@@ -3266,7 +3306,7 @@ export function ProjectWorkspace() {
                       data-testid="marquee-overlay"
                     >
                       <div className="absolute top-3 left-1/2 -translate-x-1/2 rounded-full bg-primary text-primary-foreground text-xs font-medium px-4 py-2 shadow-lg pointer-events-none">
-                        {capturing ? "Schermafbeelding maken…" : "Houd ingedrukt en sleep een kader — laat los voor een schermafbeelding"}
+                        {claudeConnected ? "Houd ingedrukt en sleep een kader om het gebied — laat los om naar Claude te sturen" : "Koppel eerst Claude om een gebied te markeren"}
                       </div>
                       {marquee && (
                         <div
