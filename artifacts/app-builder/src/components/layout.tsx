@@ -38,7 +38,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
               <Link href="/voorwaarden" className="hover:text-foreground hover:underline">Algemene voorwaarden</Link>
               <a href="mailto:durand2511@gmail.com" className="hover:text-foreground hover:underline">Contact</a>
             </div>
-            <p>© {new Date().getFullYear()} Nebula — Durand van Konijnenburg · KVK 70776857</p>
+            <p>© {new Date().getFullYear()} Nebula · Durand van Konijnenburg · KVK 70776857</p>
           </div>
         </footer>
       )}
