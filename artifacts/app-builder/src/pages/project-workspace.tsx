@@ -39,6 +39,8 @@ import {
   Globe,
   Copy,
   Terminal as TerminalIcon,
+  HelpCircle,
+  Unplug,
 } from "lucide-react";
 import JSZip from "jszip";
 import { Button } from "@/components/ui/button";
@@ -47,6 +49,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CodeViewer } from "@/components/code-viewer";
 import { ClaudeTerminal, type TerminalStatus } from "@/components/claude-terminal";
+import { ClaudeTutorial } from "@/components/claude-tutorial";
 import { formatFileContent } from "@/lib/format-code";
 import { buildWordPressExport } from "@/lib/wxr-export";
 import {
@@ -1249,6 +1252,13 @@ export function ProjectWorkspace() {
   const [termGen, setTermGen] = useState(0);
   const [termStatus, setTermStatus] = useState<TerminalStatus>("connecting");
   const [claudeConnected, setClaudeConnected] = useState(false);
+  const [tutorialOpen, setTutorialOpen] = useState(false);
+  const [claudeDisc, setClaudeDisc] = useState(false);
+  const disconnectClaudeCode = async () => {
+    if (!window.confirm("Claude ontkoppelen? Je logt uit en kunt daarna opnieuw inloggen met je Claude-account.")) return;
+    setClaudeDisc(true);
+    try { await fetch("/api/claude/disconnect", { method: "POST" }); setClaudeConnected(false); setTermGen((g) => g + 1); setTutorialOpen(true); } finally { setClaudeDisc(false); }
+  };
   // Full-screen "web viewer" for the preview. There is no zoom/scaling: the site always
   // renders at its real, fixed size (exactly how it looks in a real browser). This toggle
   // just makes the preview take over the whole window so the user can see it full size.
@@ -2624,12 +2634,20 @@ export function ProjectWorkspace() {
             </span>
             {termStatus === "open" && <span className="ml-1 text-white/40">· live</span>}
             <div className="ml-auto flex items-center gap-2">
-              {!claudeConnected && (
-                <Link href="/claude" className="text-[11px] text-amber-200 hover:text-white underline underline-offset-2" data-testid="link-claude-connect">Claude koppelen</Link>
+              <button type="button" onClick={() => setTutorialOpen((v) => !v)} className={`text-[11px] inline-flex items-center gap-1 ${tutorialOpen ? "text-white" : "text-white/60 hover:text-white"}`} title="Uitleg tonen" data-testid="button-claude-tutorial"><HelpCircle className="h-3.5 w-3.5" /> Uitleg</button>
+              {claudeConnected ? (
+                <button type="button" onClick={disconnectClaudeCode} disabled={claudeDisc} className="text-[11px] text-white/60 hover:text-red-300 inline-flex items-center gap-1 disabled:opacity-50" title="Claude ontkoppelen" data-testid="button-claude-disconnect"><Unplug className="h-3.5 w-3.5" /> Ontkoppelen</button>
+              ) : (
+                <Link href="/claude" className="text-[11px] text-amber-200 hover:text-white underline underline-offset-2" data-testid="link-claude-connect">Los venster</Link>
               )}
               <button type="button" onClick={() => setTermGen((g) => g + 1)} className="text-[11px] text-white/50 hover:text-white inline-flex items-center gap-1" title="Terminal opnieuw verbinden" data-testid="button-terminal-reconnect"><RefreshCw className="h-3 w-3" /></button>
             </div>
           </div>
+          {(tutorialOpen || !claudeConnected) && (
+            <div className="max-h-[42%] overflow-y-auto border-b border-white/10 bg-white/[0.03] px-4 py-3">
+              <ClaudeTutorial connected={claudeConnected} />
+            </div>
+          )}
           <div className="flex-1 min-h-0 p-2">
             <ClaudeTerminal
               key={termGen}
