@@ -12,6 +12,7 @@ import { Voorwaarden } from "@/pages/voorwaarden";
 import { ClaudeConnect } from "@/pages/claude-connect";
 import { Uitleg } from "@/pages/uitleg";
 import { Help } from "@/pages/help";
+import { Welkom } from "@/pages/welkom";
 import { PlatformUitleg } from "@/pages/platform-uitleg";
 import NotFound from "@/pages/not-found";
 
@@ -35,6 +36,7 @@ function Router() {
       <Route path="/claude" component={ClaudeConnect} />
       <Route path="/uitleg" component={Uitleg} />
       <Route path="/help" component={Help} />
+      <Route path="/welkom" component={Welkom} />
       <Route path="/platform-uitleg" component={PlatformUitleg} />
       <Route path="/projects/:id" component={ProjectWorkspace} />
       <Route component={NotFound} />

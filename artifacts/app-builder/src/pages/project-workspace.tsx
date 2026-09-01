@@ -1715,10 +1715,30 @@ export function ProjectWorkspace() {
         node = node.parentElement;
       }
       const nb = node.getBoundingClientRect();
-      const scale = 0.6; // low scale → much faster; plenty sharp for a reference
+      const scale = 0.7; // low scale → much faster; plenty sharp for a reference
       const rendered: HTMLCanvasElement = await Promise.race([
-        html2canvas(node, { useCORS: true, backgroundColor: "#ffffff", scale, logging: false, imageTimeout: 1200, removeContainer: true } as Parameters<typeof html2canvas>[1]),
-        new Promise<HTMLCanvasElement>((_, rej) => setTimeout(() => rej(new Error("timeout")), 5000)),
+        html2canvas(node, {
+          useCORS: true,
+          allowTaint: false,
+          backgroundColor: "#ffffff",
+          scale,
+          logging: false,
+          imageTimeout: 4000,
+          removeContainer: true,
+          // Force lazy-loaded / data-src images to load in the clone — the usual reason a capture
+          // comes out blank on imported sites.
+          onclone: (cloned: Document) => {
+            cloned.querySelectorAll("img").forEach((img) => {
+              const el = img as HTMLImageElement & { dataset: DOMStringMap };
+              el.loading = "eager";
+              const ds = el.dataset.src || el.getAttribute("data-lazy-src") || el.getAttribute("data-original");
+              if (ds && (!el.getAttribute("src") || el.getAttribute("src")!.startsWith("data:"))) el.setAttribute("src", ds);
+              const dss = el.getAttribute("data-srcset") || el.getAttribute("data-lazy-srcset");
+              if (dss && !el.getAttribute("srcset")) el.setAttribute("srcset", dss);
+            });
+          },
+        } as Parameters<typeof html2canvas>[1]),
+        new Promise<HTMLCanvasElement>((_, rej) => setTimeout(() => rej(new Error("timeout")), 9000)),
       ]);
       const sx = Math.max(0, (rect.x - nb.left) * scale);
       const sy = Math.max(0, (rect.y - nb.top) * scale);
@@ -3392,7 +3412,7 @@ export function ProjectWorkspace() {
                             {s.isImage
                               ? <img src={s.dataUrl} alt="" className="h-16 w-auto max-w-[160px] rounded-md border border-border object-cover" />
                               : <div className="h-16 w-[140px] rounded-md border border-border bg-muted/50 flex flex-col items-center justify-center px-2 text-center"><FileCode className="h-5 w-5 text-muted-foreground" /><span className="mt-1 text-[10px] text-muted-foreground truncate max-w-full">{s.name}</span></div>}
-                            <button type="button" onClick={() => deleteShot(s.id)} className="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full bg-background border border-border shadow flex items-center justify-center text-muted-foreground hover:text-destructive" title="Verwijderen" data-testid="button-delete-shot"><X className="h-3 w-3" /></button>
+                            <button type="button" onClick={() => deleteShot(s.id)} className="absolute top-1 right-1 h-5 w-5 rounded-full bg-black/60 text-white flex items-center justify-center opacity-80 hover:opacity-100 hover:bg-black/80 transition" title="Verwijderen" data-testid="button-delete-shot"><X className="h-3 w-3" /></button>
                           </div>
                         ))}
                       </div>

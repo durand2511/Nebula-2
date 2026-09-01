@@ -3,7 +3,7 @@
  * platform manual (/platform-uitleg).
  */
 import { useLocation } from "wouter";
-import { Terminal as TerminalIcon, BookOpen, ArrowRight } from "lucide-react";
+import { Terminal as TerminalIcon, BookOpen, ArrowRight, Sparkles } from "lucide-react";
 
 export function Help() {
   const [, setLocation] = useLocation();
@@ -15,7 +15,21 @@ export function Help() {
           <p className="mt-3 text-muted-foreground max-w-xl mx-auto">Kies waar je meer over wilt weten. Alles staat er stap voor stap in.</p>
         </div>
 
-        <div className="mt-10 grid gap-5 sm:grid-cols-2">
+        <button
+          type="button"
+          onClick={() => setLocation("/welkom")}
+          className="group mt-10 w-full text-left rounded-2xl border border-primary bg-primary/5 shadow-sm p-7 hover:bg-primary/10 hover:shadow-md transition flex items-start gap-4"
+          data-testid="help-welkom"
+        >
+          <div className="h-12 w-12 rounded-xl bg-primary/15 flex items-center justify-center shrink-0"><Sparkles className="h-6 w-6 text-primary" /></div>
+          <div className="flex-1">
+            <h2 className="text-xl font-bold tracking-tight">Welkom — start hier</h2>
+            <p className="mt-1 text-sm text-muted-foreground">Een korte introductie en alles wat je moet weten en lezen voordat je begint met je website.</p>
+            <span className="mt-2 inline-flex items-center gap-1 text-sm font-medium text-primary">Lees de introductie <ArrowRight className="h-4 w-4 group-hover:translate-x-0.5 transition-transform" /></span>
+          </div>
+        </button>
+
+        <div className="mt-5 grid gap-5 sm:grid-cols-2">
           <button
             type="button"
             onClick={() => setLocation("/uitleg")}
