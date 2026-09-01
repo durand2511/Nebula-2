@@ -667,32 +667,14 @@ router.post("/billing/subscribe", async (req, res) => {
     const lineItem = /^price_/.test(envPrice)
       ? { price: envPrice, quantity: 1 }
       : { quantity: 1, price_data: { currency: "eur", unit_amount: Math.round(SUBSCRIPTION_PRICE_EUR * 100), recurring: { interval: "month" }, product_data: { name: "Nebula — volledige toegang" } } };
-    // Publishable key is NOT secret (it ships to the browser). Fall back to the test key so the custom
-    // in-app checkout always works; set STRIPE_PUBLISHABLE_KEY on Render to your pk_live for production.
-    const pk = process.env.STRIPE_PUBLISHABLE_KEY || "pk_test_51Sk17JHyqZ2ZUEjYuhLf3UJ1asUQDhj5VhTS8YUVEtllknDO2HkqKRargBFvtSGSIWldq2M4luirH81IRsX0bc8j00dRMdgdth";
-    if (pk) {
-      // Custom in-app checkout via Stripe Payment Element: create an incomplete subscription and hand
-      // its PaymentIntent client_secret to our own payment form (card + iDEAL).
-      const priceId = await nebulaPriceId();
-      const sub = await stripeReq("POST", "subscriptions", {
-        customer,
-        items: [{ price: priceId }],
-        payment_behavior: "default_incomplete",
-        // iDEAL on a recurring subscription must pair with SEPA Direct Debit: iDEAL collects the first
-        // payment and sets up a SEPA mandate for renewals. Including sepa_debit makes iDEAL allowed.
-        payment_settings: { payment_method_types: ["card", "ideal", "sepa_debit"], save_default_payment_method: "on_subscription" },
-        expand: ["latest_invoice.payment_intent"],
-        metadata: { platformUserId: String(u.id) },
-      });
-      const pi = sub?.latest_invoice?.payment_intent;
-      if (pi?.client_secret) {
-        res.json({ clientSecret: pi.client_secret, publishableKey: pk, subscriptionId: sub.id });
-        return;
-      }
-      // No client secret (shouldn't happen) → clean up and fall back to hosted.
-      try { await stripeReq("DELETE", `subscriptions/${sub.id}`); } catch { /* ignore */ }
-    }
-    // Fallback: hosted Stripe Checkout (redirect) — €50/mo, card + iDEAL, name+address for the invoice.
+    // Hosted Stripe Checkout (redirect) — €50/mo, card + iDEAL, name+address for the invoice.
+    // NOTE: the old custom in-app flow (incomplete subscription + Payment Element) is gone for two
+    // reasons, both verified against the live API: (1) `ideal` is rejected outright in a subscription's
+    // payment_settings ("can't be used with collection_method charge_automatically"), and (2) newer
+    // Stripe API versions no longer return `latest_invoice.payment_intent`, so there is no
+    // client_secret to hand to the Payment Element at all. Hosted Checkout in subscription mode DOES
+    // accept iDEAL and pairs it with SEPA automatically: iDEAL collects the first payment and Stripe
+    // stores a SEPA Direct Debit mandate for the renewals.
     const session = await stripeReq("POST", "checkout/sessions", {
       mode: "subscription", customer, client_reference_id: String(u.id),
       payment_method_types: ["card", "ideal"],
