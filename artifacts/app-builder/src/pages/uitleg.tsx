@@ -77,14 +77,14 @@ export function Uitleg() {
           <p className="text-muted-foreground mt-1">Dit doe je maar één keer. Daarna onthoudt Nebula je koppeling.</p>
 
           <ol className="mt-6">
-            <StepRow n={1} icon={<ShoppingCart className="h-4 w-4 text-primary" />} title="Koop een Claude-abonnement">
-              <p>Claude Code werkt op je eigen Claude-abonnement — dat is je enige kostenpost. Kies <strong className="text-foreground">Pro</strong> of <strong className="text-foreground">Max</strong>.</p>
-              <a href="https://claude.ai/upgrade" target="_blank" rel="noreferrer"><Button size="sm" variant="outline" className="gap-1.5">Naar claude.ai/upgrade <ExternalLink className="h-3.5 w-3.5" /></Button></a>
+            <StepRow n={1} icon={<UserPlus className="h-4 w-4 text-primary" />} title="Maak een Claude-account">
+              <p>Ga naar claude.ai en maak een account aan met je e-mailadres. <strong className="text-foreground">Heb je al een Claude-account? Sla deze stap over.</strong></p>
+              <a href="https://claude.ai/login" target="_blank" rel="noreferrer"><Button size="sm" variant="outline" className="gap-1.5">Account maken op claude.ai <ExternalLink className="h-3.5 w-3.5" /></Button></a>
             </StepRow>
 
-            <StepRow n={2} icon={<UserPlus className="h-4 w-4 text-primary" />} title="Maak of gebruik je Claude-account">
-              <p>Nog geen account? Maak er één met je e-mailadres. Heb je er al één? Dan sla je deze stap over.</p>
-              <a href="https://claude.ai/login" target="_blank" rel="noreferrer"><Button size="sm" variant="outline" className="gap-1.5">Account maken op claude.ai <ExternalLink className="h-3.5 w-3.5" /></Button></a>
+            <StepRow n={2} icon={<ShoppingCart className="h-4 w-4 text-primary" />} title="Koop een Claude-abonnement">
+              <p>Claude Code werkt op je eigen Claude-abonnement — dat is je enige kostenpost. Kies <strong className="text-foreground">Pro</strong> of <strong className="text-foreground">Max</strong>. <strong className="text-foreground">Heb je al een abonnement? Sla deze stap over.</strong></p>
+              <a href="https://claude.ai/upgrade" target="_blank" rel="noreferrer"><Button size="sm" variant="outline" className="gap-1.5">Naar claude.ai/upgrade <ExternalLink className="h-3.5 w-3.5" /></Button></a>
             </StepRow>
 
             <StepRow n={3} icon={<TerminalIcon className="h-4 w-4 text-primary" />} title="Open het koppel-venster">

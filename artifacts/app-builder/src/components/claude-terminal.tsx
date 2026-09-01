@@ -6,7 +6,7 @@
  *   • onFilesChanged  — Claude saved files → refresh preview + file list
  *   • onConnected     — the user's Claude login was detected → "gekoppeld"
  */
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, forwardRef, useImperativeHandle } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
@@ -30,11 +30,29 @@ function wsUrl(projectId: number): string {
   return `${proto}//${window.location.host}/api/claude/terminal?project=${projectId}&token=${tok}`;
 }
 
-export function ClaudeTerminal({ projectId, className, onFilesChanged, onConnected, onStatus }: Props) {
+export type ClaudeTerminalHandle = {
+  /** Type text into Claude's prompt (no Enter) — used to prefill a request. */
+  send: (text: string) => boolean;
+  focus: () => void;
+};
+
+export const ClaudeTerminal = forwardRef<ClaudeTerminalHandle, Props>(function ClaudeTerminal(
+  { projectId, className, onFilesChanged, onConnected, onStatus }: Props,
+  ref,
+) {
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
+
+  useImperativeHandle(ref, () => ({
+    send: (text: string) => {
+      const ws = wsRef.current;
+      if (ws && ws.readyState === WebSocket.OPEN) { ws.send(JSON.stringify({ t: "i", d: text })); termRef.current?.focus(); return true; }
+      return false;
+    },
+    focus: () => termRef.current?.focus(),
+  }), []);
   const [status, setStatus] = useState<TerminalStatus>("connecting");
   const statusRef = useRef<TerminalStatus>("connecting");
   const [errMsg, setErrMsg] = useState<string>("");
@@ -142,4 +160,4 @@ export function ClaudeTerminal({ projectId, className, onFilesChanged, onConnect
       )}
     </div>
   );
-}
+});

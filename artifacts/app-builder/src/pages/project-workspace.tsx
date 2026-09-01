@@ -48,7 +48,7 @@ import { Textarea } from "@/components/ui/textarea";
 // ScrollArea removed — using a plain div for scroll control
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CodeViewer } from "@/components/code-viewer";
-import { ClaudeTerminal, type TerminalStatus } from "@/components/claude-terminal";
+import { ClaudeTerminal, type TerminalStatus, type ClaudeTerminalHandle } from "@/components/claude-terminal";
 import { formatFileContent } from "@/lib/format-code";
 import { buildWordPressExport } from "@/lib/wxr-export";
 import {
@@ -1288,6 +1288,8 @@ export function ProjectWorkspace() {
   const [blogBusy, setBlogBusy] = useState(false);
   const selectModeRef = useRef(false);
   selectModeRef.current = selectMode;
+  const previewPageRef = useRef<string | null>(null);
+  const termHandleRef = useRef<ClaudeTerminalHandle | null>(null);
   type Selection = { kind: "text" | "image"; tag: string; selector: string; cls?: string; text?: string; src?: string; file?: string; alt?: string; w?: number; h?: number; nav?: boolean };
   const [selection, setSelection] = useState<Selection | null>(null);
   const [editValue, setEditValue] = useState("");
@@ -1300,6 +1302,7 @@ export function ProjectWorkspace() {
   const savedScrollRef = useRef<number | null>(null);
   // For imported multi-page sites: which page the preview currently shows (null = index).
   const [previewPage, setPreviewPage] = useState<string | null>(null);
+  previewPageRef.current = previewPage;
   // Stable session ID for the reverse-proxy cookie jar — one per component mount.
   // The site-proxy and preview-page endpoints use this to associate cookie state
   // with this specific preview tab.
@@ -1536,11 +1539,21 @@ export function ProjectWorkspace() {
         line?: number;
       };
       if (!d) return;
-      // Visual select mode: the user clicked an element in the preview to edit it.
+      // "Aanwijzen": the user picked an element in the preview → prefill a clear reference into the
+      // Claude Code terminal so they only have to finish the sentence (what should change).
       if (d.__buildlySelected && (d.kind === "text" || d.kind === "image")) {
-        const sel: Selection = { kind: d.kind, tag: d.tag ?? "", selector: d.selector ?? "", cls: d.cls, text: d.text, src: d.src, file: d.file, alt: d.alt, w: d.w, h: d.h, nav: d.nav };
-        setSelection(sel);
-        setEditValue(d.kind === "text" ? (d.text ?? "") : "");
+        const page = (previewPageRef.current ?? "index.html").replace(/^pages\//, "").replace(/\.html$/, "") || "index";
+        let msg: string;
+        if (d.kind === "image") {
+          const naam = d.file || d.alt || "deze afbeelding";
+          msg = `Op pagina "${page}", de afbeelding "${naam}": `;
+        } else {
+          const t = (d.text ?? "").replace(/\s+/g, " ").trim().slice(0, 80);
+          msg = `Op pagina "${page}", het ${d.tag || "element"}${t ? ` met de tekst "${t}"` : ""}: `;
+        }
+        const sent = termHandleRef.current?.send(msg);
+        setSelectMode(false);
+        if (!sent) window.alert("Koppel eerst Claude (klik op 'Claude koppelen') om dit te kunnen gebruiken.");
         return;
       }
       // Imported multi-page navigation: the preview asks to render a sibling page.
@@ -2642,6 +2655,7 @@ export function ProjectWorkspace() {
           <div className="flex-1 min-h-0 p-2">
             <ClaudeTerminal
               key={termGen}
+              ref={termHandleRef}
               projectId={projectId}
               className="h-full"
               onStatus={setTermStatus}
@@ -2694,83 +2708,37 @@ export function ProjectWorkspace() {
                     className="h-8 text-muted-foreground hover:text-foreground data-[active=true]:text-primary-foreground"
                     data-active={selectMode}
                     onClick={() => setSelectMode((v) => !v)}
-                    title="Klik op een element in de preview om het direct te bewerken"
+                    title="Wijs een element in de preview aan; de verwijzing wordt automatisch naar Claude gestuurd"
                     data-testid="button-select-edit"
                   >
                     <MousePointerClick className="h-3.5 w-3.5 mr-1.5" />
-                    {selectMode ? "Klaar met selecteren" : "Selecteer & bewerk"}
+                    {selectMode ? "Klaar met aanwijzen" : "Aanwijzen"}
                   </Button>
                 )}
-                {/* Visuele editor — pagina-wisselaar (tabbladen) + nieuwe pagina toevoegen (AI-vrij). */}
-                {!isStreaming && activeTab === "preview" && previewHtml && (() => {
-                  const sitePages = (files ?? []).filter((f) => f.path.endsWith(".html") && !f.path.startsWith("components/") && f.path !== "booking-app.html");
-                  return (
-                    <>
-                      {sitePages.length > 1 && (
-                        <select
-                          className="h-8 w-[112px] rounded-md border border-border bg-background px-2 text-sm text-muted-foreground truncate"
-                          value={previewPage ?? "index.html"}
-                          onChange={(e) => { setPreviewPage(e.target.value); setPreviewKey((k) => k + 1); }}
-                          title="Wissel tussen pagina's"
-                          data-testid="select-page"
-                        >
-                          {sitePages.map((f) => (<option key={f.path} value={f.path}>{f.path.replace(/^pages\//, "").replace(/\.html$/, "")}</option>))}
-                        </select>
-                      )}
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-8 text-muted-foreground hover:text-foreground"
-                        title="Voeg een nieuwe pagina/tabblad toe (zonder AI)"
-                        data-testid="button-add-page"
-                        onClick={async () => {
-                          const name = window.prompt("Naam van de nieuwe pagina (bijv. Over ons):");
-                          if (!name || !name.trim()) return;
-                          const label = name.trim();
-                          const slug = label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "nieuwe-pagina";
-                          const ok = await postAction({ action: "create_page", name: label, navLabel: label });
-                          if (!ok) { window.alert("Pagina toevoegen mislukt."); return; }
-                          await refreshAfterEdit();
-                          setPreviewPage(`${slug}.html`);
-                          setPreviewKey((k) => k + 1);
-                        }}
-                      >
-                        + Pagina
-                      </Button>
-                      <select
-                        className="h-8 w-[104px] rounded-md border border-border bg-background px-2 text-sm text-muted-foreground truncate"
-                        value=""
-                        title="Voeg een sectie toe aan deze pagina (zonder AI)"
-                        data-testid="select-add-section"
-                        onChange={async (e) => {
-                          const kind = e.target.value;
-                          e.currentTarget.selectedIndex = 0;
-                          if (!kind) return;
-                          const ok = await postAction({ action: "add_section", page: currentPagePath(), kind });
-                          if (!ok) { window.alert("Sectie toevoegen mislukt."); return; }
-                          await refreshAfterEdit();
-                        }}
-                      >
-                        <option value="">+ Sectie…</option>
-                        <option value="heading">Titel + tekst</option>
-                        <option value="text">Tekstblok</option>
-                        <option value="image-text">Afbeelding + tekst</option>
-                        <option value="gallery">Galerij (3 foto's)</option>
-                        <option value="cta">Oproep (knop)</option>
-                      </select>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-8 text-muted-foreground hover:text-foreground"
-                        title="Schrijf zelf een blogpost (zonder AI)"
-                        data-testid="button-add-blog"
-                        onClick={() => { setBlogTitle(""); setBlogBody(""); setBlogImage(""); setBlogOpen(true); }}
-                      >
-                        + Blog
-                      </Button>
-                    </>
-                  );
-                })()}
+                {/* Sectie toevoegen (zonder AI) — de rest gaat via Claude Code */}
+                {!isStreaming && activeTab === "preview" && previewHtml && (
+                  <select
+                    className="h-8 w-[104px] rounded-md border border-border bg-background px-2 text-sm text-muted-foreground truncate"
+                    value=""
+                    title="Voeg een sectie toe aan deze pagina (zonder AI)"
+                    data-testid="select-add-section"
+                    onChange={async (e) => {
+                      const kind = e.target.value;
+                      e.currentTarget.selectedIndex = 0;
+                      if (!kind) return;
+                      const ok = await postAction({ action: "add_section", page: currentPagePath(), kind });
+                      if (!ok) { window.alert("Sectie toevoegen mislukt."); return; }
+                      await refreshAfterEdit();
+                    }}
+                  >
+                    <option value="">+ Sectie…</option>
+                    <option value="heading">Titel + tekst</option>
+                    <option value="text">Tekstblok</option>
+                    <option value="image-text">Afbeelding + tekst</option>
+                    <option value="gallery">Galerij (3 foto's)</option>
+                    <option value="cta">Oproep (knop)</option>
+                  </select>
+                )}
                 {!isStreaming && activeTab === "preview" && previewHtml && (
                   <Button
                     variant="ghost"
@@ -2793,29 +2761,6 @@ export function ProjectWorkspace() {
                   >
                     <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
                     Refresh
-                  </Button>
-                )}
-                {!isStreaming && activeTab === "preview" && previewHtml && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-8 text-muted-foreground hover:text-foreground"
-                    disabled={fontsBusy}
-                    title="Haalt de lettertypes van de geïmporteerde site op en maakt ze zelfstandig, zodat icoontjes/pijltjes renderen i.p.v. blokjes"
-                    onClick={async () => {
-                      if (fontsBusy) return;
-                      setFontsBusy(true);
-                      try {
-                        const r = await fetch(`/api/projects/${projectId}/inline-fonts`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
-                        const d = await r.json().catch(() => ({}));
-                        if (r.ok && d.ok) { setPreviewKey((k) => k + 1); }
-                        else window.alert(d.error || "Fonts fixen mislukt. Zorg dat de originele site bereikbaar is.");
-                      } catch { window.alert("Fonts fixen mislukt."); }
-                      finally { setFontsBusy(false); }
-                    }}
-                  >
-                    {fontsBusy ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : null}
-                    Fonts fixen
                   </Button>
                 )}
                 {!isStreaming && activeTab === "preview" && (
@@ -3218,7 +3163,7 @@ export function ProjectWorkspace() {
                   {/* Select & edit mode: hint banner + click-to-edit popover */}
                   {selectMode && !selection && (
                     <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[60] rounded-full bg-primary text-primary-foreground text-xs font-medium px-4 py-2 shadow-lg pointer-events-none">
-                      Klik op tekst of een afbeelding om die direct te bewerken
+                      Klik op een element — Claude weet dan precies wat je bedoelt
                     </div>
                   )}
                   {selection && (
