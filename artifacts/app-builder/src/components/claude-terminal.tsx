@@ -52,7 +52,7 @@ export function ClaudeTerminal({ projectId, className, onFilesChanged, onConnect
     const term = new Terminal({
       cursorBlink: true,
       fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace",
-      fontSize: 13,
+      fontSize: 12,
       lineHeight: 1.2,
       scrollback: 5000,
       allowProposedApi: true,
@@ -68,6 +68,8 @@ export function ClaudeTerminal({ projectId, className, onFilesChanged, onConnect
     termRef.current = term;
     fitRef.current = fit;
     try { fit.fit(); } catch { /* not laid out yet */ }
+    // fit again after the browser has actually laid the element out (first fit can be pre-layout)
+    const t0 = setTimeout(() => { try { fit.fit(); } catch { /* ignore */ } }, 120);
 
     const ro = new ResizeObserver(() => {
       try { fit.fit(); } catch { /* ignore */ }
@@ -76,7 +78,7 @@ export function ClaudeTerminal({ projectId, className, onFilesChanged, onConnect
     });
     ro.observe(hostRef.current);
 
-    return () => { ro.disconnect(); term.dispose(); termRef.current = null; fitRef.current = null; };
+    return () => { clearTimeout(t0); ro.disconnect(); term.dispose(); termRef.current = null; fitRef.current = null; };
   }, []);
 
   // (Re)connect the socket.

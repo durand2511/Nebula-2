@@ -2614,7 +2614,7 @@ export function ProjectWorkspace() {
       {/* Main Workspace */}
       <div className="flex-1 flex overflow-hidden">
         {/* Left Panel: Claude Code terminal (the editor) */}
-        <div className="w-[520px] border-r border-border bg-[#0f0e14] flex flex-col shrink-0">
+        <div className="w-[600px] max-w-[46vw] min-w-[440px] border-r border-border bg-[#0f0e14] flex flex-col shrink-0">
           <div className="flex items-center gap-2 px-3 py-2 border-b border-white/10 text-xs text-white/70">
             <TerminalIcon className="h-3.5 w-3.5 text-primary" />
             <span className="font-semibold text-white/90">Claude Code</span>

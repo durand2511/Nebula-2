@@ -239,6 +239,27 @@ export async function disconnectClaude(userId: number): Promise<void> {
   await db.update(platformUsers).set({ claudeAuth: "" }).where(eq(platformUsers.id, userId));
 }
 
+/**
+ * Pre-answer Claude Code's first-run onboarding (theme, telemetry, "trust this folder") by seeding
+ * the user-level .claude.json — WITHOUT touching any restored OAuth credentials. This takes the
+ * customer straight to the login step instead of a multi-screen wizard in a tiny terminal.
+ */
+async function seedOnboarding(userId: number, cwd: string): Promise<void> {
+  const { home, configDir } = userDirs(userId);
+  for (const file of [path.join(configDir, ".claude.json"), path.join(home, ".claude.json")]) {
+    let cfg: Record<string, unknown> = {};
+    try { cfg = JSON.parse(await fs.readFile(file, "utf8")); } catch { /* fresh */ }
+    cfg.hasCompletedOnboarding = true;
+    cfg.theme ??= "dark";
+    cfg.autoUpdates = false;
+    cfg.hasTrustDialogAccepted = true;
+    const projects = (cfg.projects && typeof cfg.projects === "object") ? cfg.projects as Record<string, unknown> : {};
+    projects[cwd] = { ...(projects[cwd] as object || {}), hasTrustDialogAccepted: true, hasCompletedProjectOnboarding: true, allowedTools: [] };
+    cfg.projects = projects;
+    await fs.writeFile(file, JSON.stringify(cfg, null, 2), { encoding: "utf8", mode: 0o600 });
+  }
+}
+
 async function restoreCreds(userId: number): Promise<string> {
   const [u] = await db.select({ claudeAuth: platformUsers.claudeAuth }).from(platformUsers).where(eq(platformUsers.id, userId));
   if (!u?.claudeAuth) return "";
@@ -399,7 +420,9 @@ async function getOrCreateSession(userId: number, projectId: number, projectName
   if (existing) await destroySession(existing);
 
   const { home, configDir } = userDirs(userId);
-  const cwd = projectId > 0 ? path.join(ROOT, "ws", `u${userId}`, `p${projectId}`) : path.join(home, "koppelen");
+  let cwd = projectId > 0 ? path.join(ROOT, "ws", `u${userId}`, `p${projectId}`) : path.join(home, "koppelen");
+  await fs.mkdir(cwd, { recursive: true });
+  try { cwd = await fs.realpath(cwd); } catch { /* keep as-is */ }
   const u = unixUser(userId);
   for (const d of [home, configDir, path.join(home, ".config"), path.join(home, ".cache"), path.join(home, ".local", "share"), path.join(home, ".local", "state")]) {
     await fs.mkdir(d, { recursive: true });
@@ -407,6 +430,7 @@ async function getOrCreateSession(userId: number, projectId: number, projectName
   // Session settings: deny shell/network tools, auto-accept file edits. Rewritten every start.
   await fs.writeFile(path.join(configDir, "settings.json"), JSON.stringify(SESSION_SETTINGS, null, 2), "utf8");
   const credHash = await restoreCreds(userId);
+  await seedOnboarding(userId, cwd);
   await ownDir(home, u);
 
   const s: Session = {
@@ -477,6 +501,11 @@ async function getOrCreateSession(userId: number, projectId: number, projectName
       s.watcher = null;
       const poll = setInterval(() => { if (sessions.get(key) === s) scheduleSync(s); else clearInterval(poll); }, 3000);
     }
+  }
+  // Fresh + not logged in → open the login menu automatically (skips the "Run /login" hunt and the
+  // 3rd-party/Vertex mis-selection). Preselected option is "Claude account with subscription".
+  if (!blobConnected(await readCredBlob(userId))) {
+    setTimeout(() => { if (!s.exited && s.proc) { try { s.proc.write("/login\r"); } catch { /* ignore */ } } }, 2500);
   }
   s.credTimer = setInterval(() => { void persistCredsIfChanged(s); }, CRED_POLL_MS);
   if (projectId > 0) s.dbTimer = setInterval(() => { refreshFromDb(s).catch((err) => logger.warn({ err, key }, "[claude-terminal] db refresh failed")); }, 5000);
