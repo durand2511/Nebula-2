@@ -331,11 +331,11 @@ async function billingApi(path: string, body?: unknown): Promise<{ ok: boolean; 
 function BillingDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [data, setData] = useState<any>(null);
   const [busy, setBusy] = useState(false);
+  const [checkout, setCheckout] = useState<{ clientSecret: string; publishableKey: string } | null>(null);
   const load = () => billingApi("").then((r) => { if (r.ok) setData(r.d); });
   useEffect(() => { if (open) { setData(null); load(); } }, [open]);
   if (!open) return null;
 
-  const [checkout, setCheckout] = useState<{ clientSecret: string; publishableKey: string } | null>(null);
   const subscribe = async () => {
     setBusy(true);
     const r = await billingApi("/subscribe", {});
