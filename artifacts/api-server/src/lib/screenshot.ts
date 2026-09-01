@@ -63,8 +63,9 @@ async function doCapture(opts: { projectId: number; page: string; clip: Clip; vi
       width: Math.max(1, Math.round(opts.clip.width)),
       height: Math.max(1, Math.round(opts.clip.height)),
     };
+    // puppeteer-core ≥22 returns a Uint8Array, not a Buffer — wrap it so .toString("base64") works.
     const buf = await pg.screenshot({ type: "png", clip });
-    return buf as Buffer;
+    return Buffer.from(buf as Uint8Array);
   } finally {
     await browser.close().catch(() => {});
   }

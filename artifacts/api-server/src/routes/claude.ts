@@ -61,7 +61,7 @@ router.post("/claude/shot", express.json({ limit: "1mb" }), async (req, res) => 
       clip: { x: Number(clip.x) || 0, y: Number(clip.y) || 0, width: Number(clip.width) || 0, height: Number(clip.height) || 0 },
       viewport: { width: Number(viewport.width) || 1200, height: Number(viewport.height) || 900 },
     });
-    res.json({ ok: true, dataUrl: `data:image/png;base64,${buf.toString("base64")}` });
+    res.json({ ok: true, dataUrl: `data:image/png;base64,${Buffer.from(buf).toString("base64")}` });
   } catch (err) {
     const msg = (err as Error).message === "no-chromium" ? "no-chromium" : "Screenshot mislukt.";
     logger.warn({ err, projectId }, "[claude] server screenshot failed");
