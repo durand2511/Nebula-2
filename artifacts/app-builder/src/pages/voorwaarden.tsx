@@ -4,93 +4,126 @@ export function Voorwaarden() {
     <div className="flex-1 w-full px-4 py-10 pb-24">
       <div className="mx-auto max-w-3xl rounded-2xl border border-border bg-card/95 backdrop-blur shadow-lg p-8 md:p-10">
         <h1 className="text-3xl font-bold tracking-tight">Algemene voorwaarden</h1>
-        <p className="mt-2 text-sm text-foreground/50">Laatst bijgewerkt: 29 juni 2026</p>
+        <p className="mt-2 text-sm text-foreground/50">Laatst bijgewerkt: 1 september 2026</p>
 
         <p className="mt-6 text-foreground/80 leading-relaxed">
-          Deze algemene voorwaarden zijn van toepassing op het gebruik van Nebula, een dienst van
-          Durand van Konijnenburg (KVK 70776857), bereikbaar via nebulabookings.com.
+          Deze algemene voorwaarden zijn van toepassing op alle offertes, opdrachten en
+          overeenkomsten van Nebula, een web design bureau van Durand van Konijnenburg
+          (KVK 70776857), bereikbaar via nebulabookings.com.
         </p>
 
         <Section title="1. Definities">
           <ul className="space-y-1">
-            <li><strong>Nebula</strong>: het platform en de dienst van Durand van Konijnenburg.</li>
-            <li><strong>Klant</strong>: de studio of ondernemer die een account bij Nebula afneemt.</li>
-            <li><strong>Eindgebruiker</strong>: de leerling/klant die via de website van de Klant boekt.</li>
+            <li><strong>Nebula</strong>: het web design bureau van Durand van Konijnenburg.</li>
+            <li><strong>Klant</strong>: de ondernemer of organisatie die Nebula een opdracht geeft.</li>
+            <li><strong>Website</strong>: de website, webapplicatie of het digitale product dat Nebula in opdracht van de Klant ontwerpt en bouwt.</li>
+            <li><strong>Oplevering</strong>: het moment waarop Nebula de Website aan de Klant overdraagt en de Klant daar zelf toegang toe heeft.</li>
           </ul>
         </Section>
 
         <Section title="2. Wat Nebula levert">
           <p>
-            Nebula stelt software beschikbaar waarmee de Klant een website en een boekingssysteem kan
-            opzetten en beheren, inclusief lesroosters, boekingen, betalingen via Stripe, facturatie,
-            e-mailcommunicatie en gerelateerde functionaliteit. Nebula levert de dienst "as a service"
-            (in de cloud); er wordt geen software aan de Klant overgedragen.
+            Nebula ontwerpt en bouwt websites, webapplicaties en andere digitale producten op maat.
+            Nebula werkt daarbij met AI-ontwikkeltools, in het bijzonder <strong>Claude Code</strong>,
+            waarmee vrijwel alles gemaakt kan worden: van een eenvoudige zakelijke website tot
+            complete webapplicaties met eigen functionaliteit, koppelingen en SEO. De exacte omvang
+            van een opdracht wordt per project vastgelegd in een offerte of schriftelijke afspraak.
           </p>
         </Section>
 
-        <Section title="3. Account en gebruik">
+        <Section title="3. Eigendom en beheer">
           <p>
-            De Klant is verantwoordelijk voor het juist instellen van zijn account, voor de inhoud die
-            hij plaatst en voor het vertrouwelijk houden van zijn inloggegevens. De Klant gebruikt het
-            platform niet voor onrechtmatige doeleinden en zorgt zelf voor een correcte verwerking van
-            de gegevens van zijn eindgebruikers.
+            Na oplevering en volledige betaling is de Klant <strong>volledig eigenaar</strong> van de
+            Website, inclusief het ontwerp, de inhoud en de broncode die specifiek voor de Klant is
+            gemaakt. De Klant is tevens <strong>zelf beheerder</strong> van de Website: de Klant
+            beschikt over de toegang tot de Website, het domein en (indien van toepassing) de hosting
+            en kan de Website naar eigen inzicht aanpassen, verplaatsen of laten onderhouden door
+            derden. Nebula behoudt geen rechten op de Website en maakt geen aanspraak op het domein
+            van de Klant.
+          </p>
+          <p className="mt-3">
+            Generieke tools, bibliotheken en werkwijzen die Nebula ook voor andere projecten gebruikt,
+            blijven eigendom van Nebula of van de betreffende licentiegevers. Nebula mag de opgeleverde
+            Website tonen als referentie in haar portfolio, tenzij de Klant daar bezwaar tegen maakt.
           </p>
         </Section>
 
-        <Section title="4. Betaling en opzegging">
+        <Section title="4. Verantwoordelijkheden van de Klant">
+          <p>
+            De Klant levert tijdig de informatie, teksten, afbeeldingen en toegangen aan die nodig zijn
+            voor de opdracht en staat ervoor in dat hij daar de rechten op heeft. Na oplevering is de
+            Klant als eigenaar en beheerder zelf verantwoordelijk voor de inhoud, het gebruik, de
+            beveiliging van zijn inloggegevens en de naleving van wet- en regelgeving (waaronder de
+            AVG) op zijn Website.
+          </p>
+        </Section>
+
+        <Section title="5. Offerte, prijs en betaling">
           <ul className="space-y-1">
-            <li>Het abonnement kost <strong>€69,99 per maand</strong> (inclusief btw, tenzij anders vermeld).</li>
-            <li>De betaling verloopt maandelijks vooraf via Stripe.</li>
-            <li>Het abonnement is <strong>maandelijks opzegbaar</strong>; bij opzegging loopt de toegang door tot het einde van de reeds betaalde periode.</li>
-            <li>Aanvullend AI-tegoed en eventuele extra aankopen worden los in rekening gebracht.</li>
-            <li>Reeds betaalde bedragen worden niet gerestitueerd, behoudens dwingend recht.</li>
+            <li>Nebula werkt op basis van een offerte of een schriftelijk bevestigde prijsafspraak per project.</li>
+            <li>Prijzen zijn exclusief btw, tenzij anders vermeld.</li>
+            <li>Tenzij anders afgesproken geldt een aanbetaling bij de start van de opdracht en het restant bij oplevering; facturen worden binnen 14 dagen betaald.</li>
+            <li>Onderhoud, hosting, doorontwikkeling of andere doorlopende diensten worden alleen geleverd als dat apart is afgesproken en worden apart in rekening gebracht.</li>
+            <li>Meerwerk buiten de afgesproken omvang wordt vooraf gemeld en na akkoord in rekening gebracht.</li>
           </ul>
         </Section>
 
-        <Section title="5. Beschikbaarheid">
+        <Section title="6. Oplevering en feedback">
           <p>
-            Nebula spant zich naar redelijkheid in voor een goede beschikbaarheid van het platform,
-            maar geeft <strong>geen garantie op ononderbroken beschikbaarheid (uptime)</strong>.
-            Onderhoud, storingen bij derden (zoals hosting- of betaaldiensten) of overmacht kunnen tot
-            tijdelijke onderbrekingen leiden.
+            Nebula levert de Website op zoals afgesproken in de offerte. De Klant krijgt de gelegenheid
+            om de Website te beoordelen en binnen de afgesproken feedbackrondes wijzigingen door te
+            geven. Als de Klant niet binnen 14 dagen na oplevering reageert, geldt de Website als
+            geaccepteerd.
           </p>
         </Section>
 
-        <Section title="6. Aansprakelijkheid">
+        <Section title="7. Beschikbaarheid en hosting">
+          <p>
+            Als de Klant de Website bij een derde partij host, is die partij verantwoordelijk voor de
+            beschikbaarheid. Als Nebula in opdracht van de Klant de hosting verzorgt, spant Nebula zich
+            naar redelijkheid in voor een goede beschikbaarheid, maar geeft{" "}
+            <strong>geen garantie op ononderbroken beschikbaarheid (uptime)</strong>. Onderhoud,
+            storingen bij derden of overmacht kunnen tot tijdelijke onderbrekingen leiden.
+          </p>
+        </Section>
+
+        <Section title="8. Aansprakelijkheid">
           <p>
             De aansprakelijkheid van Nebula is beperkt tot directe schade en tot maximaal het bedrag
-            dat de Klant in de drie maanden voorafgaand aan de schadeveroorzakende gebeurtenis heeft
-            betaald. Nebula is niet aansprakelijk voor indirecte schade, gevolgschade, gederfde winst,
-            gemiste besparingen of schade door uitval of fouten van ingeschakelde derden. Deze
-            beperkingen gelden niet bij opzet of bewuste roekeloosheid van Nebula.
+            dat de Klant voor de betreffende opdracht heeft betaald. Nebula is niet aansprakelijk voor
+            indirecte schade, gevolgschade, gederfde winst, gemiste besparingen of schade door uitval
+            of fouten van ingeschakelde derden, noch voor wijzigingen die de Klant of derden na
+            oplevering aan de Website aanbrengen. Deze beperkingen gelden niet bij opzet of bewuste
+            roekeloosheid van Nebula.
           </p>
         </Section>
 
-        <Section title="7. Gegevensverwerking">
+        <Section title="9. Gegevensverwerking">
           <p>
             Op de verwerking van persoonsgegevens is ons{" "}
             <a className="text-primary font-medium hover:underline" href="/privacy">privacybeleid</a>{" "}
-            van toepassing. Voor zover Nebula persoonsgegevens verwerkt in opdracht van de Klant,
+            van toepassing. De Klant is als eigenaar en beheerder van zijn Website de
+            verwerkingsverantwoordelijke voor de gegevens van zijn bezoekers. Voor zover Nebula
+            tijdens het project of bij onderhoud persoonsgegevens verwerkt in opdracht van de Klant,
             gebeurt dit als verwerker conform de AVG.
           </p>
         </Section>
 
-        <Section title="8. Wijzigingen">
+        <Section title="10. Wijzigingen">
           <p>
-            Nebula mag deze voorwaarden en de dienst van tijd tot tijd aanpassen. Wezenlijke
-            wijzigingen worden vooraf aangekondigd. Door het platform te blijven gebruiken, ga je
-            akkoord met de gewijzigde voorwaarden.
+            Nebula mag deze voorwaarden van tijd tot tijd aanpassen. Op een opdracht zijn de
+            voorwaarden van toepassing zoals die golden op het moment van de offerte of opdrachtbevestiging.
           </p>
         </Section>
 
-        <Section title="9. Toepasselijk recht">
+        <Section title="11. Toepasselijk recht">
           <p>
             Op deze voorwaarden en op alle overeenkomsten met Nebula is <strong>Nederlands recht</strong>{" "}
             van toepassing.
           </p>
         </Section>
 
-        <Section title="10. Contact">
+        <Section title="12. Contact">
           <ul className="space-y-1">
             <li>Durand van Konijnenburg</li>
             <li>E-mail: <a className="text-primary font-medium hover:underline" href="mailto:durand2511@gmail.com">durand2511@gmail.com</a></li>
