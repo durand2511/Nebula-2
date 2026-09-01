@@ -17,6 +17,9 @@ export const platformUsers = pgTable("platform_users", {
   subscriptionStatus: text("subscription_status").notNull().default("none"), // none | active | past_due | canceled
   currentPeriodEnd: text("current_period_end").notNull().default(""),         // yyyy-mm-dd
   aiCredit: real("ai_credit").notNull().default(0),                            // euros of AI budget left
+  // Claude Code-koppeling: the user's own Claude login (OAuth credential files), encrypted JSON blob.
+  // Restored into the per-user CLAUDE_CONFIG_DIR whenever a terminal session starts.
+  claudeAuth: text("claude_auth").notNull().default(""),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 

@@ -70,6 +70,7 @@ autoInstallPeers: false
 
 onlyBuiltDependencies:
   - '@swc/core'
+  - node-pty
   - esbuild
   - msw
   - unrs-resolver
@@ -161,3 +162,4 @@ overrides:
 
 allowBuilds:
   esbuild: true
+  node-pty: true

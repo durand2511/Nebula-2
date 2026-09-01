@@ -12,9 +12,41 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { ArrowRight, Globe, Loader2, FileCode, MessageSquare, Clock, Trash2, Sparkles, Palette, Rocket, User as UserIcon, LogOut, X, CreditCard, Check } from "lucide-react";
+import { ArrowRight, Globe, Loader2, FileCode, MessageSquare, Clock, Trash2, Sparkles, Palette, Rocket, User as UserIcon, LogOut, X, CreditCard, Check, Terminal as TerminalIcon, Unplug } from "lucide-react";
 import logoUrl from "../assets/nebula-logo.png";
 import { getToken, setToken, clearToken, type PlatformUser } from "@/lib/session";
+
+/** "Claude Code"-koppeling: status + één knop naar /claude (koppelen) of ontkoppelen. */
+function ClaudeStatusCard() {
+  const [, setLocation] = useLocation();
+  const [connected, setConnected] = useState<boolean | null>(null);
+  const [busy, setBusy] = useState(false);
+  const load = useCallback(() => { fetch("/api/claude/status").then((r) => r.json()).then((d) => setConnected(!!d.connected)).catch(() => setConnected(false)); }, []);
+  useEffect(() => { load(); }, [load]);
+  const disconnect = async () => {
+    if (!window.confirm("Claude ontkoppelen? Je kunt daarna opnieuw inloggen met je Claude-account.")) return;
+    setBusy(true);
+    try { await fetch("/api/claude/disconnect", { method: "POST" }); setConnected(false); } finally { setBusy(false); }
+  };
+  return (
+    <div className={`mt-8 rounded-2xl border p-5 flex flex-wrap items-center gap-4 ${connected ? "border-emerald-300/60 bg-emerald-50/60" : "border-amber-300/60 bg-amber-50/60"}`} data-testid="card-claude-status">
+      <div className={`h-10 w-10 rounded-xl flex items-center justify-center ${connected ? "bg-emerald-600 text-white" : "bg-amber-500 text-white"}`}><TerminalIcon className="h-5 w-5" /></div>
+      <div className="flex-1 min-w-[220px]">
+        <div className="font-semibold text-foreground flex items-center gap-2">
+          Claude Code {connected === null ? "" : connected ? <span className="inline-flex items-center gap-1 text-emerald-700 text-xs font-medium"><Check className="h-3.5 w-3.5" /> gekoppeld</span> : <span className="text-amber-800 text-xs font-medium">nog niet gekoppeld</span>}
+        </div>
+        <p className="text-xs text-muted-foreground mt-0.5">
+          {connected ? "Je websites worden bewerkt met Claude Code op je eigen Claude-abonnement." : "Koppel één keer je Claude-abonnement; daarna bewerk je al je websites met Claude Code."}
+        </p>
+      </div>
+      {connected ? (
+        <button type="button" onClick={disconnect} disabled={busy} className="text-xs text-muted-foreground hover:text-destructive inline-flex items-center gap-1" data-testid="button-claude-disconnect"><Unplug className="h-3.5 w-3.5" /> Ontkoppelen</button>
+      ) : (
+        <Button onClick={() => setLocation("/claude")} className="gap-2" data-testid="button-claude-connect">Claude koppelen <ArrowRight className="h-4 w-4" /></Button>
+      )}
+    </div>
+  );
+}
 
 async function authApi(path: string, body?: unknown): Promise<{ ok: boolean; status: number; d: any }> {
   const r = await fetch(`/api/auth/${path}`, {
@@ -233,13 +265,14 @@ export function AiEditor() {
             </Button>
           </div>
           {error && (<p className="mt-3 text-sm text-destructive text-center" data-testid="text-import-error">{error}</p>)}
+          <ClaudeStatusCard />
           <div className="mt-8 rounded-2xl border border-border bg-card shadow-lg p-8 text-center">
             <h2 className="text-2xl font-bold tracking-tight">Begin je project</h2>
-            <p className="mt-2 text-muted-foreground">Importeer je bestaande website hierboven — Nebula bouwt 'm om tot een slimme, volledig bewerkbare website.</p>
+            <p className="mt-2 text-muted-foreground">Importeer je bestaande website hierboven of open een project — daarna bewerk je alles met Claude Code, rechtstreeks in je browser.</p>
             <div className="mt-7 grid gap-4 sm:grid-cols-3 text-left">
-              <div className="rounded-xl border border-border/70 p-4"><Sparkles className="h-6 w-6 text-primary" /><h3 className="mt-2 font-semibold text-sm">Slim bewerken</h3><p className="text-xs text-muted-foreground mt-1">Pas je site aan met gewone taal of klik-en-bewerk — geen code nodig.</p></div>
-              <div className="rounded-xl border border-border/70 p-4"><Palette className="h-6 w-6 text-primary" /><h3 className="mt-2 font-semibold text-sm">Op maat ontworpen</h3><p className="text-xs text-muted-foreground mt-1">Elke pagina uniek — jouw merk, kleuren en uitstraling. Geen sjabloon.</p></div>
-              <div className="rounded-xl border border-border/70 p-4"><Rocket className="h-6 w-6 text-primary" /><h3 className="mt-2 font-semibold text-sm">Direct online</h3><p className="text-xs text-muted-foreground mt-1">Publiceer op een gratis Nebula-adres of je eigen domein met SSL.</p></div>
+              <div className="rounded-xl border border-border/70 p-4"><TerminalIcon className="h-6 w-6 text-primary" /><h3 className="mt-2 font-semibold text-sm">Claude Code als editor</h3><p className="text-xs text-muted-foreground mt-1">Vertel in gewone taal wat er anders moet; Claude past de bestanden van je site direct aan.</p></div>
+              <div className="rounded-xl border border-border/70 p-4"><Sparkles className="h-6 w-6 text-primary" /><h3 className="mt-2 font-semibold text-sm">Jouw eigen abonnement</h3><p className="text-xs text-muted-foreground mt-1">Koppel één keer je Claude-account. Je betaalt alleen je Claude-abonnement, niets extra's.</p></div>
+              <div className="rounded-xl border border-border/70 p-4"><Rocket className="h-6 w-6 text-primary" /><h3 className="mt-2 font-semibold text-sm">Jij bent eigenaar</h3><p className="text-xs text-muted-foreground mt-1">Je site, je bestanden, je domein — publiceer op een Nebula-adres of je eigen domein met SSL.</p></div>
             </div>
           </div>
         </div>

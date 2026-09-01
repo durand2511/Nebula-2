@@ -38,6 +38,7 @@ import {
   Rocket,
   Globe,
   Copy,
+  Terminal as TerminalIcon,
 } from "lucide-react";
 import JSZip from "jszip";
 import { Button } from "@/components/ui/button";
@@ -45,6 +46,7 @@ import { Textarea } from "@/components/ui/textarea";
 // ScrollArea removed — using a plain div for scroll control
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CodeViewer } from "@/components/code-viewer";
+import { ClaudeTerminal, type TerminalStatus } from "@/components/claude-terminal";
 import { formatFileContent } from "@/lib/format-code";
 import { buildWordPressExport } from "@/lib/wxr-export";
 import {
@@ -1243,6 +1245,10 @@ export function ProjectWorkspace() {
   // Setup instructions stay reachable (collapsible), not just before the first message.
   const [showHelp, setShowHelp] = useState(true);
   const [previewKey, setPreviewKey] = useState(0);
+  // Claude Code terminal (the editor) state
+  const [termGen, setTermGen] = useState(0);
+  const [termStatus, setTermStatus] = useState<TerminalStatus>("connecting");
+  const [claudeConnected, setClaudeConnected] = useState(false);
   // Full-screen "web viewer" for the preview. There is no zoom/scaling: the site always
   // renders at its real, fixed size (exactly how it looks in a real browser). This toggle
   // just makes the preview take over the whole window so the user can see it full size.
@@ -2607,491 +2613,38 @@ export function ProjectWorkspace() {
 
       {/* Main Workspace */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Left Panel: Chat */}
-        <div className="w-[380px] border-r border-border bg-card/30 flex flex-col shrink-0">
-          <div ref={chatScrollRef} className="flex-1 overflow-y-auto p-4" onScroll={handleChatScroll}>
-            <div className="space-y-5 pb-4">
-              {/* Setup-instructies: altijd bereikbaar (inklapbaar), niet alleen vóór je eerste bericht. */}
-              <div className="border border-border/60 rounded-2xl bg-card/60 overflow-hidden">
-                <button type="button" onClick={() => setShowHelp((v) => !v)} className="w-full flex items-center justify-between px-4 py-2.5 text-sm font-semibold text-foreground hover:bg-muted/40" data-testid="button-toggle-help">
-                  <span className="flex items-center gap-2"><Sparkles className="h-4 w-4 text-primary" /> Aan de slag &amp; setup</span>
-                  <ChevronDown className={`h-4 w-4 transition-transform ${showHelp ? "" : "-rotate-90"}`} />
-                </button>
-                {showHelp && (
-                  <div className="px-5 pb-5 text-sm space-y-4">
-                    <div>
-                      <p className="text-muted-foreground">Vraag de chat om iets te bouwen of aan te passen. Bijvoorbeeld een boekingssysteem in je website:</p>
-                      <div className="mt-2 rounded-lg bg-muted/60 px-3 py-2 font-mono text-[12px] text-foreground/80">Voeg een boekingssysteem toe aan mijn website</div>
-                    </div>
-                    <div>
-                      <div className="font-medium text-foreground">Je admin-account instellen</div>
-                      <p className="text-muted-foreground mt-1">Wil je later kunnen inloggen op je boekingsbeheer? Typ in de chat:</p>
-                      <div className="mt-2 rounded-lg bg-muted/60 px-3 py-2 font-mono text-[12px] text-foreground/80">admin gebruikersnaam jouwmail@gmail.com wachtwoord</div>
-                      <p className="text-muted-foreground mt-1 text-xs">Daarmee maak je de beheerder-login aan waarmee je op het boekingssysteem inlogt.</p>
-                    </div>
-                    <div className="rounded-lg border border-amber-300/60 bg-amber-50 p-3">
-                      <div className="font-medium text-amber-900">Voordat je systeem werkt — 2 stappen</div>
-                      <p className="text-amber-900/80 mt-1">Doe deze in je boekingssysteem op het tabblad <span className="font-semibold">Integraties</span>:</p>
-                      <ul className="text-amber-900/80 mt-2 space-y-1.5 list-disc pl-4">
-                        <li><span className="font-semibold">Koppel Stripe</span> via de knop bij Integraties — anders kunnen klanten niet betalen.</li>
-                        <li><span className="font-semibold">Vul je bedrijfsgegevens in</span> (bedrijfsnaam, KvK, BTW, adres) bij Integraties — zonder dit worden er geen automatische facturen gemaakt of gemaild.</li>
-                      </ul>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {isLoadingMessages ? (
-                <div className="flex justify-center p-4">
-                  <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-                </div>
-              ) : (
-                messages?.map((msg) => {
-                  if (msg.role === "user") {
-                    return (
-                      <div key={msg.id} className="flex justify-end">
-                        <div className="text-sm rounded-lg px-3.5 py-2 max-w-[90%] whitespace-pre-wrap bg-primary/10 text-foreground">
-                          {msg.content}
-                        </div>
-                      </div>
-                    );
-                  }
-                  const record = buildRecords.find(r => r.assistantMsgId === msg.id);
-                  return (
-                    <Fragment key={msg.id}>
-                      <div className="text-sm text-foreground/90 leading-relaxed whitespace-pre-wrap">
-                        {cleanContent(msg.content)}
-                      </div>
-                      {record && (
-                        <>
-                          {record.segments.map((seg, i) => {
-                            // The narration text is already shown via msg.content above, so
-                            // never render the record's text segments (would duplicate it).
-                            if (seg.kind === "text") {
-                              return null;
-                            }
-                            // The file_saved EVENTS below already list every saved file. If we
-                            // ALSO rendered FILE/PATCH segment panels we'd show each file twice
-                            // ("dubbele code panels"). So only fall back to segment panels for
-                            // LEGACY records that have no file_saved events.
-                            const hasFileEvents = record.events.some((e) => e.event === "file_saved");
-                            if (hasFileEvents) {
-                              return null;
-                            }
-                            if (seg.kind === "patch" || seg.kind === "file") {
-                              const Icon = seg.kind === "patch" ? FileText : FileCode;
-                              return (
-                                <div key={`rec-seg-${i}`} className="rounded-lg border border-border/60 overflow-hidden cursor-pointer hover:bg-muted/10 transition-colors" onClick={() => goToDiff(seg.file)}>
-                                  <div className="flex items-center gap-2 px-3 py-1.5 bg-muted/40 border-b border-border/40">
-                                    <Icon className="h-3 w-3 shrink-0 text-muted-foreground" />
-                                    <span className="flex-1 font-mono text-xs text-muted-foreground truncate">{seg.file}</span>
-                                    {seg.kind === "patch" && seg.op && (
-                                      <span className="font-mono text-[10px] text-muted-foreground/60 shrink-0">
-                                        {seg.op.replace(/_/g, " ")}
-                                      </span>
-                                    )}
-                                    <ChevronRight className="h-3 w-3 shrink-0 text-emerald-500/70 ml-1" />
-                                  </div>
-                                  {seg.code && (
-                                    <div className="max-h-44 overflow-y-auto bg-[#0d1117]">
-                                      <pre className="p-3 text-[11px] leading-relaxed font-mono text-gray-300 whitespace-pre overflow-x-auto">
-                                        <code>{seg.code}</code>
-                                      </pre>
-                                    </div>
-                                  )}
-                                </div>
-                              );
-                            }
-                            return null;
-                          })}
-                          {record.events.length > 0 && (
-                            <div className="space-y-1">
-                              {record.events.map((ev, i) => {
-                                if (ev.event === "file_saved") {
-                                  return (
-                                    <div key={`ev-${i}`} className="rounded-lg border border-border/60 bg-card/60 text-xs overflow-hidden">
-                                      <div className="px-3 py-2.5 space-y-1.5">
-                                        <div className="flex items-center gap-2 font-medium text-foreground/90">
-                                          <Check className="h-3 w-3 shrink-0 text-emerald-500" />
-                                          <span className="truncate">{ev.path}</span>
-                                          <span className={`shrink-0 font-normal px-1.5 py-0.5 rounded text-[10px] ${
-                                            ev.op === "create"
-                                              ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
-                                              : "bg-primary/10 text-primary"
-                                          }`}>
-                                            {ev.op === "create" ? "nieuw" : "gewijzigd"}
-                                          </span>
-                                          <button
-                                            onClick={() => goToDiff(ev.path)}
-                                            className="ml-auto flex shrink-0 items-center gap-1 text-[10px] text-emerald-500/80 hover:text-emerald-400 transition-colors"
-                                          >
-                                            <Code2 className="h-3 w-3" />
-                                            Bekijk diff
-                                            <ChevronRight className="h-2.5 w-2.5" />
-                                          </button>
-                                        </div>
-                                        {ev.summary && (
-                                          <p className="pl-5 text-muted-foreground leading-snug">{ev.summary}</p>
-                                        )}
-                                        <div className="flex gap-3 text-[10px] pl-5">
-                                          <span className="text-emerald-600">+{ev.linesAdded} regels</span>
-                                          {ev.linesRemoved > 0 && <span className="text-rose-500">−{ev.linesRemoved}</span>}
-                                        </div>
-                                        {ev.symbols.length > 0 && (
-                                          <div className="pl-5 flex flex-wrap gap-x-2 gap-y-0.5 text-muted-foreground/70 font-mono text-[10px]">
-                                            {ev.symbols.map((s, j) => <span key={j}>{s}</span>)}
-                                          </div>
-                                        )}
-                                      </div>
-                                    </div>
-                                  );
-                                }
-                                if (ev.event === "validation_error") {
-                                  if (
-                                    ev.error.toLowerCase().includes("ankerpunt") ||
-                                    ev.error.toLowerCase().includes("niet gevonden")
-                                  ) return null;
-                                  return (
-                                    <div key={`ev-verr-${i}`} className="flex items-center gap-2 text-xs text-rose-500 pl-1">
-                                      <AlertTriangle className="h-3 w-3 shrink-0" />
-                                      <span className="font-mono">{ev.path}</span>
-                                      <span className="text-rose-400">— {ev.error}</span>
-                                    </div>
-                                  );
-                                }
-                                return null;
-                              })}
-                            </div>
-                          )}
-                        </>
-                      )}
-                    </Fragment>
-                  );
-                })
+        {/* Left Panel: Claude Code terminal (the editor) */}
+        <div className="w-[520px] border-r border-border bg-[#0f0e14] flex flex-col shrink-0">
+          <div className="flex items-center gap-2 px-3 py-2 border-b border-white/10 text-xs text-white/70">
+            <TerminalIcon className="h-3.5 w-3.5 text-primary" />
+            <span className="font-semibold text-white/90">Claude Code</span>
+            <span className={`ml-1 inline-flex items-center gap-1 ${claudeConnected ? "text-emerald-400" : "text-amber-300"}`}>
+              <span className={`h-1.5 w-1.5 rounded-full ${claudeConnected ? "bg-emerald-400" : "bg-amber-300"}`} />
+              {claudeConnected ? "gekoppeld" : "niet gekoppeld"}
+            </span>
+            {termStatus === "open" && <span className="ml-1 text-white/40">· live</span>}
+            <div className="ml-auto flex items-center gap-2">
+              {!claudeConnected && (
+                <Link href="/claude" className="text-[11px] text-amber-200 hover:text-white underline underline-offset-2" data-testid="link-claude-connect">Claude koppelen</Link>
               )}
-
-              {/* Optimistic pending user message */}
-              {showPendingUser && (
-                <div className="flex flex-col items-end gap-1.5">
-                  {pendingImages.length > 0 && (
-                    <div className="flex flex-wrap justify-end gap-1.5 max-w-[90%]">
-                      {pendingImages.map((src, i) => (
-                        <img
-                          key={i}
-                          src={src}
-                          alt="attached reference"
-                          className="h-16 w-16 rounded-md object-cover border border-border"
-                        />
-                      ))}
-                    </div>
-                  )}
-                  {pendingUser && (
-                    <div className="text-sm rounded-lg px-3.5 py-2 max-w-[90%] whitespace-pre-wrap bg-primary/10 text-foreground">
-                      {pendingUser}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Interleaved stream: model narration + per-file code panels */}
-              {isStreaming && streamSegments.length === 0 && (
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <Loader2 className="h-3 w-3 animate-spin shrink-0" />
-                  <span>Bezig…</span>
-                </div>
-              )}
-
-              {/* Interleaved narration text + FILE/PATCH code panels — ONLY while streaming.
-                  Once the build finishes, the persisted assistant message + its buildRecord
-                  render the same content (above), so showing these too would duplicate it. */}
-              {isStreaming && streamSegments.map((seg, i) => {
-                if (seg.kind === "text") {
-                  const display = stripMarkdown(seg.content);
-                  if (!display) return null;
-                  return (
-                    <div key={i} className="text-sm text-foreground/90 leading-relaxed whitespace-pre-wrap">
-                      {display}
-                      {showCursor && i === streamSegments.length - 1 && (
-                        <span className="inline-block w-1.5 h-[1em] ml-0.5 -mb-[0.1em] bg-primary/70 animate-pulse align-middle" />
-                      )}
-                    </div>
-                  );
-                }
-
-                if (seg.kind === "patch" || seg.kind === "file") {
-                  const isSegExpanded = expandedSegIndices.has(i);
-                  const canNavigate = !seg.active && !isStreaming;
-                  const Icon = seg.kind === "patch" ? FileText : FileCode;
-                  const toggleSeg = () => {
-                    if (seg.active) return;
-                    if (canNavigate) {
-                      goToDiff(seg.file);
-                    } else {
-                      setExpandedSegIndices(prev => {
-                        const next = new Set(prev);
-                        if (next.has(i)) next.delete(i); else next.add(i);
-                        return next;
-                      });
-                    }
-                  };
-                  return (
-                    <div key={i} className="rounded-lg border border-border/60 overflow-hidden">
-                      <div
-                        className={`flex items-center gap-2 px-3 py-1.5 bg-muted/40 border-b border-border/40 ${!seg.active ? "cursor-pointer hover:bg-muted/60 transition-colors" : ""}`}
-                        onClick={toggleSeg}
-                      >
-                        <Icon className="h-3 w-3 shrink-0 text-muted-foreground" />
-                        <span className="flex-1 font-mono text-xs text-muted-foreground truncate">{seg.file}</span>
-                        {seg.kind === "patch" && seg.op && (
-                          <span className="font-mono text-[10px] text-muted-foreground/60 shrink-0">
-                            {seg.op.replace(/_/g, " ")}
-                          </span>
-                        )}
-                        {seg.active
-                          ? <Loader2 className="h-3 w-3 animate-spin shrink-0 text-muted-foreground ml-1" />
-                          : canNavigate
-                            ? <ChevronRight className="h-3 w-3 shrink-0 text-emerald-500/70 ml-1" />
-                            : isSegExpanded
-                              ? <ChevronUp className="h-3 w-3 shrink-0 text-muted-foreground ml-1" />
-                              : <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground ml-1" />}
-                      </div>
-                      {seg.code && !isSegExpanded && (
-                        <div className="max-h-44 overflow-y-auto bg-[#0d1117] cursor-pointer" onClick={toggleSeg}>
-                          <pre className="p-3 text-[11px] leading-relaxed font-mono text-gray-300 whitespace-pre overflow-x-auto">
-                            <code>{seg.code}</code>
-                          </pre>
-                        </div>
-                      )}
-                      {seg.code && isSegExpanded && (
-                        <div className="overflow-auto bg-[#0d1117]">
-                          <div className="flex items-center gap-2 px-3 py-1.5 border-b border-white/5 text-[10px] text-gray-500">
-                            <span className="text-emerald-500/70">
-                              +{seg.code.split("\n").length} regels toegevoegd
-                            </span>
-                            {!isStreaming && (
-                              <button
-                                onClick={e => { e.stopPropagation(); setActiveTab("preview"); }}
-                                className="ml-auto text-gray-500 hover:text-gray-300 transition-colors flex items-center gap-1"
-                              >
-                                <MonitorPlay className="h-3 w-3" />
-                                Bekijk in preview
-                              </button>
-                            )}
-                          </div>
-                          <pre className="p-3 text-[11px] leading-relaxed font-mono m-0">
-                            {seg.code.split("\n").map((line, j) => (
-                              <div key={j} className="flex bg-emerald-950/30">
-                                <span className="select-none w-10 text-right pr-3 text-gray-600 shrink-0">{j + 1}</span>
-                                <span className="text-emerald-400 mr-2 shrink-0 select-none">+</span>
-                                <span className="text-emerald-200 whitespace-pre">{line || " "}</span>
-                              </div>
-                            ))}
-                          </pre>
-                        </div>
-                      )}
-                    </div>
-                  );
-                }
-                return null;
-              })}
-
-              {/* Live progress indicator — shows the current file or backend status so a
-                  long first-file generation never looks frozen while no file is saved yet. */}
-              {isStreaming && (workingFilePath || liveStatus) && (
-                <div className="flex items-center gap-2 text-xs text-muted-foreground pl-1 py-1">
-                  <Loader2 className="h-3 w-3 shrink-0 animate-spin text-primary" />
-                  {workingFilePath ? (
-                    <>
-                      <span>Bezig met</span>
-                      <span className="font-mono text-foreground/80 truncate">{workingFilePath}</span>
-                    </>
-                  ) : (
-                    <span className="truncate">{liveStatus}</span>
-                  )}
-                </div>
-              )}
-
-              {/* Agent event timeline — ONLY while streaming. After the build finishes, the
-                  persisted assistant message renders these same file panels via its
-                  buildRecord; showing the live timeline too would duplicate the code panels. */}
-              {isStreaming && agentEvents.length > 0 && (
-                <div className="space-y-1">
-                  {agentEvents.map((ev, i) => {
-                    if (ev.event === "file_saved") {
-                      return (
-                        <div key={i} className="rounded-lg border border-border/60 bg-card/60 text-xs overflow-hidden">
-                          <div className="px-3 py-2.5 space-y-1.5">
-                            <div className="flex items-center gap-2 font-medium text-foreground/90">
-                              <Check className="h-3 w-3 shrink-0 text-emerald-500" />
-                              <span className="truncate">{ev.path}</span>
-                              <span className={`shrink-0 font-normal px-1.5 py-0.5 rounded text-[10px] ${
-                                ev.op === "create"
-                                  ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
-                                  : "bg-primary/10 text-primary"
-                              }`}>
-                                {ev.op === "create" ? "nieuw" : "gewijzigd"}
-                              </span>
-                              <button
-                                onClick={() => goToDiff(ev.path)}
-                                className="ml-auto flex shrink-0 items-center gap-1 text-[10px] text-emerald-500/80 hover:text-emerald-400 transition-colors"
-                              >
-                                <Code2 className="h-3 w-3" />
-                                Bekijk diff
-                                <ChevronRight className="h-2.5 w-2.5" />
-                              </button>
-                            </div>
-                            {ev.summary && (
-                              <p className="pl-5 text-muted-foreground leading-snug">{ev.summary}</p>
-                            )}
-                            <div className="flex gap-3 text-[10px] pl-5">
-                              <span className="text-emerald-600">+{ev.linesAdded} regels</span>
-                              {ev.linesRemoved > 0 && <span className="text-rose-500">−{ev.linesRemoved}</span>}
-                            </div>
-                            {ev.symbols.length > 0 && (
-                              <div className="pl-5 flex flex-wrap gap-x-2 gap-y-0.5 text-muted-foreground/70 font-mono text-[10px]">
-                                {ev.symbols.map((s, j) => <span key={j}>{s}</span>)}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    }
-                    if (ev.event === "validation_error") {
-                      // Hide auto-retried anchor errors — they are expected and confusing to surface
-                      if (
-                        ev.error.toLowerCase().includes("ankerpunt") ||
-                        ev.error.toLowerCase().includes("niet gevonden")
-                      ) return null;
-                      return (
-                        <div key={i} className="flex items-center gap-2 text-xs text-rose-500 pl-1">
-                          <AlertTriangle className="h-3 w-3 shrink-0" />
-                          <span className="font-mono">{ev.path}</span>
-                          <span className="text-rose-400">— {ev.error}</span>
-                        </div>
-                      );
-                    }
-                    return null;
-                  })}
-                </div>
-              )}
-
-              {/* Completion — only the unique "Herstel" action here. The "bekijk diff" button
-                  is already shown per build in the assistant message's buildRecord above;
-                  duplicating it here produced TWO identical "bestanden gewijzigd — bekijk diff"
-                  buttons after a build. */}
-              {buildSucceeded && !isStreaming && changedFilePaths.size > 0 && (
-                <div className="flex items-center gap-2 flex-wrap pt-1">
-                  <button
-                    onClick={() => void handleRestoreLastBuild()}
-                    disabled={isRestoring}
-                    title="Herstel alle bestanden naar de staat vóór deze build"
-                    className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-md bg-orange-500/10 text-orange-600 dark:text-orange-400 hover:bg-orange-500/20 transition-colors font-medium disabled:opacity-50"
-                  >
-                    {isRestoring ? <Loader2 className="h-3 w-3 animate-spin" /> : <RotateCcw className="h-3 w-3" />}
-                    Herstel
-                  </button>
-                </div>
-              )}
-
-              {/* Build error surfaced inline (no technical detail during the build) */}
-              {buildError && (
-                <div className="flex items-start gap-2.5 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-foreground">
-                  <AlertTriangle className="h-3.5 w-3.5 text-destructive shrink-0 mt-0.5" />
-                  <span>{buildError}</span>
-                </div>
-              )}
-
-              <div ref={messagesEndRef} />
+              <button type="button" onClick={() => setTermGen((g) => g + 1)} className="text-[11px] text-white/50 hover:text-white inline-flex items-center gap-1" title="Terminal opnieuw verbinden" data-testid="button-terminal-reconnect"><RefreshCw className="h-3 w-3" /></button>
             </div>
           </div>
-
-          <div className="px-3 pb-4 pt-2">
-            {attachedImages.length > 0 && (
-              <div className="flex flex-wrap gap-2 mb-2">
-                {attachedImages.map((img) => (
-                  <div
-                    key={img.id}
-                    className="relative h-16 w-16 rounded-md overflow-hidden border border-border group"
-                  >
-                    <img
-                      src={img.dataUrl}
-                      alt={img.name}
-                      className="h-full w-full object-cover"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => removeAttachedImage(img.id)}
-                      className="absolute top-0.5 right-0.5 h-4 w-4 rounded-full bg-background/80 text-foreground flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                      title="Remove image"
-                      data-testid={`button-remove-image-${img.id}`}
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-            <div className="relative rounded-[22px] border border-border bg-background shadow-lg transition focus-within:border-primary/50 focus-within:ring-2 focus-within:ring-primary/30">
-              <Textarea
-                ref={chatTextareaRef}
-                value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
-                onKeyDown={handleKeyDown}
-                onPaste={handlePaste}
-                placeholder="Vraag Nebula om iets te bouwen of aan te passen…"
-                className="pr-12 pl-11 min-h-[80px] max-h-[200px] resize-none bg-transparent border-0 shadow-none rounded-[22px] focus-visible:ring-0 focus-visible:ring-offset-0"
-                disabled={isStreaming}
-                data-testid="input-chat-prompt"
-              />
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                multiple
-                className="hidden"
-                onChange={handleImageInput}
-                data-testid="input-image-file"
-              />
-              <Button
-                size="icon"
-                variant="ghost"
-                className="absolute bottom-3 left-3 h-8 w-8 text-muted-foreground hover:text-foreground"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={isStreaming || attachedImages.length >= MAX_ATTACHED_IMAGES}
-                title="Attach reference image"
-                data-testid="button-attach-image"
-              >
-                <ImagePlus className="h-4 w-4" />
-              </Button>
-              {isStreaming ? (
-                <Button
-                  size="icon"
-                  variant="destructive"
-                  className="absolute bottom-3 right-3 h-8 w-8"
-                  onClick={handleStop}
-                  disabled={isStopping}
-                  data-testid="button-stop"
-                  title="Stop building"
-                >
-                  {isStopping
-                    ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    : <Square className="h-3.5 w-3.5 fill-current" />}
-                </Button>
-              ) : (
-                <Button
-                  size="icon"
-                  className="absolute bottom-3 right-3 h-8 w-8"
-                  onClick={handleSendMessage}
-                  disabled={!prompt.trim() && attachedImages.length === 0}
-                  data-testid="button-send-message"
-                >
-                  <Send className="h-4 w-4" />
-                </Button>
-              )}
-            </div>
-            <div className="text-[10px] text-center text-muted-foreground mt-2">
-              Enter to send · Shift+Enter for new line · attach or paste an image to match its style
-            </div>
+          <div className="flex-1 min-h-0 p-2">
+            <ClaudeTerminal
+              key={termGen}
+              projectId={projectId}
+              className="h-full"
+              onStatus={setTermStatus}
+              onConnected={setClaudeConnected}
+              onFilesChanged={() => {
+                queryClient.invalidateQueries({ queryKey: getListFilesQueryKey(projectId) });
+                setPreviewKey((k) => k + 1);
+              }}
+            />
+          </div>
+          <div className="px-3 py-2 border-t border-white/10 text-[11px] text-white/45 leading-relaxed">
+            Typ wat er anders moet, bijv. <span className="text-white/70">"maak de kopregel op de homepage groter"</span>. Elke wijziging staat direct in de preview en is meteen opgeslagen. <span className="text-white/60">/exit</span> stopt Claude.
           </div>
         </div>
 

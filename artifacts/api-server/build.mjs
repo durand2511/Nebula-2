@@ -31,6 +31,8 @@ async function buildAll() {
       "*.node",
       // Spawns a subprocess and extracts bundled runtime files — must stay in node_modules, not bundled.
       "@anthropic-ai/claude-agent-sdk",
+      // Native pty bindings (build/Release/pty.node) — must be loaded from node_modules at runtime.
+      "node-pty",
       "sharp",
       "better-sqlite3",
       "sqlite3",

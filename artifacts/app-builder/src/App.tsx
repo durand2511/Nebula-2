@@ -9,6 +9,7 @@ import { AiEditor } from "@/pages/ai-editor";
 import { ProjectWorkspace } from "@/pages/project-workspace";
 import { Privacy } from "@/pages/privacy";
 import { Voorwaarden } from "@/pages/voorwaarden";
+import { ClaudeConnect } from "@/pages/claude-connect";
 import NotFound from "@/pages/not-found";
 
 const queryClient = new QueryClient({
@@ -28,6 +29,7 @@ function Router() {
       <Route path="/ai-editor" component={AiEditor} />
       <Route path="/privacy" component={Privacy} />
       <Route path="/voorwaarden" component={Voorwaarden} />
+      <Route path="/claude" component={ClaudeConnect} />
       <Route path="/projects/:id" component={ProjectWorkspace} />
       <Route component={NotFound} />
     </Switch>

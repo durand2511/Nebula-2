@@ -11,6 +11,7 @@ import importRouter from "./import";
 import studioRouter from "./studio";
 import gcalRouter from "./gcal";
 import gscRouter from "./gsc";
+import claudeRouter from "./claude";
 
 const router: IRouter = Router();
 
@@ -26,5 +27,6 @@ router.use(importRouter);
 router.use(studioRouter);
 router.use(gcalRouter);
 router.use(gscRouter);
+router.use(claudeRouter);
 
 export default router;

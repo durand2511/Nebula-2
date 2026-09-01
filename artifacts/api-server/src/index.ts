@@ -8,6 +8,7 @@ import { startProductScheduler } from "./lib/product-scheduler";
 import { startDomainHealthcheck } from "./lib/domain-healthcheck";
 import { anthropic } from "@workspace/integrations-openai-ai-server";
 import { instrumentAnthropic } from "./lib/ai-usage";
+import { attachClaudeTerminal } from "./lib/claude-terminal";
 
 // Meter every AI call's token usage (per-request) so chat edits can be billed against AI credit.
 instrumentAnthropic(anthropic as any);
@@ -26,7 +27,7 @@ if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
 
-app.listen(port, (err) => {
+const server = app.listen(port, (err) => {
   if (err) {
     logger.error({ err }, "Error listening on port");
     process.exit(1);
@@ -40,3 +41,6 @@ app.listen(port, (err) => {
   startProductScheduler();
   startDomainHealthcheck();
 });
+
+// Claude Code terminal (WebSocket upgrade on the same port/server as the HTTP API).
+attachClaudeTerminal(server);
