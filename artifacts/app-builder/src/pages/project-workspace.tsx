@@ -2632,7 +2632,7 @@ export function ProjectWorkspace() {
             </span>
             {termStatus === "open" && <span className="ml-1 text-white/40">· live</span>}
             <div className="ml-auto flex items-center gap-2">
-              <Link href="/uitleg" className="text-[11px] text-white/60 hover:text-white inline-flex items-center gap-1" title="Uitleg openen" data-testid="button-claude-tutorial"><HelpCircle className="h-3.5 w-3.5" /> Uitleg</Link>
+              <a href="/uitleg" target="_blank" rel="noreferrer" className="text-[11px] text-white/60 hover:text-white inline-flex items-center gap-1" title="Uitleg openen in nieuw tabblad" data-testid="button-claude-tutorial"><HelpCircle className="h-3.5 w-3.5" /> Uitleg</a>
               {claudeConnected && (
                 <button type="button" onClick={disconnectClaudeCode} disabled={claudeDisc} className="text-[11px] text-white/60 hover:text-red-300 inline-flex items-center gap-1 disabled:opacity-50" title="Claude ontkoppelen" data-testid="button-claude-disconnect"><Unplug className="h-3.5 w-3.5" /> Ontkoppelen</button>
               )}
