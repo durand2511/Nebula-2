@@ -2636,7 +2636,6 @@ export function ProjectWorkspace() {
               )}
             </div>
             <GscCard projectId={projectId} />
-            <RedesignRequestButton projectId={projectId} />
           </div>
         </div>
       )}
