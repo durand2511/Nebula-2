@@ -693,12 +693,24 @@ router.get("/billing", async (req, res) => {
   });
 });
 
-// Cancel the subscription at period end (keeps access until then).
+// Cancel the subscription. A real Stripe subscription is cancelled at period end (access stays until
+// then). A non-Stripe entry (lifetime/admin-unlock, or none) is just cleared locally so it never
+// errors with "Opzeggen mislukt".
 router.post("/billing/cancel", async (req, res) => {
   const u = await billingUser(req); if (!u) { res.status(401).json({ error: "Niet ingelogd." }); return; }
-  if (!u.subscriptionId) { res.status(400).json({ error: "Geen actief abonnement." }); return; }
-  try { await stripeReq("POST", `subscriptions/${encodeURIComponent(u.subscriptionId)}`, { cancel_at_period_end: true }); res.json({ ok: true }); }
-  catch (err) { logger.error({ err, userId: u.id }, "[billing] cancel failed"); res.status(500).json({ error: "Opzeggen mislukt." }); }
+  const sid = u.subscriptionId || "";
+  if (/^sub_/.test(sid)) {
+    try {
+      await stripeReq("POST", `subscriptions/${encodeURIComponent(sid)}`, { cancel_at_period_end: true });
+      res.json({ ok: true, message: "Opgezegd — je houdt toegang tot het einde van de periode." });
+      return;
+    } catch (err) {
+      logger.warn({ err, userId: u.id }, "[billing] stripe cancel failed — clearing locally");
+    }
+  }
+  // Lifetime/admin/none, or a Stripe subscription that no longer exists → clear our record.
+  await db.update(platformUsers).set({ subscriptionStatus: "canceled", subscriptionId: "" }).where(eq(platformUsers.id, u.id));
+  res.json({ ok: true, message: "Abonnement opgezegd." });
 });
 
 export default router;
