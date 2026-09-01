@@ -1660,10 +1660,21 @@ export function ProjectWorkspace() {
     const s = dragRef.current;
     setMarquee({ x: Math.min(s.x, p.x), y: Math.min(s.y, p.y), w: Math.abs(p.x - s.x), h: Math.abs(p.y - s.y) });
   };
-  // On release: make a REAL screenshot of just the marked area and drop it in the tray (to send to
-  // Claude). We render only the smallest element that covers the selection — never the whole page —
-  // so it's fast and doesn't freeze the browser, then crop to the exact rectangle.
+  // On release: screenshot just the marked area. html2canvas blocks the main thread, so we (1) show a
+  // loading overlay and yield a couple of frames so it actually paints, (2) render at a low scale and
+  // only the smallest element covering the selection (fast), (3) detect a blank result (cross-origin
+  // images can't be rasterised in-browser) and then point the user to the always-reliable paste path.
   const [capturing, setCapturing] = useState(false);
+  const nextFrame = () => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
+  const isBlankCanvas = (cv: HTMLCanvasElement): boolean => {
+    try {
+      const ctx = cv.getContext("2d"); if (!ctx) return false;
+      const { data } = ctx.getImageData(0, 0, cv.width, cv.height);
+      let nonWhite = 0, samples = 0;
+      for (let i = 0; i < data.length; i += 4 * 97) { samples++; const r = data[i], g = data[i + 1], b = data[i + 2]; if (r < 245 || g < 245 || b < 245) nonWhite++; }
+      return samples > 0 && nonWhite / samples < 0.02;
+    } catch { return false; }
+  };
   const endMarquee = async () => {
     const rect = marquee;
     dragRef.current = null;
@@ -1672,9 +1683,9 @@ export function ProjectWorkspace() {
     const doc = iframe?.contentDocument;
     if (!doc) { setMarquee(null); return; }
     setCapturing(true);
+    setMarquee(null);
+    await nextFrame(); // let the loading overlay paint before html2canvas blocks the thread
     try {
-      // Smallest element (walking up from the selection centre) whose box covers the marquee — capped
-      // so we never rasterise the entire document.
       const cx = rect.x + rect.w / 2, cy = rect.y + rect.h / 2;
       let node = (doc.elementFromPoint(cx, cy) as HTMLElement) || doc.body;
       for (let i = 0; i < 10 && node.parentElement && node !== doc.body; i++) {
@@ -1683,12 +1694,11 @@ export function ProjectWorkspace() {
         node = node.parentElement;
       }
       const nb = node.getBoundingClientRect();
-      const scale = Math.min(2, iframe?.contentWindow?.devicePixelRatio || 1);
+      const scale = 0.6; // low scale → much faster; plenty sharp for a reference
       const rendered: HTMLCanvasElement = await Promise.race([
-        html2canvas(node, { useCORS: true, backgroundColor: "#ffffff", scale, logging: false, imageTimeout: 3000 } as Parameters<typeof html2canvas>[1]),
-        new Promise<HTMLCanvasElement>((_, rej) => setTimeout(() => rej(new Error("timeout")), 8000)),
+        html2canvas(node, { useCORS: true, backgroundColor: "#ffffff", scale, logging: false, imageTimeout: 1200, removeContainer: true } as Parameters<typeof html2canvas>[1]),
+        new Promise<HTMLCanvasElement>((_, rej) => setTimeout(() => rej(new Error("timeout")), 5000)),
       ]);
-      // Crop the rendered element-canvas down to the marquee (both in the same client space × scale).
       const sx = Math.max(0, (rect.x - nb.left) * scale);
       const sy = Math.max(0, (rect.y - nb.top) * scale);
       const sw = Math.min(rendered.width - sx, rect.w * scale);
@@ -1697,12 +1707,15 @@ export function ProjectWorkspace() {
       const out = document.createElement("canvas");
       out.width = Math.round(sw); out.height = Math.round(sh);
       out.getContext("2d")!.drawImage(rendered, sx, sy, sw, sh, 0, 0, sw, sh);
+      if (isBlankCanvas(out)) throw new Error("blank");
       const dataUrl = out.toDataURL("image/png");
       setShots((prev) => [...prev, { id: `s${Date.now()}${Math.random().toString(36).slice(2, 6)}`, dataUrl, name: "markering.png", isImage: true }]);
-    } catch {
-      window.alert("Kon geen schermafbeelding van dit gebied maken. Tip: markeer een kleiner deel, of maak zelf een screenshot (⌘⇧4) en plak 'm — dan gaat-ie ook naar Claude.");
+    } catch (err) {
+      const blank = (err as Error).message === "blank";
+      window.alert(blank
+        ? "Van dit gebied lukt geen automatische schermafbeelding (foto's van de site kunnen in de browser niet worden meegepakt). Maak zelf even een screenshot met ⌘⇧4 en plak 'm met ⌘V — die gaat wél mee naar Claude."
+        : "Kon geen schermafbeelding maken. Maak zelf een screenshot (⌘⇧4) en plak 'm met ⌘V, dan gaat-ie naar Claude.");
     } finally {
-      setMarquee(null);
       setCapturing(false);
     }
   };
@@ -3329,6 +3342,15 @@ export function ProjectWorkspace() {
                           style={{ left: marquee.x, top: marquee.y, width: marquee.w, height: marquee.h }}
                         />
                       )}
+                    </div>
+                  )}
+                  {/* Loading overlay while a marked-area screenshot is being made */}
+                  {capturing && (
+                    <div className="absolute inset-0 z-[68] flex items-center justify-center bg-background/70 backdrop-blur-sm">
+                      <div className="rounded-2xl bg-background border border-border shadow-xl px-6 py-4 flex items-center gap-3">
+                        <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                        <span className="text-sm font-medium text-foreground">Schermafbeelding maken…</span>
+                      </div>
                     </div>
                   )}
                   {/* Tray of attachments (screenshots / pasted images / dragged files) for Claude */}
