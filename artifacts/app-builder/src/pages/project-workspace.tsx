@@ -483,81 +483,10 @@ function buildPreviewHtml(
   // to the parent window so Buildly can surface them and offer an auto-fix.
   // DEBUG version: also builds an in-iframe overlay showing script/click/error counts.
   const reporter = `<script>(function(){
-// ── Error forwarding to parent ────────────────────────────────────────────
+// Forward runtime errors to the parent window so the editor can surface them. No visible overlay.
 function r(p){try{parent.postMessage({__buildlyError:true,message:String(p.message||"Error"),source:p.source||"",line:p.line||0},"*")}catch(e){}}
-window.addEventListener("error",function(e){r({message:e.message,source:e.filename,line:e.lineno});dbg("ERR","JS: "+e.message.slice(0,80));});
-window.addEventListener("unhandledrejection",function(e){var m=e.reason&&e.reason.message?e.reason.message:e.reason;r({message:"Unhandled promise rejection: "+m});dbg("ERR","Promise: "+String(m).slice(0,80));});
-
-// ── DEBUG overlay (remove after debugging) ───────────────────────────────
-var _clicks=0,_links=0,_forms=0,_xhr=0,_xhrErr=0,_panel=null;
-function dbgPanel(){
-  if(_panel)return _panel;
-  var p=document.createElement("div");
-  p.id="__bd_dbg";
-  p.style.cssText="position:fixed;top:8px;right:8px;z-index:2147483647;"+
-    "background:rgba(0,0,20,.85);color:#7fff7f;font:11px/1.5 monospace;"+
-    "padding:8px 12px;border-radius:6px;min-width:200px;pointer-events:none;"+
-    "border:1px solid rgba(0,255,0,.3);max-height:60vh;overflow:auto;";
-  document.body.appendChild(p);
-  _panel=p;return p;
-}
-function dbg(cat,msg){
-  var p=dbgPanel();
-  var row=document.createElement("div");
-  row.style.cssText=(cat==="ERR"?"color:#ff7f7f;":"")+"word-break:break-all;";
-  row.textContent="["+cat+"] "+msg;
-  p.appendChild(row);
-  if(p.children.length>40)p.removeChild(p.children[0]);
-}
-function updateStats(){
-  var scripts=document.querySelectorAll("script[src]").length;
-  var inline=document.querySelectorAll("script:not([src])").length;
-  var links=document.querySelectorAll("a[href]").length;
-  var forms=document.querySelectorAll("form").length;
-  var p=dbgPanel();
-  var hdr=document.getElementById("__bd_dbg_hdr");
-  if(!hdr){hdr=document.createElement("div");hdr.id="__bd_dbg_hdr";hdr.style.cssText="color:#fff;border-bottom:1px solid #444;margin-bottom:4px;padding-bottom:4px;";p.insertBefore(hdr,p.firstChild);}
-  hdr.textContent="scripts:"+scripts+" inline:"+inline+" a:"+links+" forms:"+forms+" | clicks:"+_clicks+" links:"+_links+" subs:"+_forms+" xhr:"+_xhr+"/"+_xhrErr+"err";
-}
-
-// Intercept XHR to monitor CORS errors
-var _origOpen=XMLHttpRequest.prototype.open,_origSend=XMLHttpRequest.prototype.send;
-XMLHttpRequest.prototype.open=function(m,u){this.__bd_url=u;return _origOpen.apply(this,arguments);};
-XMLHttpRequest.prototype.send=function(){
-  _xhr++;updateStats();
-  var url=this.__bd_url||"?";
-  this.addEventListener("load",function(){if(this.status===0){_xhrErr++;dbg("XHR","CORS/net error: "+url.slice(0,60));}else{dbg("XHR","OK "+this.status+": "+url.slice(0,50));}updateStats();});
-  this.addEventListener("error",function(){_xhrErr++;dbg("XHR","FAIL: "+url.slice(0,60));updateStats();});
-  return _origSend.apply(this,arguments);
-};
-
-// Intercept fetch to monitor CORS errors
-var _origFetch=window.fetch;
-if(_origFetch){window.fetch=function(input,init){_xhr++;updateStats();var url=typeof input==="string"?input:(input&&input.url)||"?";return _origFetch.apply(this,arguments).then(function(r){dbg("FETCH","OK "+r.status+": "+url.slice(0,50));updateStats();return r;}).catch(function(e){_xhrErr++;dbg("FETCH","FAIL("+e.message+"): "+url.slice(0,50));updateStats();return Promise.reject(e);});};}
-
-// Count all clicks and link clicks
-document.addEventListener("click",function(e){
-  _clicks++;
-  var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;
-  if(a)_links++;
-  updateStats();
-  if(a)dbg("NAV","a href="+( a.getAttribute("href")||"").slice(0,60));
-},true);
-
-// Count form submissions
-document.addEventListener("submit",function(e){
-  _forms++;
-  dbg("FORM","submit action="+(e.target&&e.target.action||"(none)").slice(0,60));
-  updateStats();
-},true);
-
-window.addEventListener("DOMContentLoaded",function(){
-  dbg("DOM","ready — initialising debug overlay");
-  updateStats();
-  // Show which scripts are in the page
-  var ss=document.querySelectorAll("script[src]");
-  ss.forEach(function(s){dbg("SCR",s.src.slice(0,70));});
-});
+window.addEventListener("error",function(e){r({message:e.message,source:e.filename,line:e.lineno});});
+window.addEventListener("unhandledrejection",function(e){var m=e.reason&&e.reason.message?e.reason.message:e.reason;r({message:"Unhandled promise rejection: "+m});});
 })();</script>`;
   // Enforce the native semantics of the `hidden` attribute. Generated apps often
   // toggle modals/dialogs/drawers via `el.hidden = true/false` but then style the

@@ -46,6 +46,22 @@ async function ensureCustomer(u: { id: number; email: string; name: string; stri
   return c.id;
 }
 
+// Get-or-create the €50/mo recurring price (by lookup_key), unless a fixed price is set via env.
+async function nebulaPriceId(): Promise<string> {
+  const env = process.env.STRIPE_NEBULA_PRICE || "";
+  if (/^price_/.test(env)) return env;
+  try {
+    const found = await stripeReq("GET", `prices?lookup_keys[]=nebula_monthly_50&active=true&limit=1`);
+    if (found?.data?.[0]?.id) return found.data[0].id;
+  } catch { /* fall through to create */ }
+  const price = await stripeReq("POST", "prices", {
+    currency: "eur", unit_amount: Math.round(SUBSCRIPTION_PRICE_EUR * 100),
+    recurring: { interval: "month" }, lookup_key: "nebula_monthly_50",
+    product_data: { name: "Nebula — volledige toegang" },
+  });
+  return price.id;
+}
+
 // ── Stripe REST helper ────────────────────────────────────────────────────────
 function toForm(obj: Record<string, unknown>, prefix = ""): string[] {
   const out: string[] = [];
@@ -651,17 +667,35 @@ router.post("/billing/subscribe", async (req, res) => {
     const lineItem = /^price_/.test(envPrice)
       ? { price: envPrice, quantity: 1 }
       : { quantity: 1, price_data: { currency: "eur", unit_amount: Math.round(SUBSCRIPTION_PRICE_EUR * 100), recurring: { interval: "month" }, product_data: { name: "Nebula — volledige toegang" } } };
-    const common: Record<string, unknown> = {
+    const pk = process.env.STRIPE_PUBLISHABLE_KEY || "";
+    if (pk) {
+      // Custom in-app checkout via Stripe Payment Element: create an incomplete subscription and hand
+      // its PaymentIntent client_secret to our own payment form (card + iDEAL).
+      const priceId = await nebulaPriceId();
+      const sub = await stripeReq("POST", "subscriptions", {
+        customer,
+        items: [{ price: priceId }],
+        payment_behavior: "default_incomplete",
+        payment_settings: { payment_method_types: ["card", "ideal"], save_default_payment_method: "on_subscription" },
+        expand: ["latest_invoice.payment_intent"],
+        metadata: { platformUserId: String(u.id) },
+      });
+      const pi = sub?.latest_invoice?.payment_intent;
+      if (pi?.client_secret) {
+        res.json({ clientSecret: pi.client_secret, publishableKey: pk, subscriptionId: sub.id });
+        return;
+      }
+      // No client secret (shouldn't happen) → clean up and fall back to hosted.
+      try { await stripeReq("DELETE", `subscriptions/${sub.id}`); } catch { /* ignore */ }
+    }
+    // Fallback: hosted Stripe Checkout (redirect) — €50/mo, card + iDEAL, name+address for the invoice.
+    const session = await stripeReq("POST", "checkout/sessions", {
       mode: "subscription", customer, client_reference_id: String(u.id),
       payment_method_types: ["card", "ideal"],
       billing_address_collection: "required",
       customer_update: { address: "auto", name: "auto" },
       line_items: [lineItem],
       subscription_data: { metadata: { platformUserId: String(u.id) } },
-    };
-    // Hosted Stripe Checkout (redirect) — reliable, €50/mo, card + iDEAL, name+address for the invoice.
-    const session = await stripeReq("POST", "checkout/sessions", {
-      ...common,
       success_url: `${base}/ai-editor?sub=ok`, cancel_url: `${base}/ai-editor?sub=cancel`,
     });
     res.json({ url: session.url });

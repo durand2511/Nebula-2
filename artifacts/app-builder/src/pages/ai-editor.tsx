@@ -335,12 +335,15 @@ function BillingDialog({ open, onClose }: { open: boolean; onClose: () => void }
   useEffect(() => { if (open) { setData(null); load(); } }, [open]);
   if (!open) return null;
 
+  const [checkout, setCheckout] = useState<{ clientSecret: string; publishableKey: string } | null>(null);
   const subscribe = async () => {
     setBusy(true);
     const r = await billingApi("/subscribe", {});
     setBusy(false);
-    if (r.ok && r.d.url) window.location.href = r.d.url;
-    else alert(r.d.error || "Abonneren mislukt.");
+    if (!r.ok) { alert(r.d.error || "Abonneren mislukt."); return; }
+    if (r.d.clientSecret && r.d.publishableKey) { setCheckout({ clientSecret: r.d.clientSecret, publishableKey: r.d.publishableKey }); return; }
+    if (r.d.url) { window.location.href = r.d.url; return; }
+    alert("Abonneren mislukt.");
   };
   const cancel = async () => { if (!window.confirm("Je abonnement opzeggen? Je houdt toegang tot het einde van de periode.")) return; setBusy(true); const r = await billingApi("/cancel", {}); setBusy(false); if (r.ok) load(); else alert(r.d.error || "Opzeggen mislukt."); };
   const price = data?.priceEur ?? 50;
@@ -372,6 +375,82 @@ function BillingDialog({ open, onClose }: { open: boolean; onClose: () => void }
             <button className="mt-3 text-xs text-muted-foreground underline hover:text-destructive" disabled={busy} onClick={cancel} data-testid="button-cancel-inline">Al een abonnement? Opzeggen</button>
           </div>
         )}
+      </div>
+      {checkout && <CheckoutModal clientSecret={checkout.clientSecret} publishableKey={checkout.publishableKey} price={price} onClose={() => setCheckout(null)} />}
+    </div>
+  );
+}
+
+// ── Custom in-app Stripe payment (Payment Element: card + iDEAL) ──
+function CheckoutModal({ clientSecret, publishableKey, price, onClose }: { clientSecret: string; publishableKey: string; price: number; onClose: () => void }) {
+  const payRef = useRef<HTMLDivElement | null>(null);
+  const addrRef = useRef<HTMLDivElement | null>(null);
+  const stateRef = useRef<{ stripe: any; elements: any } | null>(null);
+  const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
+  const [err, setErr] = useState("");
+  const [paying, setPaying] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { loadStripe } = await import("@stripe/stripe-js");
+        const stripe = await loadStripe(publishableKey);
+        if (!stripe) throw new Error("Stripe kon niet laden.");
+        if (cancelled) return;
+        const elements = stripe.elements({ clientSecret, appearance: { theme: "stripe", variables: { colorPrimary: "#e0855b", borderRadius: "10px" } } });
+        stateRef.current = { stripe, elements };
+        const addr = elements.create("address", { mode: "billing" });
+        const pay = elements.create("payment", { layout: "tabs" });
+        // Mount once the refs exist.
+        const mount = () => {
+          if (cancelled) return;
+          if (addrRef.current) addr.mount(addrRef.current);
+          if (payRef.current) pay.mount(payRef.current);
+          setStatus("ready");
+        };
+        setTimeout(mount, 30);
+      } catch (e) {
+        if (!cancelled) { setErr((e as Error).message || "Betalen kon niet laden."); setStatus("error"); }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [clientSecret, publishableKey]);
+
+  const pay = async () => {
+    const st = stateRef.current;
+    if (!st) return;
+    setPaying(true); setErr("");
+    try {
+      const { error } = await st.stripe.confirmPayment({
+        elements: st.elements,
+        confirmParams: { return_url: `${window.location.origin}/ai-editor?sub=done` },
+      });
+      if (error) { setErr(error.message || "Betaling mislukt."); setPaying(false); }
+      // On success Stripe redirects (card) or to the bank (iDEAL) — no code runs here.
+    } catch (e) { setErr((e as Error).message || "Betaling mislukt."); setPaying(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[95] flex items-start justify-center overflow-y-auto bg-black/50 p-4" onClick={onClose}>
+      <div className="w-[min(480px,96%)] my-8 rounded-2xl bg-white shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-3 border-b border-neutral-200">
+          <span className="font-semibold text-neutral-900">Afrekenen — €{price}/maand</span>
+          <button onClick={onClose} className="h-8 w-8 rounded-full hover:bg-neutral-100 flex items-center justify-center text-neutral-500" data-testid="button-close-checkout"><X className="h-4 w-4" /></button>
+        </div>
+        <div className="p-5 space-y-4 max-h-[70vh] overflow-y-auto">
+          {status === "loading" && <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-neutral-400" /></div>}
+          {status === "error" && <p className="text-sm text-red-600">{err || "Betalen kon niet laden. Probeer het later opnieuw."}</p>}
+          <div className={status === "ready" ? "space-y-4" : "hidden"}>
+            <div><p className="text-xs font-medium text-neutral-500 mb-1.5">Factuurgegevens</p><div ref={addrRef} /></div>
+            <div><p className="text-xs font-medium text-neutral-500 mb-1.5">Betaalmethode</p><div ref={payRef} /></div>
+            {err && <p className="text-sm text-red-600">{err}</p>}
+            <button onClick={pay} disabled={paying} className="w-full h-11 rounded-xl bg-neutral-900 text-white font-semibold hover:bg-neutral-800 disabled:opacity-60 flex items-center justify-center gap-2" data-testid="button-pay">
+              {paying ? <Loader2 className="h-5 w-5 animate-spin" /> : `Betaal €${price}/maand`}
+            </button>
+            <p className="text-[11px] text-neutral-400 text-center">Veilig betalen via Stripe · iDEAL &amp; creditcard · maandelijks opzegbaar</p>
+          </div>
+        </div>
       </div>
     </div>
   );
