@@ -667,7 +667,9 @@ router.post("/billing/subscribe", async (req, res) => {
     const lineItem = /^price_/.test(envPrice)
       ? { price: envPrice, quantity: 1 }
       : { quantity: 1, price_data: { currency: "eur", unit_amount: Math.round(SUBSCRIPTION_PRICE_EUR * 100), recurring: { interval: "month" }, product_data: { name: "Nebula — volledige toegang" } } };
-    const pk = process.env.STRIPE_PUBLISHABLE_KEY || "";
+    // Publishable key is NOT secret (it ships to the browser). Fall back to the test key so the custom
+    // in-app checkout always works; set STRIPE_PUBLISHABLE_KEY on Render to your pk_live for production.
+    const pk = process.env.STRIPE_PUBLISHABLE_KEY || "pk_test_51Sk17JHyqZ2ZUEjYuhLf3UJ1asUQDhj5VhTS8YUVEtllknDO2HkqKRargBFvtSGSIWldq2M4luirH81IRsX0bc8j00dRMdgdth";
     if (pk) {
       // Custom in-app checkout via Stripe Payment Element: create an incomplete subscription and hand
       // its PaymentIntent client_secret to our own payment form (card + iDEAL).
