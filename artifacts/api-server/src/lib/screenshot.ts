@@ -89,7 +89,8 @@ async function doCapture(opts: { projectId: number; page: string; clip: Clip; vi
     await pg.addStyleTag({ content: "video{background:#171717 !important}" }).catch(() => {});
     // Scroll to the marked area so IntersectionObserver-style lazy images there actually load
     // (the viewport is window-sized now; captureBeyondViewport handles the clip itself).
-    await pg.evaluate((y: number) => window.scrollTo(0, Math.max(0, y - 200)), Math.round(opts.clip.y)).catch(() => {});
+    // eslint-disable-next-line @typescript-eslint/no-implied-eval — runs in the page, where scrollTo exists
+    await pg.evaluate("window.scrollTo(0, Math.max(0, " + Math.max(0, Math.round(opts.clip.y) - 200) + "))").catch(() => {});
     await new Promise((r) => setTimeout(r, 300)); // let fonts/lazy images settle
     const clip = {
       x: Math.max(0, Math.round(opts.clip.x)),
