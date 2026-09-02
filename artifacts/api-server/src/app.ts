@@ -13,6 +13,7 @@ import { db, projectEmail } from "@workspace/db";
 import { desc } from "drizzle-orm";
 import { sendMail, smtpConfigFromEnv, type SmtpConfig } from "./lib/smtp.js";
 import { decryptSecret } from "./lib/email-config.js";
+import { kennisbankRouter } from "./lib/kennisbank.js";
 
 const app: Express = express();
 
@@ -164,6 +165,10 @@ app.post("/api/contact", async (req, res) => {
 });
 
 app.use("/api", router);
+
+// Kennisbank: server-rendered SEO pages on the platform host (/kennisbank, article pages,
+// /sitemap.xml, IndexNow key). Registered BEFORE the SPA static/fallback so Google gets real HTML.
+app.use(kennisbankRouter());
 
 // Serve the builder frontend (the app-builder SPA) for platform hosts, so visiting the platform
 // domain opens the app instead of "Cannot GET /". Customer domains are already served above; every

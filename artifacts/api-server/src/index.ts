@@ -6,6 +6,7 @@ import { startSeoScheduler } from "./lib/seo-scheduler";
 import { startCampaignScheduler } from "./lib/campaign-scheduler";
 import { startProductScheduler } from "./lib/product-scheduler";
 import { startDomainHealthcheck } from "./lib/domain-healthcheck";
+import { startKennisbankScheduler } from "./lib/kennisbank";
 import { anthropic } from "@workspace/integrations-openai-ai-server";
 import { instrumentAnthropic } from "./lib/ai-usage";
 import { attachClaudeTerminal } from "./lib/claude-terminal";
@@ -40,6 +41,7 @@ const server = app.listen(port, (err) => {
   startCampaignScheduler();
   startProductScheduler();
   startDomainHealthcheck();
+  startKennisbankScheduler();
 });
 
 // Claude Code terminal (WebSocket upgrade on the same port/server as the HTTP API).

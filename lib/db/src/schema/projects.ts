@@ -165,6 +165,19 @@ export const seoArticles = pgTable("seo_articles", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
+// Nebula platform kennisbank: daily AI-generated Dutch articles on nebulabookings.com/kennisbank
+// (webdesign/SEO/boekingssysteem topics) — server-rendered for Google, one per day via scheduler.
+export const platformBlog = pgTable("platform_blog", {
+  id: serial("id").primaryKey(),
+  slug: text("slug").notNull().unique(),
+  title: text("title").notNull(),
+  metaTitle: text("meta_title").notNull().default(""),
+  metaDescription: text("meta_description").notNull().default(""),
+  topic: text("topic").notNull().default(""),
+  html: text("html").notNull().default(""),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
 // A studio's legally-required invoice details (filled in the booking app's Facturatie tab).
 export const projectInvoice = pgTable("project_invoice", {
   projectId: integer("project_id").primaryKey().references(() => projects.id, { onDelete: "cascade" }),

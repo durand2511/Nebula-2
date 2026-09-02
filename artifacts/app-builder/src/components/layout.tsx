@@ -38,6 +38,10 @@ export function Layout({ children }: { children: React.ReactNode }) {
             <Link href="/help" className={`rounded-full px-3.5 py-1 text-xs font-medium transition-colors ${(location === "/help" || location === "/uitleg" || location === "/platform-uitleg") ? "bg-foreground text-background" : "text-foreground/60 hover:text-foreground hover:bg-foreground/5"}`}>
               Uitleg
             </Link>
+            {/* Server-rendered SEO pages — a real <a>, not a wouter Link, so the browser leaves the SPA. */}
+            <a href="/kennisbank" className="rounded-full px-3.5 py-1 text-xs font-medium transition-colors text-foreground/60 hover:text-foreground hover:bg-foreground/5">
+              Kennisbank
+            </a>
           </nav>
         </header>
       )}
