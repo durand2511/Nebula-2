@@ -365,6 +365,12 @@ function BillingDialog({ open, onClose }: { open: boolean; onClose: () => void }
   const cancel = async () => { if (!window.confirm("Je abonnement opzeggen? Je houdt toegang tot het einde van de periode.")) return; setBusy(true); const r = await billingApi("/cancel", {}); setBusy(false); if (r.ok) load(); else alert(r.d.error || "Opzeggen mislukt."); };
   const price = data?.priceEur ?? 50;
 
+  // One dialog at a time: while the checkout is open it fully replaces the plan dialog instead of
+  // stacking a popup on a popup. Closing the checkout falls back to the plan; success reloads it.
+  if (checkout) {
+    return <CheckoutModal clientSecret={checkout.clientSecret} publishableKey={checkout.publishableKey} price={price} onClose={() => setCheckout(null)} onDone={() => { setCheckout(null); load(); }} />;
+  }
+
   return (
     <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
       <div className="w-[min(500px,96%)] max-h-[88vh] overflow-y-auto rounded-xl bg-background border shadow-2xl p-6" onClick={(e) => e.stopPropagation()}>
@@ -393,7 +399,6 @@ function BillingDialog({ open, onClose }: { open: boolean; onClose: () => void }
           </div>
         )}
       </div>
-      {checkout && <CheckoutModal clientSecret={checkout.clientSecret} publishableKey={checkout.publishableKey} price={price} onClose={() => setCheckout(null)} onDone={() => { setCheckout(null); load(); }} />}
     </div>
   );
 }
@@ -419,12 +424,15 @@ function CheckoutModal({ clientSecret, publishableKey, price, onClose, onDone }:
         stateRef.current = { stripe, elements };
         const addr = elements.create("address", { mode: "billing" });
         const pay = elements.create("payment", { layout: "tabs" });
-        // Mount once the refs exist.
+        // "ready" only when the Payment Element ACTUALLY rendered — mounting can fail (e.g. a
+        // live/test key mismatch), and pretending it's ready gives an empty form plus a confusing
+        // "elements should have a mounted Payment Element" on submit.
+        pay.on("ready", () => { if (!cancelled) setStatus("ready"); });
+        pay.on("loaderror", (ev: any) => { if (!cancelled) { setErr(ev?.error?.message || "Het betaalformulier kon niet laden. Probeer het later opnieuw."); setStatus("error"); } });
         const mount = () => {
           if (cancelled) return;
           if (addrRef.current) addr.mount(addrRef.current);
           if (payRef.current) pay.mount(payRef.current);
-          setStatus("ready");
         };
         setTimeout(mount, 30);
       } catch (e) {

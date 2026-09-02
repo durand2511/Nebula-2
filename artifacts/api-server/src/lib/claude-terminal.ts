@@ -307,9 +307,18 @@ async function persistCredsIfChanged(s: Session): Promise<void> {
   const h = hashBlob(blob);
   if (h === s.credHash) return;
   s.credHash = h;
-  const wasConnected = blobConnected(blob);
-  await db.update(platformUsers).set({ claudeAuth: Object.keys(blob).length ? encryptSecret(JSON.stringify(blob)) : "" }).where(eq(platformUsers.id, s.userId));
-  broadcast(s, { t: "status", connected: wasConnected });
+  const isConnected = blobConnected(blob);
+  if (!isConnected) {
+    // Claude Code lost its login (a failed OAuth refresh wipes the file, or it was never written).
+    // NEVER clear the stored koppeling for that: keep the last good DB copy so a session restart can
+    // restore it, and only report the live status. An explicit disconnect goes through
+    // disconnectClaude(), which does clear the DB.
+    logger.warn({ key: s.key }, "[claude-terminal] credentials on disk no longer connected — keeping DB copy");
+    broadcast(s, { t: "status", connected: false });
+    return;
+  }
+  await db.update(platformUsers).set({ claudeAuth: encryptSecret(JSON.stringify(blob)) }).where(eq(platformUsers.id, s.userId));
+  broadcast(s, { t: "status", connected: true });
 }
 
 // ── DB ⇄ disk ─────────────────────────────────────────────────────────────────────────────────
@@ -484,6 +493,14 @@ async function getOrCreateSession(userId: number, projectId: number, projectName
   if (existing && !existing.exited) return existing;
   if (existing) await destroySession(existing);
 
+  // ONE live Claude session per user. All of a user's sessions share the same home (and thus the
+  // same OAuth credentials file); two live Claude processes race each other on token refresh —
+  // refresh tokens rotate, so the loser gets invalid_grant, API errors, and wipes the login. Two
+  // Claude processes also don't fit in the small prod instance's memory.
+  for (const other of [...sessions.values()]) {
+    if (other.userId === userId && other.key !== key && !other.exited) await destroySession(other);
+  }
+
   const { home, configDir } = userDirs(userId);
   let cwd = projectId > 0 ? path.join(ROOT, "ws", `u${userId}`, `p${projectId}`) : path.join(home, "koppelen");
   await fs.mkdir(cwd, { recursive: true });
@@ -583,6 +600,7 @@ async function getOrCreateSession(userId: number, projectId: number, projectName
 
 async function destroySession(s: Session): Promise<void> {
   if (sessions.get(s.key) === s) sessions.delete(s.key);
+  await persistCredsIfChanged(s).catch(() => {}); // never lose a token refresh from the last 2s
   if (s.idleTimer) clearTimeout(s.idleTimer);
   if (s.credTimer) clearInterval(s.credTimer);
   if (s.dbTimer) clearInterval(s.dbTimer);
@@ -731,6 +749,10 @@ async function onConnection(ws: WebSocket, userId: number, projectId: number, pr
     setTimeout(() => { try { if (s.proc && !s.exited) s.proc.resize(Math.min(500, cols), Math.min(200, rows)); } catch { /* ignore */ } }, 60);
   }
 
+  // Keepalive: Render's proxy closes WebSockets that go quiet, which showed up as "opnieuw starten"
+  // mid-task. Browsers answer pings automatically, so this keeps the tunnel open while Claude works.
+  const keepalive = setInterval(() => { try { ws.ping(); } catch { /* closing */ } }, 30_000);
+
   ws.on("message", (raw) => {
     let m: ClientMsg;
     try { m = JSON.parse(String(raw)); } catch { return; }
@@ -738,8 +760,8 @@ async function onConnection(ws: WebSocket, userId: number, projectId: number, pr
     if (m.t === "i" && typeof m.d === "string") s.proc.write(m.d);
     else if (m.t === "r" && m.cols > 0 && m.rows > 0) { try { s.proc.resize(Math.min(500, m.cols | 0), Math.min(200, m.rows | 0)); } catch { /* ignore */ } }
   });
-  ws.on("close", () => { s.clients.delete(ws); touchIdle(s); });
-  ws.on("error", () => { s.clients.delete(ws); touchIdle(s); });
+  ws.on("close", () => { clearInterval(keepalive); s.clients.delete(ws); touchIdle(s); });
+  ws.on("error", () => { clearInterval(keepalive); s.clients.delete(ws); touchIdle(s); });
 }
 
 // Graceful shutdown: flush every workspace to the DB before the process dies (deploys!).

@@ -665,9 +665,14 @@ router.post("/billing/subscribe", async (req, res) => {
   const u = await billingUser(req); if (!u) { res.status(401).json({ error: "Niet ingelogd." }); return; }
   try {
     const customer = await ensureCustomer(u);
-    // Publishable key is NOT secret (it ships to the browser). Set STRIPE_PUBLISHABLE_KEY on Render
-    // to your pk_live for production.
-    const pk = process.env.STRIPE_PUBLISHABLE_KEY || "pk_test_51Sk17JHyqZ2ZUEjYuhLf3UJ1asUQDhj5VhTS8YUVEtllknDO2HkqKRargBFvtSGSIWldq2M4luirH81IRsX0bc8j00dRMdgdth";
+    // Publishable key is NOT secret (it ships to the browser), but it MUST match the secret key's
+    // mode: a live SetupIntent with the test pk makes the Payment Element silently fail to mount.
+    // So the pk_test fallback only applies when the secret key is a test key too; a live secret key
+    // requires STRIPE_PUBLISHABLE_KEY (pk_live…) in the environment.
+    const sk = process.env.STRIPE_SECRET_KEY || "";
+    const pk = process.env.STRIPE_PUBLISHABLE_KEY
+      || (sk.startsWith("sk_test") ? "pk_test_51Sk17JHyqZ2ZUEjYuhLf3UJ1asUQDhj5VhTS8YUVEtllknDO2HkqKRargBFvtSGSIWldq2M4luirH81IRsX0bc8j00dRMdgdth" : "");
+    if (!pk) { res.status(500).json({ error: "Betalen is nog niet geconfigureerd: zet STRIPE_PUBLISHABLE_KEY (pk_live…) in de serveromgeving." }); return; }
     const si = await stripeReq("POST", "setup_intents", {
       customer,
       payment_method_types: ["card", "ideal", "sepa_debit"],

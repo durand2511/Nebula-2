@@ -104,10 +104,13 @@ export const ClaudeTerminal = forwardRef<ClaudeTerminalHandle, Props>(function C
   }, []);
 
   // (Re)connect the socket.
+  const attemptsRef = useRef(0);
   useEffect(() => {
     const term = termRef.current;
     if (!term) return;
     let closedByUs = false;
+    let gotExit = false;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
     setErrMsg("");
     setStat("connecting");
     term.reset();
@@ -128,11 +131,11 @@ export const ClaudeTerminal = forwardRef<ClaudeTerminalHandle, Props>(function C
       let m: any;
       try { m = JSON.parse(String(ev.data)); } catch { return; }
       switch (m.t) {
-        case "o": term.write(m.d); break;
+        case "o": attemptsRef.current = 0; term.write(m.d); break;
         case "hello": cb.current.onConnected?.(!!m.connected); break;
         case "status": cb.current.onConnected?.(!!m.connected); break;
         case "files": cb.current.onFilesChanged?.({ changed: m.changed || [], created: m.created || [], deleted: m.deleted || [] }); break;
-        case "exit": term.writeln(`\r\n\x1b[2m» Claude Code is gestopt (code ${m.code}). Klik op "Opnieuw starten" om verder te gaan.\x1b[0m`); setStat("closed"); break;
+        case "exit": gotExit = true; term.writeln(`\r\n\x1b[2m» Claude Code is gestopt (code ${m.code}). Klik op "Opnieuw starten" om verder te gaan.\x1b[0m`); setStat("closed"); break;
         case "locked": cb.current.onLocked?.(String(m.message || "")); setErrMsg(String(m.message || "Abonnement vereist.")); setStat("error"); break;
         case "err": setErrMsg(String(m.message || "Onbekende fout")); setStat("error"); break;
       }
@@ -141,12 +144,25 @@ export const ClaudeTerminal = forwardRef<ClaudeTerminalHandle, Props>(function C
     ws.onclose = (ev) => {
       if (closedByUs) return;
       if (ev.code === 1008 || ev.code === 4401) { setErrMsg("Niet ingelogd."); setStat("error"); return; }
+      if (ev.code === 4402) return; // locked → handled via the "locked" message
+      // The session keeps running server-side; a dropped tunnel (proxy hiccup, sleeping laptop,
+      // deploy) should NOT dump the user on a restart button and "lose" their progress. Reconnect
+      // automatically — the server replays the scrollback and forces a clean repaint. Only a real
+      // Claude exit (the "exit" message) is left to the manual restart button.
+      if (!gotExit && statusRef.current !== "error" && attemptsRef.current < 8) {
+        attemptsRef.current += 1;
+        const delay = Math.min(8000, 500 * 2 ** attemptsRef.current);
+        setStat("connecting");
+        term.writeln(`\r\n\x1b[2m» Verbinding verbroken — opnieuw verbinden…\x1b[0m`);
+        retryTimer = setTimeout(() => setGen((g) => g + 1), delay);
+        return;
+      }
       if (statusRef.current !== "error") setStat("closed");
     };
 
     const sub = term.onData((d) => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ t: "i", d })); });
 
-    return () => { closedByUs = true; sub.dispose(); try { ws.close(); } catch { /* ignore */ } if (wsRef.current === ws) wsRef.current = null; };
+    return () => { closedByUs = true; if (retryTimer) clearTimeout(retryTimer); sub.dispose(); try { ws.close(); } catch { /* ignore */ } if (wsRef.current === ws) wsRef.current = null; };
   }, [projectId, gen, setStat]);
 
   return (
