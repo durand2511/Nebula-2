@@ -7,6 +7,8 @@
  * sitemap + IndexNow ping), so Google indexes them properly — the SPA is never involved.
  */
 import express, { type Request, type Response } from "express";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { db, platformBlog } from "@workspace/db";
 import { desc, eq } from "drizzle-orm";
 import { anthropic } from "@workspace/integrations-openai-ai-server";
@@ -141,7 +143,11 @@ function shell(opts: { title: string; description: string; canonical: string; js
 <title>${esc(opts.title)}</title>
 <meta name="description" content="${esc(opts.description)}">
 <link rel="canonical" href="${esc(opts.canonical)}">
-<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png?v=3">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png?v=3">
+<link rel="icon" type="image/png" sizes="256x256" href="/favicon.png?v=3">
+<link rel="shortcut icon" type="image/png" href="/favicon-32.png?v=3">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=3">
 <meta property="og:type" content="${opts.ogType || "website"}">
 <meta property="og:title" content="${esc(opts.title)}">
 <meta property="og:description" content="${esc(opts.description)}">
@@ -152,6 +158,11 @@ ${opts.jsonLd.map((o) => `<script type="application/ld+json">${JSON.stringify(o)
   :root{color-scheme:light}
   *{box-sizing:border-box;margin:0;padding:0}
   body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:#f6f4f1;color:#171717;line-height:1.7;-webkit-font-smoothing:antialiased}
+  /* Same look as the rest of the platform: the rotating nature photo behind a white haze, with the
+     content floating as white "islands" on top. */
+  .bg,.haze{position:fixed;inset:0;z-index:-1}
+  .bg{background:url("/kennisbank-bg.jpeg") center/cover no-repeat}
+  .haze{background:rgba(255,255,255,.55)}
   a{color:inherit}
   .nav-wrap{position:sticky;top:0;z-index:50;display:flex;justify-content:center;padding:16px 12px 8px}
   .nav{display:flex;gap:2px;background:rgba(255,255,255,.92);backdrop-filter:blur(8px);border:1px solid #e5e2dd;border-radius:999px;padding:5px 6px;box-shadow:0 4px 14px rgba(0,0,0,.08)}
@@ -165,13 +176,13 @@ ${opts.jsonLd.map((o) => `<script type="application/ld+json">${JSON.stringify(o)
   .hero h1{font-size:clamp(30px,5vw,42px);line-height:1.12;letter-spacing:-.02em;font-weight:800}
   .hero p.sub{margin-top:12px;font-size:17px;color:#6f6a5e;max-width:56ch}
   .cards{display:grid;gap:14px;margin-top:30px}
-  .card{display:block;background:#fff;border:1px solid #eceae5;border-radius:20px;padding:22px 24px;text-decoration:none;box-shadow:0 2px 10px rgba(0,0,0,.04);transition:.15s}
+  .card{display:block;background:rgba(255,255,255,.9);backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,.7);border-radius:20px;padding:22px 24px;text-decoration:none;box-shadow:0 6px 24px rgba(0,0,0,.10);transition:.15s}
   .card:hover{transform:translateY(-2px);box-shadow:0 10px 26px rgba(0,0,0,.09)}
   .card .date{font-size:12px;color:#a09a8c;font-weight:550;text-transform:uppercase;letter-spacing:.06em}
   .card h2{font-size:19px;line-height:1.3;margin:6px 0 6px;letter-spacing:-.01em}
   .card p{font-size:14.5px;color:#6f6a5e}
   .card .more{display:inline-block;margin-top:10px;font-size:13px;font-weight:600;color:#171717}
-  article{background:#fff;border:1px solid #eceae5;border-radius:24px;padding:clamp(26px,5vw,48px);box-shadow:0 2px 12px rgba(0,0,0,.05)}
+  article{background:rgba(255,255,255,.92);backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,.7);border-radius:24px;padding:clamp(26px,5vw,48px);box-shadow:0 8px 30px rgba(0,0,0,.12)}
   article .meta{font-size:13px;color:#a09a8c;margin-bottom:14px}
   article h1{font-size:clamp(26px,4.5vw,36px);line-height:1.15;letter-spacing:-.02em;font-weight:800;margin-bottom:18px}
   article h2{font-size:22px;letter-spacing:-.01em;margin:34px 0 10px}
@@ -190,6 +201,7 @@ ${opts.jsonLd.map((o) => `<script type="application/ld+json">${JSON.stringify(o)
 </style>
 </head>
 <body>
+<div class="bg" aria-hidden="true"></div><div class="haze" aria-hidden="true"></div>
 <div class="nav-wrap"><nav class="nav">
   <a href="/">Home</a><a href="/ai-editor">Nebula</a><a href="/help">Uitleg</a><a class="on" href="/kennisbank">Kennisbank</a>
 </nav></div>
@@ -271,8 +283,20 @@ async function renderSitemap(_req: Request, res: Response): Promise<void> {
   res.type("application/xml").send(`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.join("\n")}\n</urlset>`);
 }
 
+// The same rotating background photo as the SPA (attached_assets/nebula-bg-1..6.jpeg, switching
+// every 3h) — served under a stable URL because these pages don't go through the Vite bundle.
+const ASSETS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "attached_assets");
+function bgFile(): string {
+  const n = (Math.floor(Date.now() / (3 * 60 * 60 * 1000)) % 6) + 1;
+  return path.join(ASSETS_DIR, `nebula-bg-${n}.jpeg`);
+}
+
 export function kennisbankRouter(): express.Router {
   const r = express.Router();
+  r.get("/kennisbank-bg.jpeg", (_req, res) => {
+    res.setHeader("Cache-Control", "public, max-age=3600");
+    res.sendFile(bgFile(), (err) => { if (err && !res.headersSent) res.status(404).end(); });
+  });
   r.get("/kennisbank", (req, res) => { renderIndex(req, res).catch(() => res.status(500).send("Er ging iets mis.")); });
   r.get("/kennisbank/:slug", (req, res) => { renderArticle(req, res).catch(() => res.status(500).send("Er ging iets mis.")); });
   r.get("/sitemap.xml", (req, res) => { renderSitemap(req, res).catch(() => res.status(500).send("")); });
