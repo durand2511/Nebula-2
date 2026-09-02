@@ -23,11 +23,12 @@ RUN (apt-get update && apt-get install -y --no-install-recommends chromium fonts
  && rm -rf /var/lib/apt/lists/*) || true
 ENV CHROMIUM_PATH=/usr/bin/chromium
 
-# Managed (root-owned) Claude Code policy: customers' sessions use file tools + internet
-# (WebFetch/WebSearch) — no shell — and file edits inside their workspace are auto-accepted. Users
+# Managed (root-owned) Claude Code policy: customers get FULL Claude Code (shell/git/servers/all
+# tools), pre-approved so there are no permission prompts. Cross-tenant isolation is the OS sandbox
+# (own unix uid, 0700 home/workspace, a child env with NO platform secrets), not tool hiding. Users
 # run as their own uid and cannot change this file. Mirrors SESSION_SETTINGS in claude-terminal.ts.
 RUN mkdir -p /etc/claude-code /nebula/home /nebula/ws \
- && printf '%s' '{"permissions":{"deny":["Bash","Agent","Task","NotebookEdit","KillShell","BashOutput","TaskOutput"],"defaultMode":"acceptEdits","disableBypassPermissionsMode":"disable"},"includeCoAuthoredBy":false}' > /etc/claude-code/managed-settings.json \
+ && printf '%s' '{"permissions":{"allow":["Bash","BashOutput","KillShell","Read","Write","Edit","Glob","Grep","WebFetch","WebSearch","Agent","Task","NotebookEdit","TodoWrite"],"defaultMode":"bypassPermissions"},"includeCoAuthoredBy":false}' > /etc/claude-code/managed-settings.json \
  && chmod 644 /etc/claude-code/managed-settings.json && chmod 755 /nebula /nebula/home /nebula/ws
 
 # Exact pnpm version that generated pnpm-lock.yaml (overrides live in pnpm-workspace.yaml, pnpm 10+ style).

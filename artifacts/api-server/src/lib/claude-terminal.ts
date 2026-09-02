@@ -81,7 +81,10 @@ const BINARY_EXT = new Set(["png", "jpg", "jpeg", "gif", "webp", "ico", "pdf", "
 const ALLOWED_TOOLS = ["Bash", "BashOutput", "KillShell", "Read", "Write", "Edit", "Glob", "Grep", "WebFetch", "WebSearch", "Agent", "Task", "NotebookEdit", "TodoWrite"];
 
 export const SESSION_SETTINGS = {
-  permissions: { allow: ALLOWED_TOOLS, defaultMode: "acceptEdits" },
+  // bypassPermissions: no per-command prompts at all — the customer just types what they want and
+  // Claude runs it. Safe because the OS is the sandbox: own unix uid, 0700 home/workspace, no
+  // platform secrets in the child env. Mirrors /etc/claude-code/managed-settings.json (Dockerfile).
+  permissions: { allow: ALLOWED_TOOLS, defaultMode: "bypassPermissions" },
   includeCoAuthoredBy: false,
 };
 
@@ -274,6 +277,7 @@ async function seedOnboarding(userId: number, cwd: string): Promise<void> {
     cfg.theme ??= "dark";
     cfg.autoUpdates = false;
     cfg.hasTrustDialogAccepted = true;
+    cfg.bypassPermissionsModeAccepted = true; // pre-accept the bypass-mode warning dialog
     const projects = (cfg.projects && typeof cfg.projects === "object") ? cfg.projects as Record<string, unknown> : {};
     projects[cwd] = { ...(projects[cwd] as object || {}), hasTrustDialogAccepted: true, hasCompletedProjectOnboarding: true, allowedTools: [] };
     cfg.projects = projects;
@@ -545,7 +549,7 @@ async function getOrCreateSession(userId: number, projectId: number, projectName
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
     // Deliberately NOT forwarded: ANTHROPIC_API_KEY, DATABASE_URL, STRIPE_*, EMAIL_SECRET_KEY, …
   };
-  const args = ["--permission-mode", "acceptEdits"];
+  const args = ["--permission-mode", "bypassPermissions"];
 
   // Spawn at the connecting client's real terminal size: Claude Code's startup banner is printed
   // once and never redrawn, so starting at the wrong width leaves a permanently mangled header.

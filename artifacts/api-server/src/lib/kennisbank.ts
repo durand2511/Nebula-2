@@ -206,8 +206,10 @@ ${opts.jsonLd.map((o) => `<script type="application/ld+json">${JSON.stringify(o)
   .pager a,.pager .on{min-width:34px;height:34px;display:inline-flex;align-items:center;justify-content:center;border-radius:999px;font-size:13.5px;font-weight:600;text-decoration:none;background:rgba(255,255,255,.9);border:1px solid rgba(255,255,255,.7);box-shadow:0 2px 8px rgba(0,0,0,.08);color:rgba(23,23,23,.65)}
   .pager a:hover{color:#171717;transform:translateY(-1px)}
   .pager .on{background:#171717;color:#fff;border-color:#171717}
-  footer{padding:26px 16px 40px;text-align:center;font-size:12px;color:#a09a8c}
-  footer a{color:#a09a8c}
+  footer{padding:26px 16px 40px;text-align:center;font-size:12px;color:rgba(23,23,23,.6);line-height:1.9}
+  footer .links{display:flex;flex-wrap:wrap;justify-content:center;gap:4px 16px}
+  footer a{color:rgba(23,23,23,.6);text-decoration:none}
+  footer a:hover{color:#171717;text-decoration:underline}
 </style>
 </head>
 <body>
@@ -216,7 +218,10 @@ ${opts.jsonLd.map((o) => `<script type="application/ld+json">${JSON.stringify(o)
   <a href="/">Home</a><a href="/ai-editor">Nebula</a><a href="/help">Uitleg</a><a class="on" href="/kennisbank">Kennisbank</a>
 </nav></div>
 <main>${opts.body}</main>
-<footer>© ${new Date().getFullYear()} Nebula · Durand van Konijnenburg · KVK 70776857 · <a href="/privacy">Privacybeleid</a> · <a href="/voorwaarden">Voorwaarden</a></footer>
+<footer>
+  <div class="links"><a href="/privacy">Privacybeleid</a><a href="/voorwaarden">Algemene voorwaarden</a><a href="mailto:durand2511@gmail.com">Contact</a></div>
+  <div>© ${new Date().getFullYear()} Nebula · Durand van Konijnenburg · KVK 70776857</div>
+</footer>
 </body>
 </html>`;
 }
