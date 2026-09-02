@@ -74,14 +74,14 @@ const PROJECT_DATA_TABLES = [
 const SYNC_IGNORE = new Set(["CLAUDE.md", ".claude", REFS_DIR, DB_DIR, "node_modules", ".git", ".DS_Store"]);
 const BINARY_EXT = new Set(["png", "jpg", "jpeg", "gif", "webp", "ico", "pdf", "woff", "woff2", "ttf", "otf", "eot", "zip", "mp4", "mp3", "webm"]);
 
-// Tools a customer's Claude may use: file tools + internet (WebFetch/WebSearch are allowed — handy
-// for fetching content/inspiration). Shell (Bash) and git stay off for now (a separate, opt-in
-// decision). Cross-tenant isolation is enforced at the OS level (own unix uid, 0700 home/workspace,
-// and a child env that carries NO platform secrets), independent of which tools are on.
-const DENIED_TOOLS = ["Bash", "Agent", "Task", "NotebookEdit", "KillShell", "BashOutput", "TaskOutput"];
+// The customer gets FULL Claude Code on her OWN project: shell, git, running servers and every tool,
+// all pre-approved so there are no permission prompts. Cross-tenant isolation is enforced at the OS
+// level (own unix uid, 0700 home/workspace, and a child env that carries NO platform secrets — no
+// DATABASE_URL, no Stripe/email keys), so even a shell can never reach another customer or the DB.
+const ALLOWED_TOOLS = ["Bash", "BashOutput", "KillShell", "Read", "Write", "Edit", "Glob", "Grep", "WebFetch", "WebSearch", "Agent", "Task", "NotebookEdit", "TodoWrite"];
 
 export const SESSION_SETTINGS = {
-  permissions: { deny: DENIED_TOOLS, defaultMode: "acceptEdits", disableBypassPermissionsMode: "disable" },
+  permissions: { allow: ALLOWED_TOOLS, defaultMode: "acceptEdits" },
   includeCoAuthoredBy: false,
 };
 
@@ -202,7 +202,7 @@ function claudeMd(projectName: string): string {
     "- Pas het bestand aan dat de eigenaar is van de wijziging: styling → CSS, gedrag → JS, tekst → de HTML van die pagina.",
     "- Laat bestaande layout, secties, navigatie en content intact tenzij de wijziging dat vereist.",
     "- Nieuwe pagina = nieuw `.html`-bestand in de hoofdmap; koppel 'm in de navigatie van de andere pagina's.",
-    "- Je mag dingen van internet ophalen (WebFetch/WebSearch) als dat helpt. Shell-commando's kun je (nog) niet uitvoeren; je werkt met de bestanden hier.",
+    "- Je hebt volledige Claude Code: een shell (Bash), git en internet. Je mag alles aan DIT project doen — bestanden, structuur, git-historie, en desgewenst een server draaien in deze map.",
     "- Elke opgeslagen wijziging verschijnt automatisch in de preview naast de terminal en wordt direct bewaard.",
     "- In de map `database/` staat een alleen-lezen momentopname van de EIGEN gegevens van dit project (JSON). Gebruik die om mee te denken; wijzigingen daarin veranderen de echte database niet.",
     "",
@@ -334,6 +334,21 @@ async function materialise(s: Session, projectName: string): Promise<void> {
   }
   if (s.projectId > 0) await exportDatabase(s).catch((err) => logger.warn({ err, key: s.key }, "[claude-terminal] db export failed"));
   await ownDir(s.cwd, u);
+  if (s.projectId > 0) gitInit(s.cwd, u); // a real (per-session) git repo of the customer's own project
+}
+
+// Initialise a git repo in the workspace so the customer can use git on her own project. Runs as her
+// own uid (prod) so ownership is correct; best-effort — a missing git binary never blocks the session.
+function gitInit(cwd: string, u: { uid: number; gid: number } | null): void {
+  const opts = { cwd, stdio: "ignore" as const, ...(u ? { uid: u.uid, gid: u.gid } : {}) };
+  try {
+    if (fsSync.existsSync(path.join(cwd, ".git"))) return;
+    execFileSync("git", ["init", "-q"], opts);
+    execFileSync("git", ["config", "user.email", "editor@nebulabookings.com"], opts);
+    execFileSync("git", ["config", "user.name", "Nebula"], opts);
+    execFileSync("git", ["add", "-A"], opts);
+    execFileSync("git", ["commit", "-q", "-m", "Startpunt van je website"], opts);
+  } catch { /* git missing or nothing to commit — ignore */ }
 }
 
 // Write this project's OWN data (scoped strictly by project_id) as read-only JSON so Claude can see
@@ -463,7 +478,7 @@ function broadcast(s: Session, msg: Record<string, unknown>) {
   for (const c of s.clients) if (c.readyState === WebSocket.OPEN) c.send(data);
 }
 
-async function getOrCreateSession(userId: number, projectId: number, projectName: string): Promise<Session> {
+async function getOrCreateSession(userId: number, projectId: number, projectName: string, dims?: { cols: number; rows: number }): Promise<Session> {
   const key = sessionKey(userId, projectId);
   const existing = sessions.get(key);
   if (existing && !existing.exited) return existing;
@@ -513,11 +528,15 @@ async function getOrCreateSession(userId: number, projectId: number, projectName
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
     // Deliberately NOT forwarded: ANTHROPIC_API_KEY, DATABASE_URL, STRIPE_*, EMAIL_SECRET_KEY, …
   };
-  const args = ["--permission-mode", "acceptEdits", "--disallowedTools", DENIED_TOOLS.join(",")];
+  const args = ["--permission-mode", "acceptEdits"];
 
+  // Spawn at the connecting client's real terminal size: Claude Code's startup banner is printed
+  // once and never redrawn, so starting at the wrong width leaves a permanently mangled header.
+  const cols = Math.min(500, Math.max(40, dims?.cols || 100));
+  const rows = Math.min(200, Math.max(10, dims?.rows || 30));
   try {
     s.proc = pty.spawn(CLAUDE_BIN, args, {
-      name: "xterm-256color", cols: 100, rows: 30, cwd, env,
+      name: "xterm-256color", cols, rows, cwd, env,
       ...(u ? { uid: u.uid, gid: u.gid } : {}),
     });
   } catch (err) {
@@ -674,9 +693,13 @@ export function attachClaudeTerminal(server: HttpServer): void {
       // active (the platform owner always has access). Complete the upgrade so we can send a friendly
       // message the UI shows as an unlock prompt, then close.
       const paid = hasPlatformAccess(user);
+      const dims = {
+        cols: Number(url.searchParams.get("cols") || "0") || 0,
+        rows: Number(url.searchParams.get("rows") || "0") || 0,
+      };
       wss.handleUpgrade(req, socket, head, (ws) => {
         if (!paid) { try { ws.send(JSON.stringify({ t: "locked", message: "Bewerken met Claude Code is onderdeel van het abonnement. Sluit een abonnement af (€50/maand) om te koppelen en je website te bewerken." })); } catch { /* ignore */ } ws.close(4402, "subscription-required"); return; }
-        void onConnection(ws, user.id, projectId, projectName);
+        void onConnection(ws, user.id, projectId, projectName, dims);
       });
     })().catch((err) => { logger.error({ err }, "[claude-terminal] upgrade failed"); socket.destroy(); });
   });
@@ -684,10 +707,12 @@ export function attachClaudeTerminal(server: HttpServer): void {
   logger.info("[claude-terminal] websocket endpoint ready at /api/claude/terminal");
 }
 
-async function onConnection(ws: WebSocket, userId: number, projectId: number, projectName: string) {
+async function onConnection(ws: WebSocket, userId: number, projectId: number, projectName: string, dims?: { cols: number; rows: number }) {
   let s: Session;
+  const pre = sessions.get(sessionKey(userId, projectId));
+  const isNew = !pre || pre.exited;
   try {
-    s = await getOrCreateSession(userId, projectId, projectName);
+    s = await getOrCreateSession(userId, projectId, projectName, dims);
   } catch (err) {
     ws.send(JSON.stringify({ t: "err", message: (err as Error).message }));
     ws.close(1011, "spawn-failed");
@@ -697,6 +722,14 @@ async function onConnection(ws: WebSocket, userId: number, projectId: number, pr
   touchIdle(s);
   ws.send(JSON.stringify({ t: "hello", projectId, connected: blobConnected(await readCredBlob(userId)) }));
   if (s.scrollback) ws.send(JSON.stringify({ t: "o", d: s.scrollback }));
+  // Re-attaching to a LIVE session: the replayed scrollback was rendered for the terminal size of the
+  // previous viewer, so the screen the client just drew can be garbled. A resize "jiggle" fires
+  // SIGWINCH twice and makes Claude Code repaint its whole UI cleanly at the client's real size.
+  if (!isNew && dims && dims.cols > 0 && dims.rows > 0 && s.proc && !s.exited) {
+    const { cols, rows } = dims;
+    try { s.proc.resize(Math.min(500, cols), Math.min(200, Math.max(10, rows - 1))); } catch { /* ignore */ }
+    setTimeout(() => { try { if (s.proc && !s.exited) s.proc.resize(Math.min(500, cols), Math.min(200, rows)); } catch { /* ignore */ } }, 60);
+  }
 
   ws.on("message", (raw) => {
     let m: ClientMsg;

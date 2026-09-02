@@ -25,10 +25,13 @@ type Props = {
   onLocked?: (message: string) => void;
 };
 
-function wsUrl(projectId: number): string {
+function wsUrl(projectId: number, cols?: number, rows?: number): string {
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
   const tok = encodeURIComponent(getToken() || "");
-  return `${proto}//${window.location.host}/api/claude/terminal?project=${projectId}&token=${tok}`;
+  // Real terminal size travels with the connect so the server spawns the pty at the right width —
+  // Claude Code's startup banner is printed once and stays mangled if the size changes afterwards.
+  const size = cols && rows ? `&cols=${cols}&rows=${rows}` : "";
+  return `${proto}//${window.location.host}/api/claude/terminal?project=${projectId}&token=${tok}${size}`;
 }
 
 export type ClaudeTerminalHandle = {
@@ -110,7 +113,9 @@ export const ClaudeTerminal = forwardRef<ClaudeTerminalHandle, Props>(function C
     term.reset();
     term.writeln("\x1b[2m» Verbinden met Claude Code…\x1b[0m");
 
-    const ws = new WebSocket(wsUrl(projectId));
+    // Fit first so the connect URL carries the real terminal size (the panel is laid out by now).
+    try { fitRef.current?.fit(); } catch { /* ignore */ }
+    const ws = new WebSocket(wsUrl(projectId, term.cols, term.rows));
     wsRef.current = ws;
 
     ws.onopen = () => {
