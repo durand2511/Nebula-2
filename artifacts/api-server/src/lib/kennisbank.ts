@@ -197,6 +197,10 @@ ${opts.jsonLd.map((o) => `<script type="application/ld+json">${JSON.stringify(o)
   article li{margin-bottom:6px}
   article a{color:#0f62d6;text-decoration:none}
   article a:hover{text-decoration:underline}
+  .pager{display:flex;justify-content:center;align-items:center;gap:6px;margin-top:26px}
+  .pager a,.pager .on{min-width:34px;height:34px;display:inline-flex;align-items:center;justify-content:center;border-radius:999px;font-size:13.5px;font-weight:600;text-decoration:none;background:rgba(255,255,255,.9);border:1px solid rgba(255,255,255,.7);box-shadow:0 2px 8px rgba(0,0,0,.08);color:rgba(23,23,23,.65)}
+  .pager a:hover{color:#171717;transform:translateY(-1px)}
+  .pager .on{background:#171717;color:#fff;border-color:#171717}
   .cta{margin-top:34px;background:#171717;color:#fff;border-radius:20px;padding:26px 28px}
   .cta h2{font-size:20px;margin:0 0 6px;letter-spacing:-.01em}
   .cta p{font-size:14.5px;color:rgba(255,255,255,.75);margin:0 0 16px}
@@ -218,9 +222,21 @@ ${opts.jsonLd.map((o) => `<script type="application/ld+json">${JSON.stringify(o)
 
 const ctaBlock = `<div class="cta"><h2>Zelf een website die voor je werkt?</h2><p>Nebula bouwt 'm en daarna bewerk je alles zelf — gewoon door te typen wat er anders moet. Inclusief boekingssysteem, eigen domein en automatische SEO.</p><a href="/ai-editor">Bekijk Nebula →</a></div>`;
 
-async function renderIndex(_req: Request, res: Response): Promise<void> {
-  const posts = await db.select().from(platformBlog).orderBy(desc(platformBlog.createdAt)).limit(200);
+const PER_PAGE = 5;
+
+async function renderIndex(req: Request, res: Response): Promise<void> {
+  const all = await db.select().from(platformBlog).orderBy(desc(platformBlog.createdAt)).limit(1000);
+  const pages = Math.max(1, Math.ceil(all.length / PER_PAGE));
+  const page = Math.min(pages, Math.max(1, Number(req.query.p) || 1));
+  const posts = all.slice((page - 1) * PER_PAGE, page * PER_PAGE);
   const base = `https://${CANON_HOST}`;
+  const pageUrl = (n: number) => (n <= 1 ? "/kennisbank" : `/kennisbank?p=${n}`);
+  // Numbered pager (1 2 3 …) once there is more than one page of articles.
+  const pager = pages > 1 ? `<nav class="pager" aria-label="Paginering">
+${page > 1 ? `<a href="${pageUrl(page - 1)}">←</a>` : ""}
+${Array.from({ length: pages }, (_, i) => i + 1).map((n) => n === page ? `<span class="on">${n}</span>` : `<a href="${pageUrl(n)}">${n}</a>`).join("\n")}
+${page < pages ? `<a href="${pageUrl(page + 1)}">→</a>` : ""}
+</nav>` : "";
   const body = `
 <div class="hero">
   <h1>Kennisbank</h1>
@@ -230,11 +246,12 @@ async function renderIndex(_req: Request, res: Response): Promise<void> {
 ${posts.map((p) => `<a class="card" href="/kennisbank/${esc(p.slug)}"><span class="date">${fmtDate(p.createdAt)}</span><h2>${esc(p.title)}</h2><p>${esc(p.metaDescription)}</p><span class="more">Lees verder →</span></a>`).join("\n")}
 ${posts.length === 0 ? `<div class="card"><h2>De eerste artikelen verschijnen binnenkort</h2><p>Elke dag publiceren we hier een nieuw artikel.</p></div>` : ""}
 </div>
+${pager}
 ${ctaBlock}`;
   res.type("html").send(shell({
-    title: "Kennisbank — websites, webdesign & online boekingen | Nebula",
+    title: page > 1 ? `Kennisbank — pagina ${page} | Nebula` : "Kennisbank — websites, webdesign & online boekingen | Nebula",
     description: "Praktische artikelen over website laten maken, webdesign, boekingssystemen en lokale SEO voor ondernemers. Elke dag nieuw.",
-    canonical: `${base}/kennisbank`,
+    canonical: `${base}${pageUrl(page)}`,
     jsonLd: [
       { "@context": "https://schema.org", "@type": "Blog", name: "Nebula Kennisbank", url: `${base}/kennisbank`, inLanguage: "nl" },
       { "@context": "https://schema.org", "@type": "BreadcrumbList", itemListElement: [
