@@ -1612,12 +1612,68 @@ export function ProjectWorkspace() {
     const s = dragRef.current;
     setMarquee({ x: Math.min(s.x, p.x), y: Math.min(s.y, p.y), w: Math.abs(p.x - s.x), h: Math.abs(p.y - s.y) });
   };
-  // On release: screenshot just the marked area. html2canvas blocks the main thread, so we (1) show a
-  // loading overlay and yield a couple of frames so it actually paints, (2) render at a low scale and
-  // only the smallest element covering the selection (fast), (3) detect a blank result (cross-origin
-  // images can't be rasterised in-browser) and then point the user to the always-reliable paste path.
+  // On release: screenshot just the marked area. Primary path is the SERVER (headless Chromium —
+  // real pixels incl. cross-origin/CDN images), but on a small instance Chromium can be missing or
+  // OOM. Then we fall back to an in-browser html2canvas capture (may miss some cross-origin images,
+  // but almost always usable), and only when BOTH fail do we point at the paste path.
   const [capturing, setCapturing] = useState(false);
   const nextFrame = () => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
+  const isBlankCanvas = (cv: HTMLCanvasElement): boolean => {
+    try {
+      const ctx = cv.getContext("2d");
+      if (!ctx) return true;
+      const step = Math.max(1, Math.floor(Math.min(cv.width, cv.height) / 24));
+      let same = 0, total = 0;
+      const first = ctx.getImageData(0, 0, 1, 1).data;
+      for (let y = 0; y < cv.height; y += step) for (let x = 0; x < cv.width; x += step) {
+        const p = ctx.getImageData(x, y, 1, 1).data;
+        total++;
+        if (Math.abs(p[0] - first[0]) < 6 && Math.abs(p[1] - first[1]) < 6 && Math.abs(p[2] - first[2]) < 6) same++;
+      }
+      return total > 0 && same / total > 0.985;
+    } catch { return false; } // tainted canvas etc. → treat as not-blank, let the user judge
+  };
+  const browserCapture = async (doc: Document, rect: { x: number; y: number; w: number; h: number }): Promise<string | null> => {
+    try {
+      const { default: html2canvas } = await import("html2canvas");
+      const cx = rect.x + rect.w / 2, cy = rect.y + rect.h / 2;
+      let node = (doc.elementFromPoint(cx, cy) as HTMLElement) || doc.body;
+      for (let i = 0; i < 10 && node.parentElement && node !== doc.body; i++) {
+        const r = node.getBoundingClientRect();
+        if (r.left <= rect.x && r.top <= rect.y && r.right >= rect.x + rect.w && r.bottom >= rect.y + rect.h) break;
+        node = node.parentElement;
+      }
+      const nb = node.getBoundingClientRect();
+      const scale = 0.7;
+      const rendered: HTMLCanvasElement = await Promise.race([
+        html2canvas(node, {
+          useCORS: true, allowTaint: false, backgroundColor: "#ffffff", scale, logging: false,
+          imageTimeout: 4000, removeContainer: true,
+          onclone: (cloned: Document) => {
+            cloned.querySelectorAll("img").forEach((img) => {
+              const el = img as HTMLImageElement & { dataset: DOMStringMap };
+              el.loading = "eager";
+              const ds = el.dataset.src || el.getAttribute("data-lazy-src") || el.getAttribute("data-original");
+              if (ds && (!el.getAttribute("src") || el.getAttribute("src")!.startsWith("data:"))) el.setAttribute("src", ds);
+              const dss = el.getAttribute("data-srcset") || el.getAttribute("data-lazy-srcset");
+              if (dss && !el.getAttribute("srcset")) el.setAttribute("srcset", dss);
+            });
+          },
+        } as Parameters<typeof html2canvas>[1]),
+        new Promise<HTMLCanvasElement>((_, rej) => setTimeout(() => rej(new Error("timeout")), 9000)),
+      ]);
+      const sx = Math.max(0, (rect.x - nb.left) * scale);
+      const sy = Math.max(0, (rect.y - nb.top) * scale);
+      const sw = Math.min(rendered.width - sx, rect.w * scale);
+      const sh = Math.min(rendered.height - sy, rect.h * scale);
+      if (sw < 4 || sh < 4) return null;
+      const out = document.createElement("canvas");
+      out.width = Math.round(sw); out.height = Math.round(sh);
+      out.getContext("2d")!.drawImage(rendered, sx, sy, sw, sh, 0, 0, sw, sh);
+      if (isBlankCanvas(out)) return null;
+      return out.toDataURL("image/png");
+    } catch { return null; }
+  };
   const endMarquee = async () => {
     const rect = marquee;
     dragRef.current = null;
@@ -1628,11 +1684,11 @@ export function ProjectWorkspace() {
     setCapturing(true);
     setMarquee(null);
     await nextFrame(); // let the loading overlay paint
+    const addShot = (dataUrl: string) => setShots((prev) => [...prev, { id: `s${Date.now()}${Math.random().toString(36).slice(2, 6)}`, dataUrl, name: "markering.png", isImage: true }]);
     try {
       const cw = iframe?.contentWindow;
       // The marked area in the preview's CONTENT coordinates (add scroll), plus the content width so
-      // the server renders the same layout. The server (headless Chromium) captures real pixels —
-      // including cross-origin/CDN images the browser can't rasterise — so it never comes out blank.
+      // the server renders the same layout.
       const clip = {
         x: rect.x + (cw?.scrollX || 0),
         y: rect.y + (cw?.scrollY || 0),
@@ -1644,13 +1700,15 @@ export function ProjectWorkspace() {
         height: Math.max(doc.documentElement.scrollHeight || 0, (cw?.innerHeight || 900)),
       };
       const page = previewPageRef.current ?? "index.html";
-      const r = await fetch("/api/claude/shot", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ projectId, page, clip, viewport }) });
-      const d = await r.json().catch(() => ({}));
-      if (r.ok && d.dataUrl) {
-        setShots((prev) => [...prev, { id: `s${Date.now()}${Math.random().toString(36).slice(2, 6)}`, dataUrl: d.dataUrl, name: "markering.png", isImage: true }]);
-      } else {
-        window.alert("Kon geen schermafbeelding maken. Maak zelf een screenshot (⌘⇧4) en plak 'm met ⌘V — die gaat wél mee naar Claude.");
-      }
+      let dataUrl: string | null = null;
+      try {
+        const r = await fetch("/api/claude/shot", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ projectId, page, clip, viewport }) });
+        const d = await r.json().catch(() => ({}));
+        if (r.ok && d.dataUrl) dataUrl = d.dataUrl;
+      } catch { /* server capture unavailable → browser fallback below */ }
+      if (!dataUrl) dataUrl = await browserCapture(doc, rect);
+      if (dataUrl) addShot(dataUrl);
+      else window.alert("Kon geen schermafbeelding maken. Maak zelf een screenshot (⌘⇧4) en plak 'm met ⌘V — die gaat wél mee naar Claude.");
     } catch {
       window.alert("Kon geen schermafbeelding maken. Maak zelf een screenshot (⌘⇧4) en plak 'm met ⌘V — die gaat wél mee naar Claude.");
     } finally {
