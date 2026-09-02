@@ -72,8 +72,10 @@ async function doCapture(opts: { projectId: number; page: string; clip: Clip; vi
   const pg = await browser.newPage();
   try {
     const vw = Math.max(320, Math.min(2200, Math.round(opts.viewport.width || 1200)));
-    const vh = Math.max(600, Math.min(8000, Math.round(opts.viewport.height || 900)));
-    await pg.setViewport({ width: vw, height: vh, deviceScaleFactor: 2 });
+    // Keep the viewport at window height: puppeteer's captureBeyondViewport clips below the fold
+    // just fine, and NOT rasterising an 8000px-tall page at once is a big chunk of the speed-up.
+    const vh = Math.max(600, Math.min(1400, Math.round(opts.viewport.height || 900)));
+    await pg.setViewport({ width: vw, height: vh, deviceScaleFactor: 1.5 });
     // Never download video/audio: a 4K background video makes the capture take forever, and video
     // frames don't reliably render in a fresh headless page anyway. The style below paints the spot
     // where a video lives dark, so heroes don't come out as unreadable white-on-white.
@@ -85,7 +87,10 @@ async function doCapture(opts: { projectId: number; page: string; clip: Clip; vi
     // page still yields a shot (screenshot whatever has rendered when the timeout hits).
     await pg.goto(url, { waitUntil: "load", timeout: 8000 }).catch(() => { /* capture what's there */ });
     await pg.addStyleTag({ content: "video{background:#171717 !important}" }).catch(() => {});
-    await new Promise((r) => setTimeout(r, 350)); // let fonts/lazy images settle
+    // Scroll to the marked area so IntersectionObserver-style lazy images there actually load
+    // (the viewport is window-sized now; captureBeyondViewport handles the clip itself).
+    await pg.evaluate((y: number) => window.scrollTo(0, Math.max(0, y - 200)), Math.round(opts.clip.y)).catch(() => {});
+    await new Promise((r) => setTimeout(r, 300)); // let fonts/lazy images settle
     const clip = {
       x: Math.max(0, Math.round(opts.clip.x)),
       y: Math.max(0, Math.round(opts.clip.y)),
@@ -103,6 +108,12 @@ async function doCapture(opts: { projectId: number; page: string; clip: Clip; vi
 
 export function screenshotAvailable(): boolean {
   return chromiumPath() != null;
+}
+
+/** Fire-and-forget pre-warm: launch (or keep) the shared Chromium so the next capture skips the
+ *  slow launch. Called when the user enters "Markeren" mode. */
+export async function warmup(): Promise<void> {
+  try { await getBrowser(); scheduleIdleClose(); } catch { /* no chromium / launch failed — capture will fall back */ }
 }
 
 logger.info({ chromium: chromiumPath() || "not found" }, "[screenshot] engine init");

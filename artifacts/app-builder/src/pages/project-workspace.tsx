@@ -2895,7 +2895,14 @@ export function ProjectWorkspace() {
                     size="sm"
                     className="h-8 text-muted-foreground hover:text-foreground data-[active=true]:text-primary-foreground"
                     data-active={selectMode}
-                    onClick={() => setSelectMode((v) => !v)}
+                    onClick={() => {
+                      setSelectMode((v) => {
+                        // Pre-warm the server-side Chromium while the user is still dragging their
+                        // marquee — by capture time the browser is already up (saves seconds).
+                        if (!v) void fetch("/api/claude/shot/warm", { method: "POST" }).catch(() => {});
+                        return !v;
+                      });
+                    }}
                     title="Sleep een kader over de preview om er een schermafbeelding van te maken en naar Claude te sturen"
                     data-testid="button-select-edit"
                   >

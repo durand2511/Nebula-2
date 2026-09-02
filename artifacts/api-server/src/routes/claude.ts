@@ -2,7 +2,7 @@
 import { Router, type IRouter } from "express";
 import { getSessionUser, tokenFrom } from "../lib/platform-auth.js";
 import { isClaudeConnected, disconnectClaude, writeSessionRef, deleteSessionRef } from "../lib/claude-terminal.js";
-import { captureRegion, screenshotAvailable } from "../lib/screenshot.js";
+import { captureRegion, screenshotAvailable, warmup } from "../lib/screenshot.js";
 import { db, projects } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { logger } from "../lib/logger";
@@ -42,6 +42,15 @@ router.post("/claude/ref", express.json({ limit: "12mb" }), async (req, res) => 
   const r = await writeSessionRef(u.id, projectId, dataUrl, name);
   if ("error" in r) { res.status(400).json(r); return; }
   res.json({ ok: true, path: r.path });
+});
+
+// Pre-warm the shared Chromium when the user enters "Markeren" mode, so the actual capture only
+// pays for navigation + screenshot, not the launch. Fire-and-forget; always answers ok.
+router.post("/claude/shot/warm", async (req, res) => {
+  const u = await getSessionUser(tokenFrom(req as any));
+  if (!u) { res.status(401).json({ error: "Niet ingelogd." }); return; }
+  void warmup();
+  res.json({ ok: true });
 });
 
 // Server-side region screenshot (headless Chromium) — captures real pixels incl. cross-origin/CDN
