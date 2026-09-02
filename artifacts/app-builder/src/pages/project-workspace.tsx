@@ -1653,7 +1653,7 @@ export function ProjectWorkspace() {
             // Scroll/entrance animations leave elements at opacity<1 or translated in the clone,
             // which made captures come out washed-out/see-through. Force everything fully visible.
             const st = cloned.createElement("style");
-            st.textContent = "*{opacity:1 !important;transition:none !important;animation:none !important;transform:none !important}";
+            st.textContent = "*{opacity:1 !important;transition:none !important;animation:none !important;transform:none !important} video{background:#171717 !important}";
             cloned.head?.appendChild(st);
             cloned.querySelectorAll("img").forEach((img) => {
               const el = img as HTMLImageElement & { dataset: DOMStringMap };

@@ -38,25 +38,54 @@ export async function captureRegion(opts: { projectId: number; page: string; cli
   try { return await run; } finally { if (inFlight === run) inFlight = null; }
 }
 
-async function doCapture(opts: { projectId: number; page: string; clip: Clip; viewport: Viewport }): Promise<Buffer> {
+// Keep one Chromium alive between captures (launch is the slowest part, seconds on a small
+// instance) and close it after a short idle so it never squats on memory.
+let sharedBrowser: any = null;
+let idleClose: NodeJS.Timeout | null = null;
+const BROWSER_IDLE_MS = 90 * 1000;
+
+async function getBrowser(): Promise<any> {
+  if (sharedBrowser && sharedBrowser.connected !== false) return sharedBrowser;
   const exe = chromiumPath();
   if (!exe) throw new Error("no-chromium");
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const puppeteer = require("puppeteer-core");
-  const browser = await puppeteer.launch({
+  sharedBrowser = await puppeteer.launch({
     executablePath: exe,
     headless: true,
     args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu", "--single-process", "--no-zygote", "--hide-scrollbars"],
   });
+  sharedBrowser.once("disconnected", () => { sharedBrowser = null; });
+  return sharedBrowser;
+}
+
+function scheduleIdleClose(): void {
+  if (idleClose) clearTimeout(idleClose);
+  idleClose = setTimeout(() => {
+    const b = sharedBrowser; sharedBrowser = null;
+    if (b) b.close().catch(() => {});
+  }, BROWSER_IDLE_MS);
+}
+
+async function doCapture(opts: { projectId: number; page: string; clip: Clip; viewport: Viewport }): Promise<Buffer> {
+  const browser = await getBrowser();
+  const pg = await browser.newPage();
   try {
-    const pg = await browser.newPage();
     const vw = Math.max(320, Math.min(2200, Math.round(opts.viewport.width || 1200)));
     const vh = Math.max(600, Math.min(8000, Math.round(opts.viewport.height || 900)));
     await pg.setViewport({ width: vw, height: vh, deviceScaleFactor: 2 });
+    // Never download video/audio: a 4K background video makes the capture take forever, and video
+    // frames don't reliably render in a fresh headless page anyway. The style below paints the spot
+    // where a video lives dark, so heroes don't come out as unreadable white-on-white.
+    await pg.setRequestInterception(true);
+    pg.on("request", (r: any) => { (r.resourceType() === "media" ? r.abort() : r.continue()).catch(() => {}); });
     const port = process.env.PORT || "8080";
     const url = `http://127.0.0.1:${port}/api/projects/${opts.projectId}/preview-page?page=${encodeURIComponent(opts.page)}&sid=shot`;
-    await pg.goto(url, { waitUntil: "networkidle2", timeout: 15000 });
-    await new Promise((r) => setTimeout(r, 700)); // let lazy images/fonts settle
+    // "load" + a short settle instead of networkidle2: not blocked by streams/analytics, and a slow
+    // page still yields a shot (screenshot whatever has rendered when the timeout hits).
+    await pg.goto(url, { waitUntil: "load", timeout: 8000 }).catch(() => { /* capture what's there */ });
+    await pg.addStyleTag({ content: "video{background:#171717 !important}" }).catch(() => {});
+    await new Promise((r) => setTimeout(r, 350)); // let fonts/lazy images settle
     const clip = {
       x: Math.max(0, Math.round(opts.clip.x)),
       y: Math.max(0, Math.round(opts.clip.y)),
@@ -67,7 +96,8 @@ async function doCapture(opts: { projectId: number; page: string; clip: Clip; vi
     const buf = await pg.screenshot({ type: "png", clip });
     return Buffer.from(buf as Uint8Array);
   } finally {
-    await browser.close().catch(() => {});
+    await pg.close().catch(() => {});
+    scheduleIdleClose();
   }
 }
 
