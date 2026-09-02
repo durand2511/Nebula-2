@@ -187,6 +187,11 @@ ${opts.jsonLd.map((o) => `<script type="application/ld+json">${JSON.stringify(o)
   .card h2{font-size:19px;line-height:1.3;margin:6px 0 6px;letter-spacing:-.01em}
   .card p{font-size:14.5px;color:#6f6a5e}
   .card .more{display:inline-block;margin-top:10px;font-size:13px;font-weight:600;color:#171717}
+  /* Small, subtle CTA INSIDE the white island (replaces the old big dark block): a quiet divider +
+     pill button at the end of each article. */
+  .kb-cta{margin-top:30px;padding-top:20px;border-top:1px solid #eceae5}
+  .btn-sub{display:inline-block;font-size:13px;font-weight:600;padding:8px 18px;border-radius:999px;border:1px solid #dedbd4;background:#fff;color:#171717 !important;text-decoration:none !important;transition:.15s}
+  .btn-sub:hover{background:#171717;color:#fff !important;border-color:#171717}
   article{background:rgba(255,255,255,.92);backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,.7);border-radius:24px;padding:clamp(26px,5vw,48px);box-shadow:0 8px 30px rgba(0,0,0,.12)}
   article .meta{font-size:13px;color:#a09a8c;margin-bottom:14px}
   article h1{font-size:clamp(26px,4.5vw,36px);line-height:1.15;letter-spacing:-.02em;font-weight:800;margin-bottom:18px}
@@ -201,10 +206,6 @@ ${opts.jsonLd.map((o) => `<script type="application/ld+json">${JSON.stringify(o)
   .pager a,.pager .on{min-width:34px;height:34px;display:inline-flex;align-items:center;justify-content:center;border-radius:999px;font-size:13.5px;font-weight:600;text-decoration:none;background:rgba(255,255,255,.9);border:1px solid rgba(255,255,255,.7);box-shadow:0 2px 8px rgba(0,0,0,.08);color:rgba(23,23,23,.65)}
   .pager a:hover{color:#171717;transform:translateY(-1px)}
   .pager .on{background:#171717;color:#fff;border-color:#171717}
-  .cta{margin-top:34px;background:#171717;color:#fff;border-radius:20px;padding:26px 28px}
-  .cta h2{font-size:20px;margin:0 0 6px;letter-spacing:-.01em}
-  .cta p{font-size:14.5px;color:rgba(255,255,255,.75);margin:0 0 16px}
-  .cta a{display:inline-block;background:#fff;color:#171717;font-weight:650;font-size:14px;padding:10px 20px;border-radius:999px;text-decoration:none}
   footer{padding:26px 16px 40px;text-align:center;font-size:12px;color:#a09a8c}
   footer a{color:#a09a8c}
 </style>
@@ -220,7 +221,6 @@ ${opts.jsonLd.map((o) => `<script type="application/ld+json">${JSON.stringify(o)
 </html>`;
 }
 
-const ctaBlock = `<div class="cta"><h2>Zelf een website die voor je werkt?</h2><p>Nebula bouwt 'm en daarna bewerk je alles zelf — gewoon door te typen wat er anders moet. Inclusief boekingssysteem, eigen domein en automatische SEO.</p><a href="/ai-editor">Bekijk Nebula →</a></div>`;
 
 const PER_PAGE = 5;
 
@@ -246,8 +246,7 @@ ${page < pages ? `<a href="${pageUrl(page + 1)}">→</a>` : ""}
 ${posts.map((p) => `<a class="card" href="/kennisbank/${esc(p.slug)}"><span class="date">${fmtDate(p.createdAt)}</span><h2>${esc(p.title)}</h2><p>${esc(p.metaDescription)}</p><span class="more">Lees verder →</span></a>`).join("\n")}
 ${posts.length === 0 ? `<div class="card"><h2>De eerste artikelen verschijnen binnenkort</h2><p>Elke dag publiceren we hier een nieuw artikel.</p></div>` : ""}
 </div>
-${pager}
-${ctaBlock}`;
+${pager}`;
   res.type("html").send(shell({
     title: page > 1 ? `Kennisbank — pagina ${page} | Nebula` : "Kennisbank — websites, webdesign & online boekingen | Nebula",
     description: "Praktische artikelen over website laten maken, webdesign, boekingssystemen en lokale SEO voor ondernemers. Elke dag nieuw.",
@@ -275,8 +274,8 @@ async function renderArticle(req: Request, res: Response): Promise<void> {
   <div class="meta">${fmtDate(p.createdAt)} · Nebula Kennisbank</div>
   <h1>${esc(p.title)}</h1>
   ${p.html}
-</article>
-${ctaBlock}`;
+  <div class="kb-cta"><a class="btn-sub" href="https://${CANON_HOST}/">Zelf zo'n website? Bekijk Nebula →</a></div>
+</article>`;
   res.type("html").send(shell({
     title: `${p.metaTitle || p.title} | Nebula`,
     description: p.metaDescription,
