@@ -14,6 +14,10 @@ import { desc, eq } from "drizzle-orm";
 import { anthropic } from "@workspace/integrations-openai-ai-server";
 import { INDEXNOW_KEY, submitToIndexNow } from "./indexnow.js";
 import { PLATFORM_HOST } from "./domains.js";
+
+// The apex 301-redirects to www (Render config), so www is the CANONICAL host: every canonical,
+// sitemap-URL, OG-tag and IndexNow ping must use it, or Google chases redirects ("Kan niet ophalen").
+const CANON_HOST = `www.${PLATFORM_HOST}`;
 import { logger } from "./logger";
 
 const esc = (s: string) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c] as string));
@@ -95,7 +99,7 @@ export async function generateKennisbankArticle(): Promise<{ status: "published"
     slug, title: a.title.slice(0, 200), metaTitle: (a.metaTitle || a.title).slice(0, 70),
     metaDescription: (a.metaDescription || "").slice(0, 170), topic: theme, html: a.html,
   });
-  void submitToIndexNow(PLATFORM_HOST, [`https://${PLATFORM_HOST}/kennisbank/${slug}`, `https://${PLATFORM_HOST}/kennisbank`]);
+  void submitToIndexNow(CANON_HOST, [`https://${CANON_HOST}/kennisbank/${slug}`, `https://${CANON_HOST}/kennisbank`]);
   logger.info({ slug, words }, "[kennisbank] article published");
   return { status: "published", slug };
 }
@@ -152,7 +156,7 @@ function shell(opts: { title: string; description: string; canonical: string; js
 <meta property="og:title" content="${esc(opts.title)}">
 <meta property="og:description" content="${esc(opts.description)}">
 <meta property="og:url" content="${esc(opts.canonical)}">
-<meta property="og:image" content="https://${PLATFORM_HOST}/opengraph.jpg">
+<meta property="og:image" content="https://${CANON_HOST}/opengraph.jpg">
 ${opts.jsonLd.map((o) => `<script type="application/ld+json">${JSON.stringify(o)}</script>`).join("\n")}
 <style>
   :root{color-scheme:light}
@@ -165,8 +169,9 @@ ${opts.jsonLd.map((o) => `<script type="application/ld+json">${JSON.stringify(o)
   .haze{background:rgba(255,255,255,.55)}
   a{color:inherit}
   .nav-wrap{position:sticky;top:0;z-index:50;display:flex;justify-content:center;padding:16px 12px 8px}
-  .nav{display:flex;gap:2px;background:rgba(255,255,255,.92);backdrop-filter:blur(8px);border:1px solid #e5e2dd;border-radius:999px;padding:5px 6px;box-shadow:0 4px 14px rgba(0,0,0,.08)}
-  .nav a{font-size:12.5px;font-weight:550;padding:5px 14px;border-radius:999px;text-decoration:none;color:rgba(23,23,23,.6);transition:.15s}
+  /* Pixel-identical to the SPA pill nav: gap-0.5, px-1.5 py-1 container; text-xs font-medium, px-3.5 py-1 items. */
+  .nav{display:flex;align-items:center;gap:2px;background:rgba(255,255,255,.9);backdrop-filter:blur(8px);border:1px solid #e5e7eb;border-radius:999px;padding:4px 6px;box-shadow:0 4px 6px -1px rgba(0,0,0,.1),0 2px 4px -2px rgba(0,0,0,.1)}
+  .nav a{font-size:12px;line-height:16px;font-weight:500;padding:4px 14px;border-radius:999px;text-decoration:none;color:rgba(23,23,23,.6);transition:.15s}
   .nav a:hover{color:#171717;background:rgba(23,23,23,.05)}
   .nav a.on{background:#171717;color:#fff}
   main{max-width:760px;margin:0 auto;padding:36px 20px 60px}
@@ -215,7 +220,7 @@ const ctaBlock = `<div class="cta"><h2>Zelf een website die voor je werkt?</h2><
 
 async function renderIndex(_req: Request, res: Response): Promise<void> {
   const posts = await db.select().from(platformBlog).orderBy(desc(platformBlog.createdAt)).limit(200);
-  const base = `https://${PLATFORM_HOST}`;
+  const base = `https://${CANON_HOST}`;
   const body = `
 <div class="hero">
   <h1>Kennisbank</h1>
@@ -244,8 +249,8 @@ ${ctaBlock}`;
 async function renderArticle(req: Request, res: Response): Promise<void> {
   const slug = String(req.params.slug || "");
   const [p] = await db.select().from(platformBlog).where(eq(platformBlog.slug, slug));
-  if (!p) { res.status(404).type("html").send(shell({ title: "Niet gevonden — Nebula Kennisbank", description: "Dit artikel bestaat niet (meer).", canonical: `https://${PLATFORM_HOST}/kennisbank`, jsonLd: [], body: `<div class="hero"><h1>Artikel niet gevonden</h1><p class="sub">Dit artikel bestaat niet (meer). <a href="/kennisbank">Terug naar de kennisbank</a>.</p></div>` })); return; }
-  const base = `https://${PLATFORM_HOST}`;
+  if (!p) { res.status(404).type("html").send(shell({ title: "Niet gevonden — Nebula Kennisbank", description: "Dit artikel bestaat niet (meer).", canonical: `https://${CANON_HOST}/kennisbank`, jsonLd: [], body: `<div class="hero"><h1>Artikel niet gevonden</h1><p class="sub">Dit artikel bestaat niet (meer). <a href="/kennisbank">Terug naar de kennisbank</a>.</p></div>` })); return; }
+  const base = `https://${CANON_HOST}`;
   const url = `${base}/kennisbank/${p.slug}`;
   const body = `
 <div class="crumb"><a href="/">Home</a> › <a href="/kennisbank">Kennisbank</a> › ${esc(p.title)}</div>
@@ -274,7 +279,7 @@ ${ctaBlock}`;
 
 async function renderSitemap(_req: Request, res: Response): Promise<void> {
   const posts = await db.select({ slug: platformBlog.slug, createdAt: platformBlog.createdAt }).from(platformBlog).orderBy(desc(platformBlog.createdAt)).limit(1000);
-  const base = `https://${PLATFORM_HOST}`;
+  const base = `https://${CANON_HOST}`;
   const urls = [
     `<url><loc>${base}/</loc></url>`,
     `<url><loc>${base}/kennisbank</loc>${posts[0] ? `<lastmod>${posts[0].createdAt.toISOString().slice(0, 10)}</lastmod>` : ""}</url>`,
