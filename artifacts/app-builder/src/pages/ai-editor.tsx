@@ -109,6 +109,23 @@ export function AiEditor() {
     authApi("me").then((r) => { if (r.ok && r.d.user) setUser(r.d.user); else clearToken(); }).finally(() => setAuthChecked(true));
   }, []);
 
+  // Back from an iDEAL bank authorisation (Stripe return_url): finish the subscription server-side
+  // on the saved SEPA mandate, then clean the URL and show the billing dialog with the result.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const seti = params.get("setup_intent");
+    if (!seti || !getToken()) return;
+    window.history.replaceState(null, "", window.location.pathname);
+    if (params.get("redirect_status") && params.get("redirect_status") !== "succeeded") {
+      window.alert("De betaling is niet afgerond. Probeer het opnieuw.");
+      return;
+    }
+    billingApi("/subscribe/complete", { setupIntentId: seti }).then((r) => {
+      if (r.ok) setBillingOpen(true); // the dialog now shows the green "Actief abonnement" state
+      else window.alert(r.d.error || "Abonneren is niet gelukt. Probeer het opnieuw.");
+    });
+  }, []);
+
   const onAuthSuccess = (token: string, u: PlatformUser) => { setToken(token); setUser(u); setF({ email: "", password: "", name: "", birthdate: "", phone: "" }); setAuthErr(null); refresh(); };
 
   const doLogin = async () => {
@@ -376,13 +393,13 @@ function BillingDialog({ open, onClose }: { open: boolean; onClose: () => void }
           </div>
         )}
       </div>
-      {checkout && <CheckoutModal clientSecret={checkout.clientSecret} publishableKey={checkout.publishableKey} price={price} onClose={() => setCheckout(null)} />}
+      {checkout && <CheckoutModal clientSecret={checkout.clientSecret} publishableKey={checkout.publishableKey} price={price} onClose={() => setCheckout(null)} onDone={() => { setCheckout(null); load(); }} />}
     </div>
   );
 }
 
 // ── Custom in-app Stripe payment (Payment Element: card + iDEAL) ──
-function CheckoutModal({ clientSecret, publishableKey, price, onClose }: { clientSecret: string; publishableKey: string; price: number; onClose: () => void }) {
+function CheckoutModal({ clientSecret, publishableKey, price, onClose, onDone }: { clientSecret: string; publishableKey: string; price: number; onClose: () => void; onDone: () => void }) {
   const payRef = useRef<HTMLDivElement | null>(null);
   const addrRef = useRef<HTMLDivElement | null>(null);
   const stateRef = useRef<{ stripe: any; elements: any } | null>(null);
@@ -422,12 +439,22 @@ function CheckoutModal({ clientSecret, publishableKey, price, onClose }: { clien
     if (!st) return;
     setPaying(true); setErr("");
     try {
-      const { error } = await st.stripe.confirmPayment({
+      // The clientSecret is a SETUP intent: the customer authorises the payment method here (card
+      // stays in-app; iDEAL hops to the bank and returns to the return_url), and the server then
+      // creates the €50/mo subscription on the saved method via /subscribe/complete.
+      const { error, setupIntent } = await st.stripe.confirmSetup({
         elements: st.elements,
         confirmParams: { return_url: `${window.location.origin}/ai-editor?sub=done` },
+        redirect: "if_required",
       });
-      if (error) { setErr(error.message || "Betaling mislukt."); setPaying(false); }
-      // On success Stripe redirects (card) or to the bank (iDEAL) — no code runs here.
+      if (error) { setErr(error.message || "Betaling mislukt."); setPaying(false); return; }
+      if (setupIntent?.status === "succeeded") {
+        const r = await billingApi("/subscribe/complete", { setupIntentId: setupIntent.id });
+        if (!r.ok) { setErr(r.d.error || "Abonneren mislukt."); setPaying(false); return; }
+        onDone();
+        return;
+      }
+      // A redirect flow (iDEAL) navigates away — nothing more to do here.
     } catch (e) { setErr((e as Error).message || "Betaling mislukt."); setPaying(false); }
   };
 

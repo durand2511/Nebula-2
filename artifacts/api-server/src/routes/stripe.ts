@@ -653,39 +653,66 @@ async function billingUser(req: unknown) {
   return getSessionUser(tokenFrom(req as { headers: Record<string, unknown>; query?: Record<string, unknown> }));
 }
 
-// Start the €50/mo platform subscription checkout (PLATFORM account — no Connect header). Uses a
-// fixed Stripe price when configured; otherwise builds the €50/mo price inline. Accepts iDEAL and
-// card, and collects name + billing address so a proper invoice can be issued.
+// Start the €50/mo platform subscription checkout (PLATFORM account — no Connect header).
+//
+// Custom in-app checkout via a SETUP INTENT, not a subscription PaymentIntent: Stripe rejects `ideal`
+// in a subscription's payment_settings ("can't be used with collection_method charge_automatically")
+// and newer API versions no longer return `latest_invoice.payment_intent` at all. A SetupIntent DOES
+// accept card + iDEAL + SEPA (verified live): the customer authorises in our own Payment Element,
+// iDEAL/bank authorisation yields a reusable SEPA mandate, and /billing/subscribe/complete then
+// creates the subscription off-session on the saved payment method.
 router.post("/billing/subscribe", async (req, res) => {
   const u = await billingUser(req); if (!u) { res.status(401).json({ error: "Niet ingelogd." }); return; }
   try {
     const customer = await ensureCustomer(u);
-    const base = baseUrl(req as any);
-    // Only use a fixed Stripe price when one is EXPLICITLY configured via env — otherwise build the
-    // €50/mo price inline (the old hardcoded fallback was €69,99).
-    const envPrice = process.env.STRIPE_NEBULA_PRICE || "";
-    const lineItem = /^price_/.test(envPrice)
-      ? { price: envPrice, quantity: 1 }
-      : { quantity: 1, price_data: { currency: "eur", unit_amount: Math.round(SUBSCRIPTION_PRICE_EUR * 100), recurring: { interval: "month" }, product_data: { name: "Nebula — volledige toegang" } } };
-    // Hosted Stripe Checkout (redirect) — €50/mo, card + iDEAL, name+address for the invoice.
-    // NOTE: the old custom in-app flow (incomplete subscription + Payment Element) is gone for two
-    // reasons, both verified against the live API: (1) `ideal` is rejected outright in a subscription's
-    // payment_settings ("can't be used with collection_method charge_automatically"), and (2) newer
-    // Stripe API versions no longer return `latest_invoice.payment_intent`, so there is no
-    // client_secret to hand to the Payment Element at all. Hosted Checkout in subscription mode DOES
-    // accept iDEAL and pairs it with SEPA automatically: iDEAL collects the first payment and Stripe
-    // stores a SEPA Direct Debit mandate for the renewals.
-    const session = await stripeReq("POST", "checkout/sessions", {
-      mode: "subscription", customer, client_reference_id: String(u.id),
-      payment_method_types: ["card", "ideal"],
-      billing_address_collection: "required",
-      customer_update: { address: "auto", name: "auto" },
-      line_items: [lineItem],
-      subscription_data: { metadata: { platformUserId: String(u.id) } },
-      success_url: `${base}/ai-editor?sub=ok`, cancel_url: `${base}/ai-editor?sub=cancel`,
+    // Publishable key is NOT secret (it ships to the browser). Set STRIPE_PUBLISHABLE_KEY on Render
+    // to your pk_live for production.
+    const pk = process.env.STRIPE_PUBLISHABLE_KEY || "pk_test_51Sk17JHyqZ2ZUEjYuhLf3UJ1asUQDhj5VhTS8YUVEtllknDO2HkqKRargBFvtSGSIWldq2M4luirH81IRsX0bc8j00dRMdgdth";
+    const si = await stripeReq("POST", "setup_intents", {
+      customer,
+      payment_method_types: ["card", "ideal", "sepa_debit"],
+      usage: "off_session",
+      metadata: { platformUserId: String(u.id) },
     });
-    res.json({ url: session.url });
+    res.json({ clientSecret: si.client_secret, publishableKey: pk, setupIntentId: si.id });
   } catch (err) { logger.error({ err, userId: u.id }, "[billing] subscribe failed"); res.status(500).json({ error: err instanceof Error ? err.message : "Abonneren mislukt." }); }
+});
+
+// Finish the subscription after the SetupIntent succeeded (called from our checkout modal after
+// confirmSetup, or from the return-URL after an iDEAL bank redirect). Resolves the reusable payment
+// method (an iDEAL authorisation generates a SEPA one), makes it the customer default and creates the
+// €50/mo subscription on it. SEPA's first debit can take days, so we activate access right away and
+// let the webhooks (invoice.payment_failed → past_due) correct it if the debit bounces.
+router.post("/billing/subscribe/complete", async (req, res) => {
+  const u = await billingUser(req); if (!u) { res.status(401).json({ error: "Niet ingelogd." }); return; }
+  const setupIntentId = String(req.body?.setupIntentId || "");
+  if (!/^seti_/.test(setupIntentId)) { res.status(400).json({ error: "Ongeldige betaling." }); return; }
+  try {
+    const customer = await ensureCustomer(u);
+    const si = await stripeReq("GET", `setup_intents/${encodeURIComponent(setupIntentId)}?expand[]=latest_attempt`);
+    if (si.customer !== customer || si.metadata?.platformUserId !== String(u.id)) { res.status(403).json({ error: "Deze betaling hoort niet bij dit account." }); return; }
+    if (si.status !== "succeeded") { res.status(400).json({ error: "De betaalmethode is nog niet bevestigd." }); return; }
+    // Already subscribed (double click / revisit of the return URL) → idempotent success.
+    if (u.subscriptionStatus === "active" && u.subscriptionId) { res.json({ ok: true }); return; }
+    // iDEAL itself is single-use; the reusable method is the SEPA mandate it generated.
+    let pm = String(si.payment_method || "");
+    const gen = si.latest_attempt?.payment_method_details?.ideal?.generated_sepa_debit;
+    if (gen) pm = String(gen);
+    if (!pm) { res.status(400).json({ error: "Geen betaalmethode gevonden." }); return; }
+    await stripeReq("POST", `customers/${encodeURIComponent(customer)}`, { "invoice_settings[default_payment_method]": pm });
+    const sub = await stripeReq("POST", "subscriptions", {
+      customer,
+      items: [{ price: await nebulaPriceId() }],
+      default_payment_method: pm,
+      payment_behavior: "allow_incomplete",
+      metadata: { platformUserId: String(u.id) },
+    });
+    const pe = sub?.current_period_end ? ymdUTC(new Date(sub.current_period_end * 1000)) : "";
+    await db.update(platformUsers).set({ subscriptionId: String(sub.id), subscriptionStatus: "active", ...(pe ? { currentPeriodEnd: pe } : {}) }).where(eq(platformUsers.id, u.id));
+    await addCredit(u.id, 0, "refill");
+    logger.info({ userId: u.id, sub: sub.id, pm }, "[billing] subscription started via in-app checkout");
+    res.json({ ok: true });
+  } catch (err) { logger.error({ err, userId: u.id }, "[billing] subscribe/complete failed"); res.status(500).json({ error: err instanceof Error ? err.message : "Abonneren mislukt." }); }
 });
 
 // Top up AI credit with a self-chosen amount (one-time payment, platform account).
