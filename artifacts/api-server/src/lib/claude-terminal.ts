@@ -57,6 +57,9 @@ const SCROLLBACK_MAX = 200 * 1024;        // bytes of output replayed to a (re)c
 const SYNC_DEBOUNCE_MS = 400;
 const CRED_POLL_MS = 2000;
 const MAX_FILE_BYTES = 5 * 1024 * 1024;
+// Total storage quota per project (all synced files together). Over quota → new/greater files stop
+// syncing to the DB; the customer must contact the owner for more (CLAUDE.md tells Claude this).
+const MAX_PROJECT_BYTES = (Number(process.env.NEBULA_PROJECT_QUOTA_MB) || 100) * 1024 * 1024;
 const UID_BASE = 20000;                   // unix uid = UID_BASE + platform user id
 
 // Folder for reference images (screenshots / uploads) the user gives Claude — never synced to the DB.
@@ -169,7 +172,7 @@ function userDirs(userId: number) {
   return { home, configDir: path.join(home, ".claude") };
 }
 
-function unixUser(userId: number): { uid: number; gid: number; name: string } | null {
+export function unixUser(userId: number): { uid: number; gid: number; name: string } | null {
   if (!IS_LINUX_ROOT) return null; // local dev (macOS) → run as ourselves
   const name = `nebula-u${userId}`;
   const uid = UID_BASE + userId;
@@ -213,6 +216,27 @@ function claudeMd(projectName: string): string {
     "- Deze map is UITSLUITEND het project van deze ene klant. Er is hier geen enkele toegang tot andere klanten, andere projecten, de gedeelde database of het Nebula-platform, en die komt er ook niet.",
     "- Beantwoord NOOIT vragen over andere klanten, andere websites, of gegevens buiten dit project, en probeer daar ook nooit bij te komen. Zeg dan vriendelijk dat je alleen met dit project mag werken.",
     "- Werk alleen binnen deze map. Ga niet buiten deze map zoeken of lezen.",
+    "",
+    "## Opslaglimiet (belangrijk)",
+    "Dit project heeft BEPERKTE serveropslag: maximaal ~100MB aan bestanden in totaal, en maximaal 5MB per bestand. Boven de limiet worden nieuwe/grotere bestanden NIET meer opgeslagen.",
+    "- Houd media klein: comprimeer afbeeldingen (WebP/JPEG, max ~300KB per stuk), en host video's extern (YouTube/Vimeo embed) — nooit videobestanden in het project zetten.",
+    "- Loopt de gebruiker tegen de limiet aan, of heeft hij meer opslag of zwaardere serverdingen nodig? Zeg dan letterlijk: \"Daarvoor moet je even contact opnemen met de eigenaar van Nebula: durand2511@gmail.com of 06 38 25 59 72 — die regelt meer ruimte voor je.\"",
+    "- Probeer de limiet NOOIT te omzeilen (niet opsplitsen, encoderen of elders wegschrijven).",
+    "",
+    "## Server-functies (echte serverkant, zonder externe server)",
+    "Maak een bestand `api/<naam>.js` en het wordt op de GEPUBLICEERDE site automatisch een endpoint op `/fn/<naam>`. Formaat:",
+    "```js",
+    "// api/contact.js — POST /fn/contact",
+    "module.exports = async (req) => {",
+    "  // req = { method, path, query, headers, body } (body is al JSON-geparsed bij application/json)",
+    "  return { status: 200, body: { ok: true } }; // body mag ook een string zijn; headers optioneel",
+    "};",
+    "```",
+    "- Vanuit de site aanroepen met een relatieve fetch: `fetch('/fn/contact', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({...}) })`.",
+    "- ALLEEN Node-standaardbibliotheek (global `fetch` werkt) — geen npm-packages/node_modules.",
+    "- Houd het licht en snel: harde limiet van 10 seconden per aanroep, geen langlopende processen of servers.",
+    "- Test lokaal in de terminal: `echo '{\"method\":\"POST\",\"body\":{}}' | node -e 'require(\"./api/naam.js\")(JSON.parse(require(\"fs\").readFileSync(0,\"utf8\"))).then(r=>console.log(JSON.stringify(r)))'`.",
+    "- Werkt pas op de gepubliceerde site (na Publiceren), niet in de preview.",
     "",
     "## Geïmporteerde sites",
     "Sommige bestanden zijn grote, geminificeerde HTML van een geïmporteerde site — herschrijf die niet. Voor een site-brede restyle: schrijf/verleng `.nebula-restyle.css` (wordt automatisch op elke pagina na de eigen CSS geladen) en richt je op de echte selectors van de site.",
@@ -410,6 +434,10 @@ async function syncBack(s: Session): Promise<void> {
   if (s.projectId <= 0 || s.applying) return;
   const onDisk = new Set(await walk(s.cwd));
   const changed: string[] = [], created: string[] = [], deleted: string[] = [];
+  // Running total of stored bytes — the quota gate below refuses growth past MAX_PROJECT_BYTES.
+  let totalBytes = 0;
+  for (const f of s.snapshot.values()) totalBytes += Buffer.byteLength(f.content || "", "utf8");
+  let quotaHit = false;
   for (const rel of onDisk) {
     const abs = safeJoin(s.cwd, rel);
     if (!abs) continue;
@@ -419,6 +447,9 @@ async function syncBack(s: Session): Promise<void> {
     const content = await fs.readFile(abs, "utf8").catch(() => null);
     if (content == null) continue;
     const prev = s.snapshot.get(rel);
+    const growth = Buffer.byteLength(content, "utf8") - (prev ? Buffer.byteLength(prev.content || "", "utf8") : 0);
+    if (growth > 0 && totalBytes + growth > MAX_PROJECT_BYTES) { quotaHit = true; continue; }
+    totalBytes += Math.max(0, growth);
     if (!prev) {
       const [row] = await db.insert(projectFiles).values({ projectId: s.projectId, path: rel, content, language: inferLanguage(rel) }).returning({ id: projectFiles.id, updatedAt: projectFiles.updatedAt });
       s.snapshot.set(rel, { id: row.id, path: rel, content, updatedAt: row.updatedAt.getTime() });
@@ -437,6 +468,7 @@ async function syncBack(s: Session): Promise<void> {
       deleted.push(rel);
     }
   }
+  if (quotaHit) logger.warn({ key: s.key, totalBytes, quota: MAX_PROJECT_BYTES }, "[claude-terminal] project over storage quota — growth not synced");
   if (changed.length || created.length || deleted.length) {
     await db.update(projects).set({ updatedAt: new Date() }).where(eq(projects.id, s.projectId));
     logger.info({ key: s.key, changed, created, deleted }, "[claude-terminal] synced to DB");
