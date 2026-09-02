@@ -55,8 +55,8 @@ export function PlatformUitleg() {
           </Feature>
 
           <Feature icon={<Globe className="h-5 w-5 text-primary" />} title="Je eigen domein koppelen">
-            <p>Je site komt eerst op een gratis Nebula-adres. Wil je je eigen domein (bijv. <strong>jouwstudio.nl</strong>)? In het publiceer-venster staat precies welke DNS-records je bij je domeinprovider toevoegt (een CNAME voor <strong>www</strong> en twee A-records voor het hoofddomein).</p>
-            <p>Na het toevoegen klik je op <strong>Koppelen</strong> en daarna <strong>Verifiëren</strong>. Het <strong>SSL-certificaat</strong> (het slotje/https) wordt automatisch geregeld zodra de verificatie is gelukt. Dit kan een paar uur duren.</p>
+            <p>Je site komt eerst op een gratis Nebula-adres. Wil je je eigen domein (bijv. <strong>jouwstudio.nl</strong>)? Typ het in het publiceer-venster en klik op <strong>Koppelen</strong> — dat is alles.</p>
+            <p>De technische koppeling (DNS) vergt een specifieke aanpak per domeinprovider, dus <strong>dat regelt de eigenaar van Nebula voor je</strong>. Zodra je domein live is, staat het <strong>SSL-certificaat</strong> (het slotje/https) er automatisch bij. Dit kan een paar uur duren.</p>
           </Feature>
 
           <Feature icon={<Sparkles className="h-5 w-5 text-primary" />} title="Auto-SEO — automatisch gevonden worden">

@@ -7,6 +7,7 @@ import { addDomain, listDomains, deleteDomain, verifyDomain, publishSubdomain, g
 import { publishSite, isPublished, hasUnpublishedChanges } from "../lib/site-publish.js";
 import { rebuildBookingApp } from "../lib/actions.js";
 import { hasPlatformAccess } from "../lib/billing.js";
+import { sendMail, smtpConfigFromEnv } from "../lib/smtp.js";
 
 const router = Router();
 
@@ -69,7 +70,31 @@ router.post("/projects/:id/domains", json({ limit: "16kb" }), async (req, res) =
   try {
     if (!(await ownerSubscribed(projectId))) { res.status(402).json({ error: "Een eigen domein koppelen zit in het abonnement (€50/maand). Gratis publiceer je op een Nebula-adres (met watermerk). Abonneer je in je profiel." }); return; }
     const row = await addDomain(projectId, String(req.body?.domain ?? ""));
-    res.json({ ok: true, domain: row, instruction: `Voeg bij je DNS-provider een CNAME-record toe: ${row.domain} → ${CUSTOMERS_TARGET}`, target: CUSTOMERS_TARGET });
+    // The customer never sees DNS records: connecting a domain needs a provider-specific approach, so
+    // the PLATFORM OWNER does the DNS work. Notify them by e-mail with the exact records to set
+    // (full runbook: docs/DOMEIN-KOPPELEN.md). Best-effort — the request itself never fails on mail.
+    void (async () => {
+      try {
+        const cfg = smtpConfigFromEnv();
+        if (!cfg) { logger.warn("[domains] no SMTP config — owner not e-mailed about new domain"); return; }
+        const to = process.env.CONTACT_EMAIL || "durand2511@gmail.com";
+        const [p] = await db.select().from(projects).where(eq(projects.id, projectId));
+        const owner = p?.ownerId ? (await db.select().from(platformUsers).where(eq(platformUsers.id, p.ownerId)))[0] : null;
+        const text = [
+          `Nieuw domein aangemeld: ${row.domain}`,
+          `Project: #${projectId} (${p?.name || "?"}) — klant: ${owner?.name || "?"} <${owner?.email || "?"}>`,
+          "",
+          "In te stellen bij de DNS-provider van de klant:",
+          `  www.${row.domain.replace(/^www\./, "")}  CNAME → ${CUSTOMERS_TARGET}`,
+          `  ${row.domain.replace(/^www\./, "")}  A → 216.24.57.1 en A → 216.24.57.9`,
+          "",
+          "Daarna in Nebula bij het project op 'Verifiëren' klikken (of de klant doet dat) — Render-domein + SSL gaan dan automatisch.",
+          "Volledige runbook: docs/DOMEIN-KOPPELEN.md in de repo.",
+        ].join("\n");
+        await sendMail(cfg, { to, subject: `🌐 Domein koppelen: ${row.domain}`, text, html: `<pre style="font:14px/1.5 monospace">${text.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c] as string))}</pre>`, fromName: "Nebula" });
+      } catch (err) { logger.warn({ err }, "[domains] owner notify failed"); }
+    })();
+    res.json({ ok: true, domain: row, instruction: "Je domein is aangemeld. De koppeling vergt een specifieke aanpak, dus de eigenaar van Nebula regelt dit voor je — je hoeft zelf niets in te stellen.", target: CUSTOMERS_TARGET });
   } catch (err) { res.status(400).json({ error: (err as Error)?.message || "Toevoegen mislukt." }); }
 });
 

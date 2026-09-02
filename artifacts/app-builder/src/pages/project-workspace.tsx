@@ -1650,6 +1650,11 @@ export function ProjectWorkspace() {
           useCORS: true, allowTaint: false, backgroundColor: "#ffffff", scale, logging: false,
           imageTimeout: 4000, removeContainer: true,
           onclone: (cloned: Document) => {
+            // Scroll/entrance animations leave elements at opacity<1 or translated in the clone,
+            // which made captures come out washed-out/see-through. Force everything fully visible.
+            const st = cloned.createElement("style");
+            st.textContent = "*{opacity:1 !important;transition:none !important;animation:none !important;transform:none !important}";
+            cloned.head?.appendChild(st);
             cloned.querySelectorAll("img").forEach((img) => {
               const el = img as HTMLImageElement & { dataset: DOMStringMap };
               el.loading = "eager";
@@ -1669,7 +1674,10 @@ export function ProjectWorkspace() {
       if (sw < 4 || sh < 4) return null;
       const out = document.createElement("canvas");
       out.width = Math.round(sw); out.height = Math.round(sh);
-      out.getContext("2d")!.drawImage(rendered, sx, sy, sw, sh, 0, 0, sw, sh);
+      const octx = out.getContext("2d")!;
+      octx.fillStyle = "#ffffff"; // opaque ground — no see-through pixels for Claude to squint at
+      octx.fillRect(0, 0, out.width, out.height);
+      octx.drawImage(rendered, sx, sy, sw, sh, 0, 0, sw, sh);
       if (isBlankCanvas(out)) return null;
       return out.toDataURL("image/png");
     } catch { return null; }
@@ -2743,29 +2751,14 @@ export function ProjectWorkspace() {
             <div className="rounded-lg border p-4">
               <div className="flex items-center gap-2 mb-1"><Globe className="h-4 w-4 text-muted-foreground" /><h4 className="font-medium text-sm">Eigen domein koppelen</h4></div>
               <div className="text-xs text-muted-foreground mb-3 space-y-2">
-                <p>Koppel je eigen domein (bijv. <span className="font-medium">jouwstudio.nl</span>) aan Nebula. Voeg bij je DNS-provider deze <span className="font-medium">3 records</span> toe:</p>
-                <div className="rounded-md bg-muted/50 px-3 py-2">
-                  <div className="font-medium text-foreground">1. CNAME — voor www (www.jouwstudio.nl)</div>
-                  <div className="mt-1">Naam: <code className="bg-muted px-1 rounded">www</code></div>
-                  <div>Type: <code className="bg-muted px-1 rounded">CNAME</code></div>
-                  <div>Waarde: <code className="bg-muted px-1 rounded">{pubData?.target || "customers.nebulabookings.com"}</code></div>
-                </div>
-                <div className="rounded-md bg-muted/50 px-3 py-2">
-                  <div className="font-medium text-foreground">2 + 3. A-records — voor het hoofddomein (jouwstudio.nl)</div>
-                  <div className="mt-1">Naam: <code className="bg-muted px-1 rounded">@</code> (of leeg, afhankelijk van je provider)</div>
-                  <div>Type: <code className="bg-muted px-1 rounded">A</code></div>
-                  <div>Voeg <span className="font-medium">twee</span> A-records toe met deze waardes:</div>
-                  <div className="mt-1">Waarde 1: <code className="bg-muted px-1 rounded">216.24.57.1</code></div>
-                  <div>Waarde 2: <code className="bg-muted px-1 rounded">216.24.57.9</code></div>
-                </div>
-                <p>TTL kan op de standaardwaarde van je provider blijven staan (meestal 1 uur).</p>
-                <p>Typ je domein hieronder, klik op <span className="font-medium">Koppelen</span> en daarna op <span className="font-medium">Verifiëren</span>. Wijzigingen kunnen tot een paar uur duren voordat ze actief zijn. SSL wordt <span className="font-medium">automatisch</span> geregeld zodra de verificatie is gelukt.</p>
+                <p>Wil je je eigen domein (bijv. <span className="font-medium">jouwstudio.nl</span>) aan je site koppelen? Typ hieronder je domein en klik op <span className="font-medium">Koppelen</span>.</p>
+                <p>De technische koppeling (DNS) vergt een specifieke aanpak per domeinprovider — <span className="font-medium text-foreground">dit regelt de eigenaar van Nebula voor je</span>. Je hoeft zelf niets in te stellen; zodra je domein live is (inclusief SSL) zie je dat hier vanzelf verschijnen.</p>
               </div>
               {(pubData?.domains || []).map((d: any) => (
                 <div key={d.id} className="flex items-center justify-between gap-2 border rounded-md px-3 py-2 mb-2">
                   <div className="min-w-0">
                     <div className="text-sm font-medium break-all">{d.domain}</div>
-                    <div className={`text-[11px] ${d.status === "active" ? "text-emerald-600" : "text-amber-600"}`}>{d.status === "active" ? "● Live (SSL actief)" : "○ Wacht op DNS — voeg de CNAME toe"}</div>
+                    <div className={`text-[11px] ${d.status === "active" ? "text-emerald-600" : "text-amber-600"}`}>{d.status === "active" ? "● Live (SSL actief)" : "○ Wordt gekoppeld door Nebula — je hoeft niets te doen"}</div>
                   </div>
                   <div className="flex items-center gap-1 shrink-0">
                     {d.status !== "active" && (
