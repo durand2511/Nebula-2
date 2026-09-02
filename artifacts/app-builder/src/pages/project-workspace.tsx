@@ -1710,10 +1710,14 @@ export function ProjectWorkspace() {
       const page = previewPageRef.current ?? "index.html";
       let dataUrl: string | null = null;
       try {
-        const r = await fetch("/api/claude/shot", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ projectId, page, clip, viewport }) });
+        // Never let a wedged server call stall the UI: abort after 12s and use the browser fallback.
+        const ac = new AbortController();
+        const kill = setTimeout(() => ac.abort(), 12000);
+        const r = await fetch("/api/claude/shot", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ projectId, page, clip, viewport }), signal: ac.signal });
+        clearTimeout(kill);
         const d = await r.json().catch(() => ({}));
         if (r.ok && d.dataUrl) dataUrl = d.dataUrl;
-      } catch { /* server capture unavailable → browser fallback below */ }
+      } catch { /* server capture unavailable/slow → browser fallback below */ }
       if (!dataUrl) dataUrl = await browserCapture(doc, rect);
       if (dataUrl) addShot(dataUrl);
       else window.alert("Kon geen schermafbeelding maken. Maak zelf een screenshot (⌘⇧4) en plak 'm met ⌘V — die gaat wél mee naar Claude.");

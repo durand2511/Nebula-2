@@ -33,7 +33,26 @@ let inFlight: Promise<Buffer> | null = null;
 export async function captureRegion(opts: { projectId: number; page: string; clip: Clip; viewport: Viewport }): Promise<Buffer> {
   // Single-flight: serialise captures so we never run two Chromium instances at once (memory).
   while (inFlight) { try { await inFlight; } catch { /* ignore previous */ } }
-  const run = doCapture(opts);
+  // HARD 10s cap on the whole capture. Without it, a Chromium that died mid-flight (OOM on the
+  // small instance) left puppeteer calls hanging forever — and every next capture queued behind it,
+  // which felt like "screenshots take minutes". On timeout we also throw the browser away so the
+  // next attempt starts from a clean launch.
+  const run = (async () => {
+    let timer: NodeJS.Timeout | null = null;
+    try {
+      return await Promise.race([
+        doCapture(opts),
+        new Promise<never>((_, rej) => { timer = setTimeout(() => rej(new Error("capture-timeout")), 10_000); }),
+      ]);
+    } catch (err) {
+      if ((err as Error)?.message === "capture-timeout") {
+        const b = sharedBrowser; sharedBrowser = null;
+        if (b) b.close().catch(() => {});
+        logger.warn("[screenshot] capture timed out — recycled Chromium");
+      }
+      throw err;
+    } finally { if (timer) clearTimeout(timer); }
+  })();
   inFlight = run;
   try { return await run; } finally { if (inFlight === run) inFlight = null; }
 }
@@ -83,9 +102,12 @@ async function doCapture(opts: { projectId: number; page: string; clip: Clip; vi
     pg.on("request", (r: any) => { (r.resourceType() === "media" ? r.abort() : r.continue()).catch(() => {}); });
     const port = process.env.PORT || "8080";
     const url = `http://127.0.0.1:${port}/api/projects/${opts.projectId}/preview-page?page=${encodeURIComponent(opts.page)}&sid=shot`;
-    // "load" + a short settle instead of networkidle2: not blocked by streams/analytics, and a slow
-    // page still yields a shot (screenshot whatever has rendered when the timeout hits).
-    await pg.goto(url, { waitUntil: "load", timeout: 8000 }).catch(() => { /* capture what's there */ });
+    // Proceed after AT MOST ~2.5s even when the page's load event hasn't fired (slow CDN images
+    // kept eating the full timeout on every capture) — we screenshot whatever has rendered.
+    await Promise.race([
+      pg.goto(url, { waitUntil: "load", timeout: 8000 }).catch(() => { /* capture what's there */ }),
+      new Promise((r) => setTimeout(r, 2500)),
+    ]);
     await pg.addStyleTag({ content: "video{background:#171717 !important}" }).catch(() => {});
     // Scroll to the marked area so IntersectionObserver-style lazy images there actually load
     // (the viewport is window-sized now; captureBeyondViewport handles the clip itself).
