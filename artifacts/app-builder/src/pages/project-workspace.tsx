@@ -57,6 +57,7 @@ import {
   REFERENCE_IMAGE_PROMPT,
   type AttachedImage,
 } from "@/lib/image";
+import { useLang } from "@/lib/i18n";
 
 type ProjectFile = { id: number; path: string; content: string; language: string };
 
@@ -1076,6 +1077,7 @@ function LiveCodeView({ content }: { content: string }) {
 // component stays untouched. One click connects the owner's Google account; the server then verifies
 // the site + submits the sitemap automatically.
 function GscCard({ projectId }: { projectId: number }) {
+  const { t } = useLang();
   const [st, setSt] = useState<any>(null);
   const [busy, setBusy] = useState(false);
   const load = useCallback(async () => {
@@ -1092,11 +1094,11 @@ function GscCard({ projectId }: { projectId: number }) {
         // Re-check status when the popup closes (or after a while) so the card updates itself.
         const iv = setInterval(() => { if (!w || w.closed) { clearInterval(iv); void load(); } }, 1200);
         setTimeout(() => { clearInterval(iv); void load(); }, 120000);
-      } else { window.alert(j.error || "Koppelen mislukt."); }
-    } catch { window.alert("Koppelen mislukt."); } finally { setBusy(false); }
+      } else { window.alert(j.error || t("Koppelen mislukt.", "Connecting failed.")); }
+    } catch { window.alert(t("Koppelen mislukt.", "Connecting failed.")); } finally { setBusy(false); }
   };
-  const sync = async () => { setBusy(true); try { const r = await fetch(`/api/projects/${projectId}/gsc/sync`, { method: "POST" }); const j = await r.json(); if (!j.ok) window.alert(j.detail || "Synchroniseren mislukt."); await load(); } catch { /* ignore */ } finally { setBusy(false); } };
-  const disconnect = async () => { if (!window.confirm("Google Search Console ontkoppelen?")) return; setBusy(true); try { await fetch(`/api/projects/${projectId}/gsc/disconnect`, { method: "POST" }); await load(); } catch { /* ignore */ } finally { setBusy(false); } };
+  const sync = async () => { setBusy(true); try { const r = await fetch(`/api/projects/${projectId}/gsc/sync`, { method: "POST" }); const j = await r.json(); if (!j.ok) window.alert(j.detail || t("Synchroniseren mislukt.", "Sync failed.")); await load(); } catch { /* ignore */ } finally { setBusy(false); } };
+  const disconnect = async () => { if (!window.confirm(t("Google Search Console ontkoppelen?", "Disconnect Google Search Console?"))) return; setBusy(true); try { await fetch(`/api/projects/${projectId}/gsc/disconnect`, { method: "POST" }); await load(); } catch { /* ignore */ } finally { setBusy(false); } };
 
   if (st && st.configured === false) return null; // platform hasn't set up Google OAuth → hide entirely
   const connected = !!st?.connected;
@@ -1104,7 +1106,7 @@ function GscCard({ projectId }: { projectId: number }) {
   return (
     <div className="rounded-lg border p-4 mt-4">
       <div className="flex items-center gap-2 mb-1"><Globe className="h-4 w-4 text-muted-foreground" /><h4 className="font-medium text-sm">Google Search Console</h4></div>
-      <p className="text-xs text-muted-foreground mb-3">Koppel Google zodat je site automatisch geverifieerd wordt en je sitemap wordt ingediend — dan word je sneller in Google gevonden. Eén klik, geen DNS-gedoe.</p>
+      <p className="text-xs text-muted-foreground mb-3">{t("Koppel Google zodat je site automatisch geverifieerd wordt en je sitemap wordt ingediend — dan word je sneller in Google gevonden. Eén klik, geen DNS-gedoe.", "Connect Google so your site gets verified automatically and your sitemap is submitted — you get found on Google faster. One click, no DNS hassle.")}</p>
       {!connected ? (
         <Button size="sm" disabled={busy} onClick={() => void connect()} className="bg-emerald-600 hover:bg-emerald-500 text-white">
           {busy ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Globe className="h-3.5 w-3.5 mr-1.5" />} Koppel Google Search Console
@@ -1131,6 +1133,7 @@ function GscCard({ projectId }: { projectId: number }) {
 // "Professionele restyle aanvragen" — mails the Nebula owner (server-side, no mail app) with the project
 // + the studio's request when they want a full website makeover, bigger than the inline AI edits.
 function RedesignRequestButton({ projectId }: { projectId: number }) {
+  const { t } = useLang();
   const [open, setOpen] = useState(false);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
@@ -1140,18 +1143,18 @@ function RedesignRequestButton({ projectId }: { projectId: number }) {
     try {
       const r = await fetch(`/api/projects/${projectId}/request-redesign`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ note }) });
       const j = await r.json();
-      if (j.ok) { setSent(true); setOpen(false); } else window.alert(j.error || "Versturen mislukt.");
-    } catch { window.alert("Versturen mislukt."); } finally { setBusy(false); }
+      if (j.ok) { setSent(true); setOpen(false); } else window.alert(j.error || t("Versturen mislukt.", "Sending failed."));
+    } catch { window.alert(t("Versturen mislukt.", "Sending failed.")); } finally { setBusy(false); }
   };
   return (
     <div className="rounded-lg border p-4 mt-4">
-      <div className="flex items-center gap-2 mb-1"><Wand2 className="h-4 w-4 text-primary" /><h4 className="font-medium text-sm">Professionele restyle</h4></div>
-      <p className="text-xs text-muted-foreground mb-3">Wil je dat Nebula je hele website professioneel moderniseert in de Nebula-stijl? Vraag het aan — we krijgen je verzoek binnen en pakken het voor je op.</p>
+      <div className="flex items-center gap-2 mb-1"><Wand2 className="h-4 w-4 text-primary" /><h4 className="font-medium text-sm">{t("Professionele restyle", "Professional restyle")}</h4></div>
+      <p className="text-xs text-muted-foreground mb-3">{t("Wil je dat Nebula je hele website professioneel moderniseert in de Nebula-stijl? Vraag het aan — we krijgen je verzoek binnen en pakken het voor je op.", "Want Nebula to professionally modernise your whole website in the Nebula style? Request it — we receive your request and take it from there.")}</p>
       {sent ? (
         <div className="text-[11px] text-emerald-600 flex items-center gap-1"><Check className="h-3 w-3" /> Aanvraag verstuurd — we nemen het op.</div>
       ) : open ? (
         <div className="space-y-2">
-          <textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder="Wat wil je moderner / aangepast? (optioneel)" className="w-full rounded-md border bg-background px-3 py-2 text-sm h-20" />
+          <textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder={t("Wat wil je moderner / aangepast? (optioneel)", "What would you like modernised / changed? (optional)")} className="w-full rounded-md border bg-background px-3 py-2 text-sm h-20" />
           <div className="flex gap-2">
             <Button size="sm" disabled={busy} onClick={() => void send()} className="bg-primary text-white">{busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Aanvraag versturen"}</Button>
             <Button size="sm" variant="ghost" onClick={() => { setOpen(false); setNote(""); }}>Annuleren</Button>
@@ -1165,6 +1168,7 @@ function RedesignRequestButton({ projectId }: { projectId: number }) {
 }
 
 export function ProjectWorkspace() {
+  const { t } = useLang();
   const [, params] = useRoute("/projects/:id");
   const projectId = Number(params?.id);
   const queryClient = useQueryClient();
@@ -1202,7 +1206,7 @@ export function ProjectWorkspace() {
   };
   const [claudeDisc, setClaudeDisc] = useState(false);
   const disconnectClaudeCode = async () => {
-    if (!window.confirm("Claude ontkoppelen? Je logt uit en kunt daarna opnieuw inloggen met je Claude-account.")) return;
+    if (!window.confirm(t("Claude ontkoppelen? Je logt uit en kunt daarna opnieuw inloggen met je Claude-account.", "Disconnect Claude? You'll be logged out and can log in again with your Claude account."))) return;
     setClaudeDisc(true);
     try { await fetch("/api/claude/disconnect", { method: "POST" }); setClaudeConnected(false); setTermGen((g) => g + 1); } finally { setClaudeDisc(false); }
   };
@@ -1226,8 +1230,8 @@ export function ProjectWorkspace() {
     try {
       const res = await fetch(`/api/projects/${projectId}/publish`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ slug: pubSlug }) });
       const d = await res.json();
-      if (res.ok && d.ok) { await reloadPublish(); } else window.alert(d.error || "Publiceren mislukt.");
-    } catch { window.alert("Publiceren mislukt."); }
+      if (res.ok && d.ok) { await reloadPublish(); } else window.alert(d.error || t("Publiceren mislukt.", "Publishing failed."));
+    } catch { window.alert(t("Publiceren mislukt.", "Publishing failed.")); }
     finally { setPubBusy(false); }
   };
   const [blogOpen, setBlogOpen] = useState(false);
@@ -1502,13 +1506,13 @@ export function ProjectWorkspace() {
         }
         if (!claudeConnectedRef.current) {
           setSelectMode(false);
-          window.alert("Koppel eerst je Claude-account (klik op 'Claude koppelen' of open de Uitleg). Daarna kun je elementen aanwijzen.");
+          window.alert(t("Koppel eerst je Claude-account (klik op 'Claude koppelen' of open de Uitleg). Daarna kun je elementen aanwijzen.", "Connect your Claude account first (click 'Connect Claude' or open the Guide). Then you can point at elements."));
           return;
         }
         const sent = termHandleRef.current?.send(msg);
         setSelectMode(false);
         if (sent) { setPointSent(true); window.setTimeout(() => setPointSent(false), 3500); }
-        else window.alert("De terminal is niet klaar. Klik op 'Opnieuw starten' boven de terminal en probeer het nog eens.");
+        else window.alert(t("De terminal is niet klaar. Klik op 'Opnieuw starten' boven de terminal en probeer het nog eens.", "The terminal isn't ready. Click 'Restart' above the terminal and try again."));
         return;
       }
       // Imported multi-page navigation: the preview asks to render a sibling page.
@@ -1720,9 +1724,9 @@ export function ProjectWorkspace() {
       } catch { /* server capture unavailable/slow → browser fallback below */ }
       if (!dataUrl) dataUrl = await browserCapture(doc, rect);
       if (dataUrl) addShot(dataUrl);
-      else window.alert("Kon geen schermafbeelding maken. Maak zelf een screenshot (⌘⇧4) en plak 'm met ⌘V — die gaat wél mee naar Claude.");
+      else window.alert(t("Kon geen schermafbeelding maken. Maak zelf een screenshot (⌘⇧4) en plak 'm met ⌘V — die gaat wél mee naar Claude.", "Couldn't take a screenshot. Take one yourself (⌘⇧4) and paste it with ⌘V — that does reach Claude."));
     } catch {
-      window.alert("Kon geen schermafbeelding maken. Maak zelf een screenshot (⌘⇧4) en plak 'm met ⌘V — die gaat wél mee naar Claude.");
+      window.alert(t("Kon geen schermafbeelding maken. Maak zelf een screenshot (⌘⇧4) en plak 'm met ⌘V — die gaat wél mee naar Claude.", "Couldn't take a screenshot. Take one yourself (⌘⇧4) and paste it with ⌘V — that does reach Claude."));
     } finally {
       setCapturing(false);
     }
@@ -1745,7 +1749,7 @@ export function ProjectWorkspace() {
   };
   const sendShotsToClaude = async () => {
     if (!shots.length || sendingShots) return;
-    if (!claudeConnectedRef.current) { window.alert("Koppel eerst je Claude-account (klik op 'Claude koppelen' of open de Uitleg)."); return; }
+    if (!claudeConnectedRef.current) { window.alert(t("Koppel eerst je Claude-account (klik op 'Claude koppelen' of open de Uitleg).", "Connect your Claude account first (click 'Connect Claude' or open the Guide).")); return; }
     setSendingShots(true);
     try {
       const paths: string[] = [];
@@ -1759,7 +1763,7 @@ export function ProjectWorkspace() {
           else { updated.push(s); }
         } catch { updated.push(s); }
       }
-      if (!paths.length) { window.alert("Kon de bestand(en) niet naar Claude sturen. Is Claude gekoppeld en klaar?"); setShots(updated); return; }
+      if (!paths.length) { window.alert(t("Kon de bestand(en) niet naar Claude sturen. Is Claude gekoppeld en klaar?", "Couldn't send the file(s) to Claude. Is Claude connected and ready?")); setShots(updated); return; }
       const list = paths.join(", ");
       const msg = paths.length > 1
         ? `Ik heb deze bestanden toegevoegd (${list}). Bekijk ze en gebruik ze voor mijn website: `
@@ -1772,7 +1776,7 @@ export function ProjectWorkspace() {
         window.setTimeout(() => setPointSent(false), 4000);
       } else {
         setShots(updated);
-        window.alert("De terminal is niet klaar. Klik op 'Opnieuw starten' boven de terminal en probeer het nog eens.");
+        window.alert(t("De terminal is niet klaar. Klik op 'Opnieuw starten' boven de terminal en probeer het nog eens.", "The terminal isn't ready. Click 'Restart' above the terminal and try again."));
       }
     } finally {
       setSendingShots(false);
@@ -2628,12 +2632,12 @@ export function ProjectWorkspace() {
     return !!idx && idx.content.includes("nebula-new");
   }, [files]);
   const startBuild = () => {
-    const t = buildPrompt.trim();
-    if (!t) return;
-    const msg = `Bouw een complete, verzorgde website voor mij: ${t}. Maak mooie pagina's met nette navigatie en een professioneel ontwerp, en vervang de placeholder index.html volledig.\r`;
+    const txt = buildPrompt.trim();
+    if (!txt) return;
+    const msg = `Bouw een complete, verzorgde website voor mij: ${txt}. Maak mooie pagina's met nette navigatie en een professioneel ontwerp, en vervang de placeholder index.html volledig.\r`;
     const sent = termHandleRef.current?.send(msg);
     if (sent) { setBuildDismissed(true); setBuildPrompt(""); }
-    else window.alert("Koppel eerst Claude Code — log in de terminal links in.");
+    else window.alert(t("Koppel eerst Claude Code — log in de terminal links in.", "Connect Claude Code first — log in in the terminal on the left."));
   };
 
   // Computed from streamedText — handles FILE: and PATCH: blocks interleaved with narration text.
@@ -2710,7 +2714,7 @@ export function ProjectWorkspace() {
                 .finally(() => setPubBusy(false));
             }}
           >
-            <Rocket className="h-4 w-4" /> {pubData?.published && pubData?.hasChanges ? "Republiceren" : "Publiceren"}
+            <Rocket className="h-4 w-4" /> {pubData?.published && pubData?.hasChanges ? t("Republiceren", "Republish") : t("Publiceren", "Publish")}
           </Button>
         </div>
       </header>
@@ -2719,26 +2723,26 @@ export function ProjectWorkspace() {
         <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 p-4" onClick={() => { if (!pubBusy) setPublishOpen(false); }}>
           <div className="w-[min(620px,96%)] max-h-[88vh] overflow-y-auto rounded-xl bg-background border shadow-2xl p-6" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold flex items-center gap-2"><Rocket className="h-5 w-5 text-emerald-600" /> Publiceren</h3>
+              <h3 className="text-lg font-semibold flex items-center gap-2"><Rocket className="h-5 w-5 text-emerald-600" /> {t("Publiceren", "Publish")}</h3>
               <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setPublishOpen(false)}><X className="h-4 w-4" /></Button>
             </div>
 
 
             {/* 1. Free Nebula subdomain */}
             <div className="rounded-lg border p-4 mb-4">
-              <div className="flex items-center gap-2 mb-1"><Globe className="h-4 w-4 text-muted-foreground" /><h4 className="font-medium text-sm">Gratis Nebula-adres</h4></div>
+              <div className="flex items-center gap-2 mb-1"><Globe className="h-4 w-4 text-muted-foreground" /><h4 className="font-medium text-sm">{t("Gratis Nebula-adres", "Free Nebula address")}</h4></div>
               {pubData?.subdomain ? (
                 <div className="mb-3">
-                  <p className="text-xs text-muted-foreground mb-1">Je site is live op:</p>
+                  <p className="text-xs text-muted-foreground mb-1">{t("Je site is live op:", "Your site is live at:")}</p>
                   <div className="flex items-center gap-2">
                     <a href={`https://${pubData.subdomain.domain}`} target="_blank" rel="noopener" className="text-sm font-medium text-emerald-600 hover:underline break-all">{pubData.subdomain.domain}</a>
                     <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => navigator.clipboard?.writeText(`https://${pubData.subdomain.domain}`)}><Copy className="h-3.5 w-3.5" /></Button>
                   </div>
                 </div>
               ) : (
-                <p className="text-xs text-muted-foreground mb-3">Kies een adres en zet je site direct live — geen eigen domein nodig.</p>
+                <p className="text-xs text-muted-foreground mb-3">{t("Kies een adres en zet je site direct live — geen eigen domein nodig.", "Pick an address and put your site live right away — no own domain needed.")}</p>
               )}
-              <label className="block text-xs text-muted-foreground mb-1">Adres</label>
+              <label className="block text-xs text-muted-foreground mb-1">{t("Adres", "Address")}</label>
               <div className="flex items-center gap-1">
                 <input className="flex-1 rounded-md border bg-background px-3 py-2 text-sm" value={pubSlug} onChange={(e) => setPubSlug(e.target.value)} placeholder="mijn-studio" data-testid="input-pub-slug" />
                 <span className="text-sm text-muted-foreground">.{pubData?.platformHost || "nebulabookings.com"}</span>
@@ -2746,33 +2750,33 @@ export function ProjectWorkspace() {
               <div className="mt-3">
                 <Button size="sm" disabled={pubBusy} data-testid="button-do-publish" className="bg-emerald-600 hover:bg-emerald-500 text-white"
                   onClick={() => void doPublish()}>
-                  {pubBusy ? "Bezig…" : pubData?.subdomain ? "Opnieuw publiceren" : "Publiceren"}
+                  {pubBusy ? t("Bezig…", "Working…") : pubData?.subdomain ? t("Opnieuw publiceren", "Publish again") : t("Publiceren", "Publish")}
                 </Button>
               </div>
             </div>
 
             {/* 2. Own domain */}
             <div className="rounded-lg border p-4">
-              <div className="flex items-center gap-2 mb-1"><Globe className="h-4 w-4 text-muted-foreground" /><h4 className="font-medium text-sm">Eigen domein koppelen</h4></div>
+              <div className="flex items-center gap-2 mb-1"><Globe className="h-4 w-4 text-muted-foreground" /><h4 className="font-medium text-sm">{t("Eigen domein koppelen", "Connect your own domain")}</h4></div>
               <div className="text-xs text-muted-foreground mb-3 space-y-2">
-                <p>Wil je je eigen domein (bijv. <span className="font-medium">jouwstudio.nl</span>) aan je site koppelen? Typ hieronder je domein en klik op <span className="font-medium">Koppelen</span>.</p>
-                <p>De technische koppeling (DNS) vergt een specifieke aanpak per domeinprovider — <span className="font-medium text-foreground">dit regelt de eigenaar van Nebula voor je</span>. Je hoeft zelf niets in te stellen; zodra je domein live is (inclusief SSL) zie je dat hier vanzelf verschijnen.</p>
+                <p>{t("Wil je je eigen domein (bijv. jouwstudio.nl) aan je site koppelen? Typ hieronder je domein en klik op Koppelen.", "Want to connect your own domain (e.g. yourstudio.com) to your site? Type your domain below and click Connect.")}</p>
+                <p>{t("De technische koppeling (DNS) vergt een specifieke aanpak per domeinprovider — dit regelt de eigenaar van Nebula voor je. Je hoeft zelf niets in te stellen; zodra je domein live is (inclusief SSL) zie je dat hier vanzelf verschijnen.", "The technical part (DNS) needs a provider-specific approach — the owner of Nebula handles this for you. Nothing to set up yourself; once your domain is live (SSL included) it appears here automatically.")}</p>
               </div>
               {(pubData?.domains || []).map((d: any) => (
                 <div key={d.id} className="flex items-center justify-between gap-2 border rounded-md px-3 py-2 mb-2">
                   <div className="min-w-0">
                     <div className="text-sm font-medium break-all">{d.domain}</div>
-                    <div className={`text-[11px] ${d.status === "active" ? "text-emerald-600" : "text-amber-600"}`}>{d.status === "active" ? "● Live (SSL actief)" : "○ Wordt gekoppeld door Nebula — je hoeft niets te doen"}</div>
+                    <div className={`text-[11px] ${d.status === "active" ? "text-emerald-600" : "text-amber-600"}`}>{d.status === "active" ? t("● Live (SSL actief)", "● Live (SSL active)") : t("○ Wordt gekoppeld door Nebula — je hoeft niets te doen", "○ Being connected by Nebula — nothing for you to do")}</div>
                   </div>
                   <div className="flex items-center gap-1 shrink-0">
                     {d.status !== "active" && (
                       <Button variant="outline" size="sm" className="h-7" disabled={pubBusy} onClick={async () => {
                         setPubBusy(true);
-                        try { const r = await fetch(`/api/projects/${projectId}/domains/${d.id}/verify`, { method: "POST" }); const j = await r.json(); if (!j.ok) window.alert(j.detail || "Nog niet geverifieerd."); await reloadPublish(); } catch { /* ignore */ } finally { setPubBusy(false); }
-                      }}>Verifiëren</Button>
+                        try { const r = await fetch(`/api/projects/${projectId}/domains/${d.id}/verify`, { method: "POST" }); const j = await r.json(); if (!j.ok) window.alert(j.detail || t("Nog niet geverifieerd.", "Not verified yet.")); await reloadPublish(); } catch { /* ignore */ } finally { setPubBusy(false); }
+                      }}>{t("Verifiëren", "Verify")}</Button>
                     )}
                     <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive" disabled={pubBusy} onClick={async () => {
-                      if (!window.confirm("Dit domein loskoppelen?")) return;
+                      if (!window.confirm(t("Dit domein loskoppelen?", "Disconnect this domain?"))) return;
                       setPubBusy(true);
                       try { await fetch(`/api/projects/${projectId}/domains/${d.id}`, { method: "DELETE" }); await reloadPublish(); } catch { /* ignore */ } finally { setPubBusy(false); }
                     }}><X className="h-3.5 w-3.5" /></Button>
@@ -2789,17 +2793,17 @@ export function ProjectWorkspace() {
                     if (res.ok && d.ok) { setNewDomain(""); await reloadPublish(); } else window.alert(d.error || "Koppelen mislukt.");
                   } catch { window.alert("Koppelen mislukt."); }
                   finally { setPubBusy(false); }
-                }}>Koppelen</Button>
+                }}>{t("Koppelen", "Connect")}</Button>
               </div>
               {(pubData?.domains || []).length > 0 && (
                 <div className="mt-4 pt-3 border-t">
                   <p className="text-xs text-muted-foreground mb-2">
                     {pubData?.hasChanges
-                      ? "Je hebt wijzigingen gemaakt sinds de laatste publicatie — republiceer om ze live te zetten op je gekoppelde domein."
-                      : "Iets aangepast? Republiceer om het live te zetten op je gekoppelde domein."}
+                      ? t("Je hebt wijzigingen gemaakt sinds de laatste publicatie — republiceer om ze live te zetten op je gekoppelde domein.", "You've made changes since the last publish — republish to put them live on your connected domain.")
+                      : t("Iets aangepast? Republiceer om het live te zetten op je gekoppelde domein.", "Changed something? Republish to put it live on your connected domain.")}
                   </p>
                   <Button size="sm" variant={pubData?.hasChanges ? "default" : "outline"} disabled={pubBusy} onClick={() => void doPublish()}>
-                    <Rocket className="h-3.5 w-3.5 mr-1.5" /> Republiceren
+                    <Rocket className="h-3.5 w-3.5 mr-1.5" /> {t("Republiceren", "Republish")}
                   </Button>
                 </div>
               )}
@@ -2821,8 +2825,8 @@ export function ProjectWorkspace() {
           <div className="absolute inset-0 z-[95] flex items-center justify-center bg-primary/10 border-2 border-dashed border-primary pointer-events-none">
             <div className="rounded-2xl bg-background/95 shadow-xl px-6 py-4 text-center">
               <ImagePlus className="h-7 w-7 text-primary mx-auto" />
-              <p className="mt-2 font-semibold text-foreground">Laat los om naar Claude te sturen</p>
-              <p className="text-xs text-muted-foreground">Elk bestandstype — afbeeldingen, PDF's, teksten…</p>
+              <p className="mt-2 font-semibold text-foreground">{t("Laat los om naar Claude te sturen", "Drop to send to Claude")}</p>
+              <p className="text-xs text-muted-foreground">{t("Elk bestandstype — afbeeldingen, PDF's, teksten…", "Any file type — images, PDFs, texts…")}</p>
             </div>
           </div>
         )}
@@ -2833,13 +2837,13 @@ export function ProjectWorkspace() {
             <span className="font-semibold text-white/90">Claude Code</span>
             <span className={`ml-1 inline-flex items-center gap-1 ${claudeConnected ? "text-emerald-400" : "text-amber-300"}`}>
               <span className={`h-1.5 w-1.5 rounded-full ${claudeConnected ? "bg-emerald-400" : "bg-amber-300"}`} />
-              {claudeConnected ? "gekoppeld" : "niet gekoppeld"}
+              {claudeConnected ? t("gekoppeld", "connected") : t("niet gekoppeld", "not connected")}
             </span>
             {termStatus === "open" && <span className="ml-1 text-white/40">· live</span>}
             <div className="ml-auto flex items-center gap-2">
-              <a href="/uitleg" target="_blank" rel="noreferrer" className="text-[11px] text-white/60 hover:text-white inline-flex items-center gap-1" title="Uitleg openen in nieuw tabblad" data-testid="button-claude-tutorial"><HelpCircle className="h-3.5 w-3.5" /> Uitleg</a>
+              <a href="/uitleg" target="_blank" rel="noreferrer" className="text-[11px] text-white/60 hover:text-white inline-flex items-center gap-1" title={t("Uitleg openen in nieuw tabblad", "Open the guide in a new tab")} data-testid="button-claude-tutorial"><HelpCircle className="h-3.5 w-3.5" /> {t("Uitleg", "Guide")}</a>
               {claudeConnected && (
-                <button type="button" onClick={disconnectClaudeCode} disabled={claudeDisc} className="text-[11px] text-white/60 hover:text-red-300 inline-flex items-center gap-1 disabled:opacity-50" title="Claude ontkoppelen" data-testid="button-claude-disconnect"><Unplug className="h-3.5 w-3.5" /> Ontkoppelen</button>
+                <button type="button" onClick={disconnectClaudeCode} disabled={claudeDisc} className="text-[11px] text-white/60 hover:text-red-300 inline-flex items-center gap-1 disabled:opacity-50" title={t("Claude ontkoppelen", "Disconnect Claude")} data-testid="button-claude-disconnect"><Unplug className="h-3.5 w-3.5" /> {t("Ontkoppelen", "Disconnect")}</button>
               )}
               <button type="button" onClick={() => setTermGen((g) => g + 1)} className="text-[11px] text-white/50 hover:text-white inline-flex items-center gap-1" title="Terminal opnieuw verbinden" data-testid="button-terminal-reconnect"><RefreshCw className="h-3 w-3" /></button>
             </div>
@@ -2907,11 +2911,11 @@ export function ProjectWorkspace() {
                         return !v;
                       });
                     }}
-                    title="Sleep een kader over de preview om er een schermafbeelding van te maken en naar Claude te sturen"
+                    title={t("Sleep een kader over de preview om er een schermafbeelding van te maken en naar Claude te sturen", "Drag a box over the preview to take a screenshot of it and send it to Claude")}
                     data-testid="button-select-edit"
                   >
                     <MousePointerClick className="h-3.5 w-3.5 mr-1.5" />
-                    {selectMode ? "Klaar met markeren" : "Markeren"}
+                    {selectMode ? t("Klaar met markeren", "Done marking") : t("Markeren", "Mark")}
                   </Button>
                 )}
                 {!isStreaming && activeTab === "preview" && previewHtml && (
@@ -2920,7 +2924,7 @@ export function ProjectWorkspace() {
                     size="sm"
                     className="h-8 text-muted-foreground hover:text-foreground"
                     onClick={() => setPreviewFullscreen(true)}
-                    title="Bekijk op volledig scherm"
+                    title={t("Bekijk op volledig scherm", "View full screen")}
                     data-testid="button-fullscreen"
                   >
                     <Maximize2 className="h-3.5 w-3.5 mr-1.5" />
@@ -2943,11 +2947,11 @@ export function ProjectWorkspace() {
                     variant={seoAuto ? "default" : "ghost"}
                     size="sm"
                     className="h-8"
-                    title="Automatisch periodiek SEO-artikelen publiceren aan/uit"
+                    title={t("Automatisch periodiek SEO-artikelen publiceren aan/uit", "Automatically publish SEO articles on/off")}
                     onClick={async () => {
                       const next = !seoAuto;
                       // Turning it OFF is a deliberate choice — confirm first (turning on is free).
-                      if (!next && !window.confirm("Weet je zeker dat je automatische SEO wilt uitzetten? Er worden dan geen nieuwe artikelen meer geschreven en gepubliceerd, wat je vindbaarheid in Google kan schaden.")) return;
+                      if (!next && !window.confirm(t("Weet je zeker dat je automatische SEO wilt uitzetten? Er worden dan geen nieuwe artikelen meer geschreven en gepubliceerd, wat je vindbaarheid in Google kan schaden.", "Are you sure you want to turn off automatic SEO? No new articles will be written and published, which can hurt your Google visibility."))) return;
                       setSeoAuto(next);
                       try {
                         await fetch(`/api/projects/${projectId}/seo/auto`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled: next }) });
@@ -2970,7 +2974,7 @@ export function ProjectWorkspace() {
                     <button
                       onClick={() => void handleExtractComponents()}
                       disabled={isExtracting}
-                      title="Analyseer pagina's en extraheer gedeelde componenten, stijlen en scripts"
+                      title={t("Analyseer pagina's en extraheer gedeelde componenten, stijlen en scripts", "Analyse pages and extract shared components, styles and scripts")}
                       className="text-muted-foreground/40 hover:text-muted-foreground transition-colors disabled:opacity-30"
                     >
                       {isExtracting
@@ -3141,7 +3145,7 @@ export function ProjectWorkspace() {
                               {addCount > 0 && <span className="text-emerald-400">+{addCount} regels</span>}
                               {delCount > 0 && <span className="text-rose-400">−{delCount} regels</span>}
                               {hunks.length > 0 && (
-                                <span className="text-gray-500">{hunks.length} {hunks.length === 1 ? "sectie" : "secties"} gewijzigd — klik om te markeren</span>
+                                <span className="text-gray-500">{hunks.length} {hunks.length === 1 ? t("sectie", "section") : t("secties", "sections")} {t("gewijzigd — klik om te markeren", "changed — click to highlight")}</span>
                               )}
                               {activeDiffHunks.size > 0 && (
                                 <button
@@ -3264,7 +3268,7 @@ export function ProjectWorkspace() {
                       size="sm"
                       className="absolute top-3 right-3 z-[60] shadow-lg"
                       onClick={() => setPreviewFullscreen(false)}
-                      title="Sluit volledig scherm (Esc)"
+                      title={t("Sluit volledig scherm (Esc)", "Exit full screen (Esc)")}
                       data-testid="button-exit-fullscreen"
                     >
                       <Minimize2 className="h-3.5 w-3.5 mr-1.5" />
@@ -3276,15 +3280,15 @@ export function ProjectWorkspace() {
                   {blogOpen && (
                     <div className="absolute inset-0 z-[80] flex items-center justify-center bg-black/40 p-4" onClick={() => { if (!blogBusy) setBlogOpen(false); }}>
                       <div className="w-[min(560px,94%)] rounded-xl bg-background border shadow-2xl p-5" onClick={(e) => e.stopPropagation()}>
-                        <h3 className="text-base font-semibold mb-3">Nieuwe blogpost</h3>
-                        <label className="block text-xs text-muted-foreground mb-1">Titel</label>
+                        <h3 className="text-base font-semibold mb-3">{t("Nieuwe blogpost", "New blog post")}</h3>
+                        <label className="block text-xs text-muted-foreground mb-1">{t("Titel", "Title")}</label>
                         <input className="w-full mb-3 rounded-md border bg-background px-3 py-2 text-sm" value={blogTitle} onChange={(e) => setBlogTitle(e.target.value)} placeholder="bijv. 5 tips voor beginners" data-testid="input-blog-title" />
-                        <label className="block text-xs text-muted-foreground mb-1">Tekst</label>
+                        <label className="block text-xs text-muted-foreground mb-1">{t("Tekst", "Text")}</label>
                         <textarea className="w-full mb-3 rounded-md border bg-background px-3 py-2 text-sm h-48 resize-y" value={blogBody} onChange={(e) => setBlogBody(e.target.value)} placeholder="Schrijf hier je blog… (een lege regel = nieuwe alinea)" data-testid="input-blog-body" />
-                        <label className="block text-xs text-muted-foreground mb-1">Afbeelding-URL (optioneel)</label>
+                        <label className="block text-xs text-muted-foreground mb-1">{t("Afbeelding-URL (optioneel)", "Image URL (optional)")}</label>
                         <input className="w-full mb-4 rounded-md border bg-background px-3 py-2 text-sm" value={blogImage} onChange={(e) => setBlogImage(e.target.value)} placeholder="https://…" data-testid="input-blog-image" />
                         <div className="flex justify-end gap-2">
-                          <Button variant="ghost" size="sm" disabled={blogBusy} onClick={() => setBlogOpen(false)}>Annuleren</Button>
+                          <Button variant="ghost" size="sm" disabled={blogBusy} onClick={() => setBlogOpen(false)}>{t("Annuleren", "Cancel")}</Button>
                           <Button
                             size="sm"
                             disabled={blogBusy || !blogTitle.trim() || !blogBody.trim()}
@@ -3295,12 +3299,12 @@ export function ProjectWorkspace() {
                                 const res = await fetch(`/api/projects/${projectId}/blog/manual`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: blogTitle, body: blogBody, image: blogImage }) });
                                 const d = await res.json();
                                 if (res.ok && d.ok) { setBlogOpen(false); await refreshAfterEdit(); setPreviewPage("blog.html"); setPreviewKey((k) => k + 1); }
-                                else window.alert(d.error || "Publiceren mislukt.");
-                              } catch { window.alert("Publiceren mislukt."); }
+                                else window.alert(d.error || t("Publiceren mislukt.", "Publishing failed."));
+                              } catch { window.alert(t("Publiceren mislukt.", "Publishing failed.")); }
                               finally { setBlogBusy(false); }
                             }}
                           >
-                            {blogBusy ? "Bezig…" : "Publiceren"}
+                            {blogBusy ? t("Bezig…", "Working…") : t("Publiceren", "Publish")}
                           </Button>
                         </div>
                       </div>
@@ -3318,7 +3322,7 @@ export function ProjectWorkspace() {
                       data-testid="marquee-overlay"
                     >
                       <div className="absolute top-3 left-1/2 -translate-x-1/2 rounded-full bg-primary text-primary-foreground text-xs font-medium px-4 py-2 shadow-lg pointer-events-none">
-                        {capturing ? "Schermafbeelding maken…" : "Houd ingedrukt en sleep een kader — laat los voor een schermafbeelding"}
+                        {capturing ? t("Schermafbeelding maken…", "Taking a screenshot…") : t("Houd ingedrukt en sleep een kader — laat los voor een schermafbeelding", "Press and drag a box — release for a screenshot")}
                       </div>
                       {marquee && (
                         <div
@@ -3333,19 +3337,19 @@ export function ProjectWorkspace() {
                     <div className="absolute inset-0 z-[67] flex items-center justify-center bg-background/75 backdrop-blur-sm p-4">
                       <div className="w-[min(460px,94%)] rounded-2xl border border-border bg-card shadow-2xl p-6 text-center">
                         <div className="h-11 w-11 rounded-xl bg-primary/10 flex items-center justify-center mx-auto"><Wand2 className="h-5 w-5 text-primary" /></div>
-                        <h3 className="mt-3 text-lg font-bold tracking-tight">Maak je website met Claude Code</h3>
+                        <h3 className="mt-3 text-lg font-bold tracking-tight">{t("Maak je website met Claude Code", "Build your website with Claude Code")}</h3>
                         {claudeConnected ? (
                           <>
-                            <p className="mt-1 text-sm text-muted-foreground">Beschrijf wat voor website je wilt — Claude Code bouwt 'm voor je.</p>
+                            <p className="mt-1 text-sm text-muted-foreground">{t("Beschrijf wat voor website je wilt — Claude Code bouwt 'm voor je.", "Describe the website you want — Claude Code builds it for you.")}</p>
                             <textarea value={buildPrompt} onChange={(e) => setBuildPrompt(e.target.value)} rows={3} placeholder="bijv. een strakke website voor mijn kapsalon met openingstijden, prijzen en een contactpagina" className="mt-3 w-full rounded-xl border border-border bg-background px-3 py-2 text-sm resize-none outline-none focus:border-primary" data-testid="input-build-prompt" />
                             <Button className="mt-3 w-full h-11 font-bold gap-2" disabled={!buildPrompt.trim()} onClick={startBuild} data-testid="button-build-site"><Wand2 className="h-4 w-4" /> Bouw mijn website</Button>
-                            <button type="button" className="mt-2 text-xs text-muted-foreground hover:text-foreground" onClick={() => setBuildDismissed(true)}>Ik doe het zelf in de terminal</button>
+                            <button type="button" className="mt-2 text-xs text-muted-foreground hover:text-foreground" onClick={() => setBuildDismissed(true)}>{t("Ik doe het zelf in de terminal", "I'll do it myself in the terminal")}</button>
                           </>
                         ) : (
                           <>
-                            <p className="mt-1 text-sm text-muted-foreground">Koppel eerst Claude Code: log links in de terminal in. Daarna typ je hier wat voor website je wilt.</p>
-                            <div className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-amber-50 border border-amber-300/60 text-amber-900 text-xs font-medium px-3 py-1.5"><TerminalIcon className="h-3.5 w-3.5" /> Nog niet gekoppeld</div>
-                            <div className="mt-3"><a href="/uitleg" target="_blank" rel="noreferrer" className="text-sm font-medium text-primary hover:underline">Hoe koppel ik Claude Code?</a></div>
+                            <p className="mt-1 text-sm text-muted-foreground">{t("Koppel eerst Claude Code: log links in de terminal in. Daarna typ je hier wat voor website je wilt.", "Connect Claude Code first: log in in the terminal on the left. Then type here what website you want.")}</p>
+                            <div className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-amber-50 border border-amber-300/60 text-amber-900 text-xs font-medium px-3 py-1.5"><TerminalIcon className="h-3.5 w-3.5" /> {t("Nog niet gekoppeld", "Not connected yet")}</div>
+                            <div className="mt-3"><a href="/uitleg" target="_blank" rel="noreferrer" className="text-sm font-medium text-primary hover:underline">{t("Hoe koppel ik Claude Code?", "How do I connect Claude Code?")}</a></div>
                           </>
                         )}
                       </div>
@@ -3356,7 +3360,7 @@ export function ProjectWorkspace() {
                     <div className="absolute inset-0 z-[68] flex items-center justify-center bg-background/70 backdrop-blur-sm">
                       <div className="rounded-2xl bg-background border border-border shadow-xl px-6 py-4 flex items-center gap-3">
                         <Loader2 className="h-5 w-5 animate-spin text-primary" />
-                        <span className="text-sm font-medium text-foreground">Schermafbeelding maken…</span>
+                        <span className="text-sm font-medium text-foreground">{t("Schermafbeelding maken…", "Taking a screenshot…")}</span>
                       </div>
                     </div>
                   )}
@@ -3364,11 +3368,11 @@ export function ProjectWorkspace() {
                   {shots.length > 0 && (
                     <div className="absolute bottom-3 left-3 right-3 z-[66] rounded-xl border border-border bg-background/95 backdrop-blur shadow-xl p-3">
                       <div className="flex items-center gap-2 mb-2">
-                        <span className="text-xs font-semibold text-foreground">{shots.length} bestand{shots.length > 1 ? "en" : ""} klaar</span>
-                        <span className="text-[11px] text-muted-foreground">— sleep bestanden hierheen of plak een screenshot</span>
+                        <span className="text-xs font-semibold text-foreground">{shots.length} {shots.length > 1 ? t("bestanden", "files") : t("bestand", "file")} {t("klaar", "ready")}</span>
+                        <span className="text-[11px] text-muted-foreground">{t("— sleep bestanden hierheen of plak een screenshot", "— drag files here or paste a screenshot")}</span>
                         <div className="ml-auto flex items-center gap-2">
                           <Button size="sm" className="h-7" disabled={sendingShots || !claudeConnected} onClick={sendShotsToClaude} data-testid="button-send-shots">
-                            {sendingShots ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Send className="h-3.5 w-3.5 mr-1" />} Stuur naar Claude
+                            {sendingShots ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Send className="h-3.5 w-3.5 mr-1" />} {t("Stuur naar Claude", "Send to Claude")}
                           </Button>
                         </div>
                       </div>
@@ -3382,7 +3386,7 @@ export function ProjectWorkspace() {
                           </div>
                         ))}
                       </div>
-                      {!claudeConnected && <p className="text-[11px] text-amber-600 mt-2">Koppel eerst Claude om deze naar de editor te sturen.</p>}
+                      {!claudeConnected && <p className="text-[11px] text-amber-600 mt-2">{t("Koppel eerst Claude om deze naar de editor te sturen.", "Connect Claude first to send these to the editor.")}</p>}
                     </div>
                   )}
                   {pointSent && (
@@ -3418,12 +3422,12 @@ export function ProjectWorkspace() {
                             />
                             <div className="space-y-2">
                               <div className="flex items-center gap-2">
-                                <span className="text-xs text-muted-foreground w-20 shrink-0">Tekstkleur</span>
+                                <span className="text-xs text-muted-foreground w-20 shrink-0">{t("Tekstkleur", "Text colour")}</span>
                                 <input
                                   type="color"
                                   className="h-7 w-9 rounded border bg-transparent cursor-pointer p-0"
                                   onChange={(e) => void applyElementColor("color", e.target.value)}
-                                  title="Kies de tekstkleur met de kleurenkiezer"
+                                  title={t("Kies de tekstkleur met de kleurenkiezer", "Pick the text colour with the colour picker")}
                                 />
                                 <input
                                   type="text"
@@ -3431,16 +3435,16 @@ export function ProjectWorkspace() {
                                   spellCheck={false}
                                   className="h-7 w-24 rounded border bg-transparent px-2 text-xs font-mono"
                                   onKeyDown={(e) => { if (e.key === "Enter") { const h = normHex((e.target as HTMLInputElement).value); if (h) void applyElementColor("color", h); } }}
-                                  title="Typ een hex-kleur (bijv. #59A886) en druk op Enter"
+                                  title={t("Typ een hex-kleur (bijv. #59A886) en druk op Enter", "Type a hex colour (e.g. #59A886) and press Enter")}
                                 />
                               </div>
                               <div className="flex items-center gap-2">
-                                <span className="text-xs text-muted-foreground w-20 shrink-0">Achtergrond</span>
+                                <span className="text-xs text-muted-foreground w-20 shrink-0">{t("Achtergrond", "Background")}</span>
                                 <input
                                   type="color"
                                   className="h-7 w-9 rounded border bg-transparent cursor-pointer p-0"
                                   onChange={(e) => void applyElementColor("background", e.target.value)}
-                                  title="Kies de achtergrondkleur met de kleurenkiezer"
+                                  title={t("Kies de achtergrondkleur met de kleurenkiezer", "Pick the background colour with the colour picker")}
                                 />
                                 <input
                                   type="text"
@@ -3448,10 +3452,10 @@ export function ProjectWorkspace() {
                                   spellCheck={false}
                                   className="h-7 w-24 rounded border bg-transparent px-2 text-xs font-mono"
                                   onKeyDown={(e) => { if (e.key === "Enter") { const h = normHex((e.target as HTMLInputElement).value); if (h) void applyElementColor("background", h); } }}
-                                  title="Typ een hex-kleur (bijv. #ffffff) en druk op Enter"
+                                  title={t("Typ een hex-kleur (bijv. #ffffff) en druk op Enter", "Type a hex colour (e.g. #ffffff) and press Enter")}
                                 />
                               </div>
-                              <p className="text-[11px] text-muted-foreground">Tip: typ een hex-code en druk op <span className="font-medium">Enter</span>.</p>
+                              <p className="text-[11px] text-muted-foreground">{t("Tip: typ een hex-code en druk op Enter.", "Tip: type a hex code and press Enter.")}</p>
                             </div>
                           </div>
                         ) : (
@@ -3479,11 +3483,11 @@ export function ProjectWorkspace() {
                             {editValue.startsWith("data:image") && (
                               <img src={editValue} alt="Voorbeeld" className="mx-auto max-h-32 rounded border object-contain" />
                             )}
-                            <div className="text-center text-[11px] text-muted-foreground">of plak een afbeeldings-URL</div>
+                            <div className="text-center text-[11px] text-muted-foreground">{t("of plak een afbeeldings-URL", "or paste an image URL")}</div>
                             <input
                               value={editValue.startsWith("data:image") ? "" : editValue}
                               onChange={(e) => setEditValue(e.target.value)}
-                              placeholder="https://… nieuwe afbeeldings-URL"
+                              placeholder={t("https://… nieuwe afbeeldings-URL", "https://… new image URL")}
                               className="w-full rounded-md border bg-transparent px-3 py-2 text-sm"
                             />
                           </div>
@@ -3499,7 +3503,7 @@ export function ProjectWorkspace() {
                             size="sm"
                             onClick={sendSelectionToChat}
                             disabled={applyingEdit}
-                            title="Stuur de kenmerken van dit element naar de chat zodat de AI het begrijpt"
+                            title={t("Stuur de kenmerken van dit element naar de chat zodat de AI het begrijpt", "Send this element's details to the chat so the AI understands it")}
                           >
                             <Wand2 className="h-3.5 w-3.5 mr-1.5" />
                             Met AI aanpassen
