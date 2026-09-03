@@ -12,7 +12,7 @@ import { runAgentEdit } from "../lib/agent-editor.js";
 import { unlazyImages, RENDER_FIX_STYLE, NEBULA_RESTYLE_PATH, BOOK_FLOAT_BUTTON, showBookButtonOn, TICKER_SCRIPT } from "../lib/host-site.js";
 import { smtpConfigFromEnv, sendMail } from "../lib/smtp.js";
 import { resolvePublishedDomain } from "../lib/seo.js";
-import { createBackup, backupStatus, restoreBackup, restoreAsNewProject } from "../lib/project-backups.js";
+import { createBackup, backupStatus, restoreBackup, restoreAsNewProject, deleteBackup } from "../lib/project-backups.js";
 import { projectBackups } from "@workspace/db";
 import {
   CreateProjectBody,
@@ -3708,6 +3708,16 @@ router.post("/backups/:backupId/restore-new", async (req, res) => {
   if (!u) { res.status(401).json({ error: "Niet ingelogd." }); return; }
   try { const id = await restoreAsNewProject(backupId, u.id); if (!id) { res.status(404).json({ error: "Back-up niet gevonden." }); return; } res.json({ ok: true, projectId: id }); }
   catch (err) { req.log.error({ err }, "[backups] restore-new failed"); res.status(500).json({ error: "Herstellen mislukt." }); }
+});
+
+// Permanently delete a back-up (the UI double-confirms — a deleted restore point can't come back).
+router.delete("/backups/:backupId", async (req, res) => {
+  const backupId = Number(req.params.backupId);
+  if (isNaN(backupId)) { res.status(400).json({ error: "Invalid ID" }); return; }
+  const u = await currentUser(req);
+  if (!u) { res.status(401).json({ error: "Niet ingelogd." }); return; }
+  try { res.json({ ok: await deleteBackup(backupId, u.id) }); }
+  catch (err) { req.log.error({ err }, "[backups] delete failed"); res.status(500).json({ error: "Verwijderen mislukt." }); }
 });
 
 router.get("/projects/:projectId/messages", async (req, res) => {

@@ -100,6 +100,17 @@ export async function restoreAsNewProject(backupId: number, ownerId: number): Pr
   return proj.id;
 }
 
+/** Permanently delete one back-up. Only the owner's rows (ownerless legacy rows are cleanable by
+ *  any logged-in owner, matching the restore access rule). Returns whether a row was deleted. */
+export async function deleteBackup(backupId: number, ownerId: number): Promise<boolean> {
+  const [bk] = await db.select({ id: projectBackups.id, ownerId: projectBackups.ownerId })
+    .from(projectBackups).where(eq(projectBackups.id, backupId));
+  if (!bk || (bk.ownerId != null && bk.ownerId !== ownerId)) return false;
+  await db.delete(projectBackups).where(eq(projectBackups.id, backupId));
+  logger.info({ backupId, ownerId }, "[backups] deleted");
+  return true;
+}
+
 // ── Scheduler: back up projects ~5 min after their last change ──────────────────────────────────
 let started = false;
 export function startBackupScheduler(): void {
