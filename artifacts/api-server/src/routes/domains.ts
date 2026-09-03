@@ -60,7 +60,7 @@ router.post("/projects/:id/publish", json({ limit: "16kb" }), async (req, res) =
 router.get("/projects/:id/domains", async (req, res) => {
   const projectId = Number(req.params.id);
   if (isNaN(projectId)) { res.status(400).json({ error: "Invalid project ID" }); return; }
-  try { res.json({ target: CUSTOMERS_TARGET, domains: await listDomains(projectId) }); }
+  try { res.json({ target: CUSTOMERS_TARGET, redirectSupported: true, domains: await listDomains(projectId) }); }
   catch (err) { logger.error({ err, projectId }, "[domains] list failed"); res.status(500).json({ error: "Ophalen mislukt." }); }
 });
 
@@ -69,7 +69,7 @@ router.post("/projects/:id/domains", json({ limit: "16kb" }), async (req, res) =
   if (isNaN(projectId)) { res.status(400).json({ error: "Invalid project ID" }); return; }
   try {
     if (!(await ownerSubscribed(projectId))) { res.status(402).json({ error: "Een eigen domein koppelen zit in het abonnement (€50/maand). Gratis publiceer je op een Nebula-adres (met watermerk). Abonneer je in je profiel." }); return; }
-    const row = await addDomain(projectId, String(req.body?.domain ?? ""));
+    const row = await addDomain(projectId, String(req.body?.domain ?? ""), req.body?.redirectTo ? String(req.body.redirectTo) : undefined);
     // The customer never sees DNS records: connecting a domain needs a provider-specific approach, so
     // the PLATFORM OWNER does the DNS work. Notify them by e-mail with the exact records to set
     // (full runbook: docs/DOMEIN-KOPPELEN.md). Best-effort — the request itself never fails on mail.

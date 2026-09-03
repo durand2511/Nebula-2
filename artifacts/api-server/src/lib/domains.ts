@@ -30,15 +30,19 @@ function validDomain(d: string): boolean {
 export type DomainRow = typeof domains.$inferSelect;
 
 /** Add a domain to a project (status pending). Throws on bad format / duplicate / unknown project. */
-export async function addDomain(projectId: number, raw: string): Promise<DomainRow> {
+export async function addDomain(projectId: number, raw: string, redirectTo?: string): Promise<DomainRow> {
   const domain = normalizeHost(raw);
   if (!validDomain(domain)) throw new Error("Ongeldige domeinnaam.");
   if (isReserved(domain)) throw new Error("Dit is een platform-domein en kan niet gekoppeld worden.");
+  // Optional SEO-redirect target ("host" of "host/pad"): the host router 301's this domain there
+  // once it verifies — used for expired domains with backlinks (e.g. webdesigncolor.com → platform).
+  const rt = String(redirectTo || "").trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/+$/, "");
+  if (rt && !/^[a-z0-9][a-z0-9.-]+[a-z0-9](\/[a-z0-9._~\/-]*)?$/.test(rt)) throw new Error("Ongeldig redirect-doel.");
   const [proj] = await db.select().from(projects).where(eq(projects.id, projectId));
   if (!proj) throw new Error("Project niet gevonden.");
   const [existing] = await db.select().from(domains).where(eq(domains.domain, domain));
   if (existing) throw new Error(existing.projectId === projectId ? "Dit domein is al toegevoegd." : "Dit domein is al aan een ander project gekoppeld.");
-  const [row] = await db.insert(domains).values({ projectId, domain, status: "pending" }).returning();
+  const [row] = await db.insert(domains).values({ projectId, domain, status: "pending", ...(rt ? { redirectTo: rt } : {}) }).returning();
   // Pre-register with Render so the TLS cert starts provisioning while the customer sets up DNS.
   if (renderConfigured()) { try { await addRenderDomain(domain); } catch { /* best-effort */ } }
   return row;
