@@ -36,6 +36,20 @@ export function Home() {
     t("Automatische SEO die elke dag voor je schrijft", "Automatic SEO that writes for you every day"),
     t("Jij bent eigenaar van je site — altijd", "You own your site — always"),
   ];
+  const canBuild = [
+    t("Websites", "Websites"),
+    t("Webshops", "Web shops"),
+    t("Boekingssystemen", "Booking systems"),
+    t("Web-apps op maat", "Custom web apps"),
+    t("Dashboards", "Dashboards"),
+    t("Klantportalen", "Customer portals"),
+    t("Landingspagina's", "Landing pages"),
+    t("Blogs & nieuws", "Blogs & news"),
+    t("Reserveringen & agenda's", "Reservations & calendars"),
+    t("Online betalingen", "Online payments"),
+    t("Ledenomgevingen", "Membership areas"),
+    t("Formulieren & aanmeldingen", "Forms & sign-ups"),
+  ];
   const included = [
     t("Onbeperkt bewerken met Claude Code", "Unlimited editing with Claude Code"),
     t("Boekingssysteem met iDEAL-betalingen", "Booking system with iDEAL payments"),
@@ -83,6 +97,29 @@ export function Home() {
             "Nebula builds your professional website — then you edit everything yourself by simply typing what should change. No expensive quotes, no waiting on a developer. Booking system, own domain and automatic SEO included. For one fixed monthly price.",
           )}
         </p>
+      </section>
+
+      {/* What Nebula can build — real web development via Claude Code, no limits */}
+      <section className="w-full max-w-3xl px-6 pb-16 text-center">
+        <h2 className="text-2xl md:text-[2rem] font-bold tracking-tight leading-[1.15] text-balance">
+          {t("Van simpele website tot complete web-app.", "From a simple website to a complete web app.")}
+        </h2>
+        <p className="mt-4 text-[16px] leading-relaxed text-muted-foreground max-w-2xl mx-auto">
+          {t(
+            "Nebula draait op Claude Code — echte webdevelopment. Alles wat een developer kan bouwen, bouw jij hier door het gewoon te vragen. Geen sjablonen die je vastzetten; elke functie en elk soort app is mogelijk.",
+            "Nebula runs on Claude Code — real web development. Anything a developer can build, you build here just by asking. No templates that box you in; every feature and every kind of app is possible.",
+          )}
+        </p>
+        <div className="mt-7 flex flex-wrap justify-center gap-2.5">
+          {canBuild.map((item) => (
+            <span key={item} className="rounded-full border border-white/60 bg-card/70 backdrop-blur px-4 py-2 text-sm font-medium text-foreground/80 shadow-[0_2px_10px_rgba(0,0,0,0.05)]">
+              {item}
+            </span>
+          ))}
+          <span className="rounded-full bg-foreground px-4 py-2 text-sm font-medium text-background">
+            {t("en alles daartussenin", "and everything in between")}
+          </span>
+        </div>
       </section>
 
       {/* Comparison */}
