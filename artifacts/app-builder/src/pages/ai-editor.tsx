@@ -129,7 +129,15 @@ export function AiEditor() {
     });
   }, []);
 
-  const onAuthSuccess = (token: string, u: PlatformUser) => { setToken(token); setUser(u); setF({ email: "", password: "", name: "", birthdate: "", phone: "" }); setAuthErr(null); refresh(); };
+  const onAuthSuccess = (token: string, u: PlatformUser) => {
+    setToken(token); setUser(u); setF({ email: "", password: "", name: "", birthdate: "", phone: "" }); setAuthErr(null); refresh();
+    // Resume an import that hit an expired session (see handleImport): prefill the URL so the user
+    // just clicks import again — or auto-retry it.
+    try {
+      const pending = sessionStorage.getItem("nebula_pending_import");
+      if (pending) { sessionStorage.removeItem("nebula_pending_import"); setUrl(pending); setNotice("Je bent weer ingelogd — klik op 'Website importeren' om verder te gaan."); }
+    } catch { /* ignore */ }
+  };
 
   const doLogin = async () => {
     setAuthBusy(true); setAuthErr(null);
@@ -170,10 +178,21 @@ export function AiEditor() {
       onSuccess: (p) => { refresh(); setLocation(`/projects/${p.id}`); },
       onError: (err: unknown) => {
         let message = "We konden deze website niet importeren. Controleer de URL en probeer het opnieuw.";
+        let status = 0;
         if (err && typeof err === "object") {
+          status = Number((err as { status?: unknown }).status) || 0;
           const data = (err as { data?: unknown }).data;
           const se = data && typeof data === "object" && "error" in data ? (data as { error?: unknown }).error : undefined;
           if (typeof se === "string" && se.trim()) message = se;
+        }
+        // Session lost (e.g. logged out in another tab) → don't dead-end on "Niet ingelogd".
+        // Send the user back to a clean login with their URL kept, so they can retry in one click.
+        if (status === 401 || /niet ingelogd|not logged in/i.test(message)) {
+          try { sessionStorage.setItem("nebula_pending_import", trimmed); } catch { /* ignore */ }
+          clearToken();
+          setUser(null);
+          setNotice("Je sessie was verlopen — log opnieuw in, dan gaat je import automatisch verder.");
+          return;
         }
         setError(message);
       },
