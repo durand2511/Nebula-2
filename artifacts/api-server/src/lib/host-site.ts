@@ -24,6 +24,55 @@ async function ownerSubscribed(projectId: number): Promise<boolean> {
   return hasPlatformAccess(u);
 }
 
+// Opt-in lead-capture widget (shown when the project has a leadEmail). A small fixed button opens a
+// compact form (naam/telefoon/e-mail/bericht) that POSTs to /api/projects/:id/lead → mailed to the
+// site owner. Self-contained (own CSS/JS), neutral styling that sits calmly on any site.
+function leadWidget(projectId: number): string {
+  return `<div id="nb-lead" data-pid="${projectId}"><style>
+#nb-lead{--nb:#1f2937;position:fixed;right:20px;bottom:20px;z-index:2147483000;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif}
+#nb-lead *{box-sizing:border-box}
+#nb-lead-btn{display:inline-flex;align-items:center;gap:8px;background:var(--nb);color:#fff;border:none;border-radius:999px;padding:13px 20px;font-size:14px;font-weight:600;cursor:pointer;box-shadow:0 8px 30px rgba(0,0,0,.22)}
+#nb-lead-btn:hover{transform:translateY(-1px)}
+#nb-lead-panel{display:none;position:absolute;right:0;bottom:60px;width:min(340px,86vw);background:#fff;color:var(--nb);border-radius:18px;box-shadow:0 20px 60px rgba(0,0,0,.28);padding:20px}
+#nb-lead.open #nb-lead-panel{display:block}
+#nb-lead h4{margin:0 0 4px;font-size:17px}
+#nb-lead p.nb-sub{margin:0 0 14px;font-size:13px;color:#6b7280;line-height:1.5}
+#nb-lead input,#nb-lead textarea{width:100%;border:1px solid #d7dbe0;border-radius:10px;padding:10px 12px;font-size:14px;margin-bottom:9px;font-family:inherit;color:var(--nb)}
+#nb-lead textarea{resize:vertical;min-height:64px}
+#nb-lead button.nb-send{width:100%;background:var(--nb);color:#fff;border:none;border-radius:10px;padding:11px;font-size:14px;font-weight:600;cursor:pointer}
+#nb-lead button.nb-send:disabled{opacity:.6}
+#nb-lead .nb-done{font-size:14px;color:#0f7a4d;padding:6px 0}
+#nb-lead .nb-err{font-size:12px;color:#c0392b;margin:-4px 0 8px}
+#nb-lead-close{position:absolute;top:12px;right:14px;border:none;background:none;font-size:18px;line-height:1;color:#9aa1aa;cursor:pointer}
+</style>
+<button id="nb-lead-btn" type="button" onclick="document.getElementById('nb-lead').classList.toggle('open')">Neem contact op</button>
+<div id="nb-lead-panel">
+<button id="nb-lead-close" type="button" onclick="document.getElementById('nb-lead').classList.remove('open')" aria-label="Sluiten">&times;</button>
+<h4>Interesse? Laat je gegevens achter</h4>
+<p class="nb-sub">Wil je een vrijblijvend gesprek? Vul je gegevens in en we nemen snel contact met je op.</p>
+<div id="nb-lead-form">
+<input id="nb-lead-name" type="text" placeholder="Je naam (optioneel)" autocomplete="name">
+<input id="nb-lead-phone" type="tel" placeholder="Je telefoonnummer" autocomplete="tel">
+<input id="nb-lead-email" type="email" placeholder="Je e-mailadres" autocomplete="email">
+<textarea id="nb-lead-msg" placeholder="Waar kunnen we je mee helpen? (optioneel)"></textarea>
+<div id="nb-lead-err" class="nb-err" style="display:none"></div>
+<button class="nb-send" type="button" id="nb-lead-send">Versturen</button>
+</div>
+</div>
+<script>(function(){var root=document.getElementById('nb-lead');var pid=root.getAttribute('data-pid');var send=document.getElementById('nb-lead-send');var err=document.getElementById('nb-lead-err');
+function show(m){err.textContent=m;err.style.display=m?'block':'none';}
+send.addEventListener('click',function(){
+var phone=document.getElementById('nb-lead-phone').value.trim();var email=document.getElementById('nb-lead-email').value.trim();
+var digits=phone.replace(/[^0-9]/g,'');var okmail=/^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/.test(email);
+if(digits.length<6&&!okmail){show('Vul je telefoonnummer of e-mailadres in.');return;}
+show('');send.disabled=true;send.textContent='Versturen…';
+fetch('/api/projects/'+pid+'/lead',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:document.getElementById('nb-lead-name').value.trim(),phone:phone,email:email,message:document.getElementById('nb-lead-msg').value.trim(),page:location.href})})
+.then(function(r){return r.json().catch(function(){return{};}).then(function(d){return{ok:r.ok,d:d};});})
+.then(function(x){if(x.ok){document.getElementById('nb-lead-form').innerHTML='<div class=\\'nb-done\\'>Bedankt! We nemen snel contact met je op.</div>';}else{show((x.d&&x.d.error)||'Versturen mislukt. Probeer het later opnieuw.');send.disabled=false;send.textContent='Versturen';}})
+.catch(function(){show('Versturen mislukt. Probeer het later opnieuw.');send.disabled=false;send.textContent='Versturen';});
+});})();</script></div>`;
+}
+
 // Big, non-removable watermark on FREE (unsubscribed) sites: a large diagonal band across the page
 // plus the clickable corner badge. Disappears once the owner subscribes (€50/mo).
 const NEBULA_WATERMARK = `<div aria-hidden="true" style="position:fixed;inset:0;z-index:2147483646;pointer-events:none;overflow:hidden;display:flex;align-items:center;justify-content:center"><span style="transform:rotate(-24deg);font:800 min(11vw,120px)/1 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:rgba(122,0,223,.14);white-space:nowrap;letter-spacing:.02em">Gemaakt met Nebula</span></div>`;
@@ -347,6 +396,14 @@ export async function serveProjectSite(projectId: number, req: Request, res: Res
     // page path (or comma list) to limit it to specific page(s).
     if (!isBookingApp && rows.some((r) => r.path === "booking-app.html") && showBookButtonOn(file.path, rows.find((r) => r.path === ".nebula-book-scope")?.content)) {
       content = /<\/body>/i.test(content) ? content.replace(/<\/body>/i, BOOK_FLOAT_BUTTON + "</body>") : content + BOOK_FLOAT_BUTTON;
+    }
+    // Opt-in lead-capture widget when the project has a leadEmail set (not on the booking-app page).
+    if (!isBookingApp) {
+      const [prj] = await db.select({ leadEmail: projects.leadEmail }).from(projects).where(eq(projects.id, projectId));
+      if (prj?.leadEmail) {
+        const w = leadWidget(projectId);
+        content = /<\/body>/i.test(content) ? content.replace(/<\/body>/i, w + "</body>") : content + w;
+      }
     }
     // Free (unsubscribed) sites carry a big non-removable Nebula watermark + a clickable corner badge.
     if (!(await ownerSubscribed(projectId))) {

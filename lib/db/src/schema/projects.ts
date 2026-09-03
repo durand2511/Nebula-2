@@ -46,6 +46,9 @@ export const projects = pgTable("projects", {
   name: text("name").notNull(),
   description: text("description").notNull().default(""),
   source: text("source").notNull().default("jordy"),
+  // Opt-in lead capture: when set to an e-mail address, the published site shows a floating
+  // "contact / laat je nummer achter" widget and submissions are mailed here (platform SMTP).
+  leadEmail: text("lead_email").notNull().default(""),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
@@ -93,6 +96,13 @@ export const projectStripe = pgTable("project_stripe", {
     .references(() => projects.id, { onDelete: "cascade" }),
   accountId: text("account_id").notNull(),
   chargesEnabled: text("charges_enabled").notNull().default("false"),
+  // Own-keys mode: the studio pays on its OWN Stripe account (no Connect). When secretKey is set
+  // it wins over the Connect accountId, and the booking app gets the custom in-app checkout
+  // (Payment Element: iDEAL + kaart) instead of hosted Checkout.
+  secretKey: text("secret_key").notNull().default(""),
+  publishableKey: text("publishable_key").notNull().default(""),
+  // Signing secret of the webhook endpoint we auto-create on the studio's own account (renewals).
+  webhookSecret: text("webhook_secret").notNull().default(""),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 

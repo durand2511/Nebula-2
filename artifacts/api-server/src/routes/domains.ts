@@ -112,4 +112,52 @@ router.delete("/projects/:id/domains/:domainId", async (req, res) => {
   catch (err) { logger.error({ err, projectId }, "[domains] delete failed"); res.status(500).json({ error: "Verwijderen mislukt." }); }
 });
 
+// ── Lead capture from a published customer site ────────────────────────────────────────────────
+// Public endpoint the floating lead widget POSTs to. Mails the submission to the project's leadEmail
+// via the platform SMTP. Lightly rate-limited per IP so it can't be abused as a mail relay.
+const leadHits = new Map<string, number[]>();
+function leadRateOk(ip: string): boolean {
+  const now = Date.now(), win = 10 * 60 * 1000, max = 5;
+  const arr = (leadHits.get(ip) || []).filter((t) => now - t < win);
+  if (arr.length >= max) { leadHits.set(ip, arr); return false; }
+  arr.push(now); leadHits.set(ip, arr); return true;
+}
+const escLead = (s: string) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c] as string));
+
+router.post("/projects/:id/lead", json({ limit: "16kb" }), async (req, res) => {
+  const projectId = Number(req.params.id);
+  if (isNaN(projectId)) { res.status(400).json({ error: "Invalid project ID" }); return; }
+  const ip = String(req.headers["x-forwarded-for"] || "").split(",")[0].trim() || req.socket.remoteAddress || "?";
+  if (!leadRateOk(ip)) { res.status(429).json({ error: "Te veel aanvragen. Probeer het straks opnieuw." }); return; }
+  const name = String(req.body?.name ?? "").trim().slice(0, 120);
+  const phone = String(req.body?.phone ?? "").trim().slice(0, 40);
+  const email = String(req.body?.email ?? "").trim().slice(0, 160);
+  const message = String(req.body?.message ?? "").trim().slice(0, 2000);
+  const page = String(req.body?.page ?? "").trim().slice(0, 300);
+  const okPhone = phone.replace(/\D/g, "").length >= 6;
+  const okEmail = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email);
+  if (!okPhone && !okEmail) { res.status(400).json({ error: "Vul een telefoonnummer of e-mailadres in." }); return; }
+  try {
+    const [prj] = await db.select({ leadEmail: projects.leadEmail, name: projects.name }).from(projects).where(eq(projects.id, projectId));
+    if (!prj?.leadEmail) { res.status(404).json({ error: "Contactformulier niet actief." }); return; }
+    const cfg = smtpConfigFromEnv();
+    if (!cfg) { logger.warn({ projectId }, "[lead] no platform SMTP configured"); res.status(500).json({ error: "Versturen kon niet. Probeer het later opnieuw." }); return; }
+    const rows = [
+      name && `Naam: ${name}`,
+      phone && `Telefoon: ${phone}`,
+      email && `E-mail: ${email}`,
+      message && `Bericht: ${message}`,
+      page && `Pagina: ${page}`,
+    ].filter(Boolean) as string[];
+    const html = `<div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;max-width:560px">`
+      + `<h2 style="margin:0 0 12px">📩 Nieuwe aanvraag via ${escLead(prj.name || "je website")}</h2>`
+      + rows.map((r) => `<p style="margin:4px 0">${escLead(r)}</p>`).join("")
+      + `</div>`;
+    const text = `Nieuwe aanvraag via ${prj.name}\n\n${rows.join("\n")}`;
+    await sendMail(cfg, { to: prj.leadEmail, subject: `📩 Nieuwe aanvraag via ${prj.name}`, html, text, fromName: prj.name || "Nebula" });
+    logger.info({ projectId, to: prj.leadEmail }, "[lead] submission mailed");
+    res.json({ ok: true });
+  } catch (err) { logger.error({ err, projectId }, "[lead] send failed"); res.status(500).json({ error: "Versturen kon niet. Probeer het later opnieuw." }); }
+});
+
 export default router;
