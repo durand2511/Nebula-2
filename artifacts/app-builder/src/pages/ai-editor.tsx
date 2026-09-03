@@ -13,7 +13,7 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { ArrowRight, Globe, Loader2, FileCode, MessageSquare, Clock, Trash2, Sparkles, Palette, Rocket, User as UserIcon, LogOut, X, CreditCard, Check, Terminal as TerminalIcon, Unplug } from "lucide-react";
+import { ArrowRight, Globe, Loader2, FileCode, MessageSquare, Clock, Trash2, Sparkles, Palette, Rocket, User as UserIcon, LogOut, X, CreditCard, Check, Terminal as TerminalIcon, Unplug, History } from "lucide-react";
 import logoUrl from "../assets/nebula-logo.png";
 import { getToken, setToken, clearToken, type PlatformUser } from "@/lib/session";
 
@@ -81,6 +81,7 @@ export function AiEditor() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [billingOpen, setBillingOpen] = useState(false);
+  const [backupsOpen, setBackupsOpen] = useState(false);
 
   // ── project/import state ──
   const [url, setUrl] = useState("");
@@ -258,6 +259,7 @@ export function AiEditor() {
             </div>
             <button className="w-full text-left rounded-lg px-3 py-2 hover:bg-muted/50 flex items-center gap-2" onClick={() => { setProfileOpen(true); setMenuOpen(false); }}><UserIcon className="h-4 w-4" /> {t("Profiel", "Profile")}</button>
             <button className="w-full text-left rounded-lg px-3 py-2 hover:bg-muted/50 flex items-center gap-2" onClick={() => { setBillingOpen(true); setMenuOpen(false); }} data-testid="menu-billing"><CreditCard className="h-4 w-4" /> {t("Abonnement", "Subscription")}</button>
+            <button className="w-full text-left rounded-lg px-3 py-2 hover:bg-muted/50 flex items-center gap-2" onClick={() => { setBackupsOpen(true); setMenuOpen(false); }} data-testid="menu-backups"><History className="h-4 w-4" /> {t("Back-ups", "Back-ups")}</button>
             <button className="w-full text-left rounded-lg px-3 py-2 hover:bg-muted/50 flex items-center gap-2" onClick={doAdminUnlock} data-testid="menu-admin-unlock"><Sparkles className="h-4 w-4" /> Admin code</button>
             <button className="w-full text-left rounded-lg px-3 py-2 hover:bg-muted/50 flex items-center gap-2 text-destructive" onClick={doLogout}><LogOut className="h-4 w-4" /> {t("Uitloggen", "Log out")}</button>
           </div>
@@ -316,6 +318,7 @@ export function AiEditor() {
 
       <ProfileDialog open={profileOpen} onClose={() => setProfileOpen(false)} user={user} onSaved={(u) => setUser(u)} onDeleted={() => { clearToken(); setUser(null); setProfileOpen(false); refresh(); }} />
       <BillingDialog open={billingOpen} onClose={() => setBillingOpen(false)} />
+      <BackupsDialog open={backupsOpen} onClose={() => setBackupsOpen(false)} onOpenProject={(id) => setLocation(`/projects/${id}`)} onRestored={() => refresh()} />
 
       <AlertDialog open={confirmDel} onOpenChange={(open) => { if (!open) { setConfirmDel(false); deleteProject.reset(); } }}>
         <AlertDialogContent className="light bg-white border-neutral-200">
@@ -344,6 +347,80 @@ async function billingApi(path: string, body?: unknown): Promise<{ ok: boolean; 
   });
   const d = await r.json().catch(() => ({}));
   return { ok: r.ok, d };
+}
+
+// ── Back-ups (incl. van VERWIJDERDE projecten — herstel als nieuw project) ──
+function BackupsDialog({ open, onClose, onOpenProject, onRestored }: { open: boolean; onClose: () => void; onOpenProject: (id: number) => void; onRestored: () => void }) {
+  const { t } = useLang();
+  const [list, setList] = useState<any[] | null>(null);
+  const [busy, setBusy] = useState<number | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    setList(null);
+    fetch("/api/backups", { headers: { ...(getToken() ? { Authorization: `Bearer ${getToken()}` } : {}) } })
+      .then((r) => r.json()).then((d) => setList(d.backups || [])).catch(() => setList([]));
+  }, [open]);
+  if (!open) return null;
+  const restoreNew = async (backupId: number) => {
+    if (busy) return;
+    setBusy(backupId);
+    try {
+      const r = await fetch(`/api/backups/${backupId}/restore-new`, { method: "POST", headers: { ...(getToken() ? { Authorization: `Bearer ${getToken()}` } : {}) } });
+      const d = await r.json().catch(() => ({}));
+      if (r.ok && d.projectId) { onRestored(); onClose(); onOpenProject(d.projectId); }
+      else alert(d.error || t("Herstellen mislukt.", "Restore failed."));
+    } catch { alert(t("Herstellen mislukt.", "Restore failed.")); }
+    finally { setBusy(null); }
+  };
+  const deleteBackup = async (backupId: number) => {
+    if (busy) return;
+    if (!window.confirm(t("Deze back-up verwijderen?", "Delete this back-up?"))) return;
+    if (!window.confirm(t("Weet je het zeker? Een verwijderde back-up is definitief weg en kan NIET meer worden teruggezet.", "Are you sure? A deleted back-up is gone for good and can NOT be restored."))) return;
+    setBusy(backupId);
+    try {
+      const r = await fetch(`/api/backups/${backupId}`, { method: "DELETE", headers: { ...(getToken() ? { Authorization: `Bearer ${getToken()}` } : {}) } });
+      const d = await r.json().catch(() => ({}));
+      if (r.ok && d.ok) setList((prev) => (prev || []).filter((x) => x.id !== backupId));
+      else alert(d.error || t("Verwijderen mislukt.", "Delete failed."));
+    } catch { alert(t("Verwijderen mislukt.", "Delete failed.")); }
+    finally { setBusy(null); }
+  };
+  return (
+    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+      <div className="w-[min(560px,96%)] max-h-[88vh] overflow-y-auto rounded-xl bg-background border shadow-2xl p-6" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-1"><h3 className="text-lg font-semibold flex items-center gap-2"><History className="h-5 w-5" /> {t("Back-ups", "Back-ups")}</h3><Button variant="ghost" size="icon" className="h-8 w-8" onClick={onClose}><X className="h-4 w-4" /></Button></div>
+        <p className="text-xs text-muted-foreground mb-4">{t("Al je back-ups — ook van projecten die je hebt verwijderd. Een verwijderd project kun je hier terugzetten als nieuw project, zodat er niks verloren gaat.", "All your back-ups — including from projects you deleted. You can restore a deleted project here as a new project, so nothing is lost.")}</p>
+        {list === null ? (
+          <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+        ) : list.length === 0 ? (
+          <p className="text-sm text-muted-foreground py-8 text-center">{t("Nog geen back-ups.", "No back-ups yet.")}</p>
+        ) : (
+          <ul className="space-y-2">
+            {list.map((b) => (
+              <li key={b.id} className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5">
+                <div className="min-w-0">
+                  <div className="text-sm font-medium truncate flex items-center gap-2">{b.projectName || t("Naamloos project", "Untitled project")}{b.deleted && <span className="text-[10px] uppercase tracking-wide bg-amber-100 text-amber-700 rounded px-1.5 py-0.5">{t("verwijderd", "deleted")}</span>}</div>
+                  <div className="text-[11px] text-muted-foreground">{new Date(b.createdAt).toLocaleString()} · {b.kind === "manual" ? t("handmatig", "manual") : t("automatisch", "automatic")} · {b.fileCount} {t("bestanden", "files")}</div>
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  {b.deleted ? (
+                    <Button size="sm" variant="outline" className="h-8" disabled={busy === b.id} onClick={() => restoreNew(b.id)} data-testid={`button-restore-new-${b.id}`}>
+                      {busy === b.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : t("Terugzetten", "Restore")}
+                    </Button>
+                  ) : (
+                    <Button size="sm" variant="ghost" className="h-8 text-muted-foreground" onClick={() => { onClose(); onOpenProject(b.projectId); }}>{t("Open project", "Open project")}</Button>
+                  )}
+                  <Button size="sm" variant="ghost" className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive" disabled={busy === b.id} onClick={() => deleteBackup(b.id)} title={t("Back-up verwijderen", "Delete back-up")} data-testid={`button-delbackup-${b.id}`}>
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
 }
 
 // ── Abonnement (€50/maand, volledige toegang) ──

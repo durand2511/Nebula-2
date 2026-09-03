@@ -43,6 +43,7 @@ import {
   Unplug,
   Save,
   History,
+  Trash2,
 } from "lucide-react";
 import JSZip from "jszip";
 import { Button } from "@/components/ui/button";
@@ -1257,6 +1258,21 @@ export function ProjectWorkspace() {
       else window.alert(d.error || t("Herstellen mislukt.", "Restore failed."));
     } catch { window.alert(t("Herstellen mislukt.", "Restore failed.")); }
     finally { setRestoreBusy(null); }
+  };
+  const [delBusy, setDelBusy] = useState<number | null>(null);
+  const deleteBackup = async (backupId: number) => {
+    if (delBusy) return;
+    // Twee bewuste waarschuwingen: back-ups verwijderen kan niet ongedaan gemaakt worden.
+    if (!window.confirm(t("Deze back-up verwijderen?", "Delete this back-up?"))) return;
+    if (!window.confirm(t("Weet je het zeker? Een verwijderde back-up is definitief weg en kan NIET meer worden teruggezet.", "Are you sure? A deleted back-up is gone for good and can NOT be restored."))) return;
+    setDelBusy(backupId);
+    try {
+      const r = await fetch(`/api/backups/${backupId}`, { method: "DELETE" });
+      const d = await r.json().catch(() => ({}));
+      if (r.ok && d.ok) { loadBackups(); loadBackupStatus(); }
+      else window.alert(d.error || t("Verwijderen mislukt.", "Delete failed."));
+    } catch { window.alert(t("Verwijderen mislukt.", "Delete failed.")); }
+    finally { setDelBusy(null); }
   };
   // Publish/republish immediately (no timer). Shared by the subdomain-publish and own-domain republish.
   const doPublish = async () => {
@@ -2790,9 +2806,14 @@ export function ProjectWorkspace() {
                       <div className="text-sm font-medium">{new Date(b.createdAt).toLocaleString()}</div>
                       <div className="text-[11px] text-muted-foreground">{b.kind === "manual" ? t("Handmatig opgeslagen", "Saved manually") : t("Automatisch", "Automatic")} · {b.fileCount} {t("bestanden", "files")}</div>
                     </div>
-                    <Button size="sm" variant="outline" className="h-8 shrink-0" disabled={restoreBusy === b.id} onClick={() => restoreBackup(b.id)} data-testid={`button-restore-${b.id}`}>
-                      {restoreBusy === b.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : t("Terugzetten", "Restore")}
-                    </Button>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <Button size="sm" variant="outline" className="h-8" disabled={restoreBusy === b.id} onClick={() => restoreBackup(b.id)} data-testid={`button-restore-${b.id}`}>
+                        {restoreBusy === b.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : t("Terugzetten", "Restore")}
+                      </Button>
+                      <Button size="sm" variant="ghost" className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive" disabled={delBusy === b.id} onClick={() => deleteBackup(b.id)} title={t("Back-up verwijderen", "Delete back-up")} data-testid={`button-delbackup-${b.id}`}>
+                        {delBusy === b.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                      </Button>
+                    </div>
                   </li>
                 ))}
               </ul>
