@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { timingSafeEqual } from "node:crypto";
 import router from "./routes";
 import { logger } from "./lib/logger";
-import { isReserved, findByHost, normalizeHost, PLATFORM_HOST } from "./lib/domains";
+import { isReserved, findByHost, normalizeHost, PLATFORM_HOST, SEO_REDIRECT_HOSTS } from "./lib/domains";
 import { serveProjectSite, projectHasPage } from "./lib/host-site";
 import { db, projectEmail } from "@workspace/db";
 import { desc } from "drizzle-orm";
@@ -86,6 +86,9 @@ app.use((req, res, next) => {
 // (nebulabookings.com, localhost, …) and all /api calls pass straight through to the normal app.
 app.use((req, res, next) => {
   const host = req.headers.host || "";
+  // Owner SEO-redirect domains: everything 301's to the platform homepage (consolidates the old
+  // domain's backlink value; deep paths have no equivalent here, so the homepage is the target).
+  if (SEO_REDIRECT_HOSTS.has(normalizeHost(host))) return res.redirect(301, `https://www.${PLATFORM_HOST}/`);
   if (isReserved(host) || req.path === "/api" || req.path.startsWith("/api/")) return next();
   findByHost(host)
     .then(async (match) => {
