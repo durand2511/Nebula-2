@@ -179,12 +179,32 @@ app.use(kennisbankRouter());
 // so behaviour is unchanged.
 const FRONTEND_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "app-builder", "dist", "public");
 if (fs.existsSync(path.join(FRONTEND_DIR, "index.html"))) {
-  app.use(express.static(FRONTEND_DIR));
-  // SPA fallback (Express 5-safe: a path-less middleware, not app.get("*")). Any non-/api GET that
-  // wasn't a real static file returns index.html so client-side routing (wouter) takes over.
+  // index:false → the directory root falls through to our language-aware handler below instead of
+  // express.static auto-serving the raw index.html.
+  app.use(express.static(FRONTEND_DIR, { index: false }));
+  // The index.html ships with Dutch SEO meta. For English searchers (Accept-Language en…) we swap the
+  // title/description/OG to English on the fly, so the snippet under the Google result reads in the
+  // visitor's language. Cached; only the meta tags change, the SPA is identical.
+  const indexNl = fs.readFileSync(path.join(FRONTEND_DIR, "index.html"), "utf8");
+  const EN_TITLE = "Nebula — get a website built &amp; manage it yourself | Web design";
+  const EN_DESC = "Nebula builds your professional website — then you manage everything yourself by typing what should change. Websites, web shops, booking systems and web apps, with your own domain and automatic SEO. €50 per month, cancel monthly.";
+  const EN_OG = "Your professional website, then you manage everything yourself by typing what should change. Booking system, own domain and automatic SEO included. €50 per month.";
+  const indexEn = indexNl
+    .replace(/<html lang="nl">/, '<html lang="en">')
+    .replace(/<title>[^<]*<\/title>/, `<title>${EN_TITLE}</title>`)
+    .replace(/(<meta name="description" content=")[^"]*(")/, `$1${EN_DESC}$2`)
+    .replace(/(<meta property="og:title" content=")[^"]*(")/, `$1Nebula — get a website built &amp; manage it yourself$2`)
+    .replace(/(<meta property="og:description" content=")[^"]*(")/, `$1${EN_OG}$2`)
+    .replace(/(<meta name="twitter:title" content=")[^"]*(")/, `$1Nebula — get a website built &amp; manage it yourself$2`)
+    .replace(/(<meta name="twitter:description" content=")[^"]*(")/, `$1${EN_OG}$2`);
+  const prefersEnglish = (h: string) => {
+    // First language tag wins; treat "en" (and en-US etc.) as English, anything else → Dutch default.
+    const first = (h || "").split(",")[0]?.trim().toLowerCase() || "";
+    return first.startsWith("en");
+  };
   app.use((req, res, next) => {
     if (req.method !== "GET" || req.path.startsWith("/api")) return next();
-    res.sendFile(path.join(FRONTEND_DIR, "index.html"));
+    res.type("html").send(prefersEnglish(String(req.headers["accept-language"] || "")) ? indexEn : indexNl);
   });
   logger.info({ dir: FRONTEND_DIR }, "[frontend] serving builder SPA at /");
 } else {
