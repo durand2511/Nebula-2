@@ -41,6 +41,8 @@ import {
   Terminal as TerminalIcon,
   HelpCircle,
   Unplug,
+  Save,
+  History,
 } from "lucide-react";
 import JSZip from "jszip";
 import { Button } from "@/components/ui/button";
@@ -1224,6 +1226,38 @@ export function ProjectWorkspace() {
   const [pubSlug, setPubSlug] = useState("");
   const [newDomain, setNewDomain] = useState("");
   const reloadPublish = () => fetch(`/api/projects/${projectId}/publish`).then((r) => r.json()).then(setPubData).catch(() => {});
+
+  // ── Back-ups (auto every 5 min after a change + manual "Nu opslaan"; survive project deletion) ──
+  const [backupState, setBackupState] = useState<{ saved: boolean; lastBackupAt: string | null } | null>(null);
+  const [savingBackup, setSavingBackup] = useState(false);
+  const [backupsOpen, setBackupsOpen] = useState(false);
+  const [backupsList, setBackupsList] = useState<any[] | null>(null);
+  const [restoreBusy, setRestoreBusy] = useState<number | null>(null);
+  const loadBackupStatus = useCallback(() => {
+    if (!projectId) return;
+    fetch(`/api/projects/${projectId}/backup-status`).then((r) => r.json()).then((d) => { if (typeof d?.saved === "boolean") setBackupState({ saved: d.saved, lastBackupAt: d.lastBackupAt }); }).catch(() => {});
+  }, [projectId]);
+  useEffect(() => { loadBackupStatus(); const iv = setInterval(loadBackupStatus, 30000); return () => clearInterval(iv); }, [loadBackupStatus]);
+  const saveBackupNow = async () => {
+    if (savingBackup) return;
+    setSavingBackup(true);
+    try { await fetch(`/api/projects/${projectId}/backup`, { method: "POST" }); loadBackupStatus(); if (backupsOpen) loadBackups(); }
+    catch { /* ignore */ } finally { setSavingBackup(false); }
+  };
+  const loadBackups = () => fetch(`/api/projects/${projectId}/backups`).then((r) => r.json()).then((d) => setBackupsList(d.backups || [])).catch(() => setBackupsList([]));
+  const openBackups = () => { setBackupsOpen(true); setBackupsList(null); loadBackups(); };
+  const restoreBackup = async (backupId: number) => {
+    if (restoreBusy) return;
+    if (!window.confirm(t("Dit herstelt je project naar deze back-up. Je huidige versie wordt eerst als back-up bewaard. Doorgaan?", "This restores your project to this back-up. Your current version is saved as a back-up first. Continue?"))) return;
+    setRestoreBusy(backupId);
+    try {
+      const r = await fetch(`/api/projects/${projectId}/backups/${backupId}/restore`, { method: "POST" });
+      const d = await r.json().catch(() => ({}));
+      if (r.ok && d.ok) { window.location.reload(); }
+      else window.alert(d.error || t("Herstellen mislukt.", "Restore failed."));
+    } catch { window.alert(t("Herstellen mislukt.", "Restore failed.")); }
+    finally { setRestoreBusy(null); }
+  };
   // Publish/republish immediately (no timer). Shared by the subdomain-publish and own-domain republish.
   const doPublish = async () => {
     setPubBusy(true);
@@ -2695,6 +2729,18 @@ export function ProjectWorkspace() {
           </div>
         </div>
         <div className="ml-auto flex items-center gap-2">
+          {/* Save/back-up status — reflects whether the current work is captured in a back-up. */}
+          {backupState && (
+            backupState.saved
+              ? <span className="text-[11px] text-emerald-600 flex items-center gap-1" title={backupState.lastBackupAt ? t("Laatste back-up: ", "Last back-up: ") + new Date(backupState.lastBackupAt).toLocaleString() : ""}><Check className="h-3 w-3" /> {t("Opgeslagen", "Saved")}</span>
+              : <span className="text-[11px] text-amber-600 flex items-center gap-1" title={t("Wijzigingen worden automatisch opgeslagen na 5 min — of sla nu op.", "Changes are auto-saved after 5 min — or save now.")}><span className="h-1.5 w-1.5 rounded-full bg-amber-500" /> {t("Niet opgeslagen", "Not saved")}</span>
+          )}
+          <Button size="sm" variant="ghost" className="h-8 gap-1.5 text-muted-foreground hover:text-foreground" disabled={savingBackup} onClick={saveBackupNow} title={t("Nu een back-up opslaan", "Save a back-up now")} data-testid="button-save-backup">
+            {savingBackup ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />} {t("Nu opslaan", "Save now")}
+          </Button>
+          <Button size="sm" variant="ghost" className="h-8 gap-1.5 text-muted-foreground hover:text-foreground" onClick={openBackups} title={t("Eerdere versies terugzetten", "Restore earlier versions")} data-testid="button-open-backups">
+            <History className="h-3.5 w-3.5" /> {t("Back-ups", "Back-ups")}
+          </Button>
           {pubData?.published && (
             pubData?.hasChanges
               ? <span className="text-[11px] text-amber-600 flex items-center gap-1"><span className="h-1.5 w-1.5 rounded-full bg-amber-500" /> Niet-gepubliceerde wijzigingen</span>
@@ -2718,6 +2764,42 @@ export function ProjectWorkspace() {
           </Button>
         </div>
       </header>
+
+      {backupsOpen && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 p-4" onClick={() => setBackupsOpen(false)}>
+          <div className="w-[min(520px,96%)] max-h-[88vh] overflow-y-auto rounded-xl bg-background border shadow-2xl p-6" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-1">
+              <h3 className="text-lg font-semibold flex items-center gap-2"><History className="h-5 w-5 text-primary" /> {t("Back-ups", "Back-ups")}</h3>
+              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setBackupsOpen(false)}><X className="h-4 w-4" /></Button>
+            </div>
+            <p className="text-xs text-muted-foreground mb-4">{t("Er wordt automatisch een back-up gemaakt ~5 min na je laatste wijziging. Kies een moment om je project naar terug te zetten — er gaat niks verloren.", "A back-up is made automatically ~5 min after your last change. Pick a point to restore your project to — nothing gets lost.")}</p>
+            <div className="mb-4">
+              <Button size="sm" className="gap-1.5" disabled={savingBackup} onClick={saveBackupNow} data-testid="button-backup-now-dialog">
+                {savingBackup ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />} {t("Nu een back-up maken", "Create a back-up now")}
+              </Button>
+            </div>
+            {backupsList === null ? (
+              <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+            ) : backupsList.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-6 text-center">{t("Nog geen back-ups. Er verschijnt er vanzelf één na je volgende wijziging.", "No back-ups yet. One appears automatically after your next change.")}</p>
+            ) : (
+              <ul className="space-y-2">
+                {backupsList.map((b) => (
+                  <li key={b.id} className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5">
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium">{new Date(b.createdAt).toLocaleString()}</div>
+                      <div className="text-[11px] text-muted-foreground">{b.kind === "manual" ? t("Handmatig opgeslagen", "Saved manually") : t("Automatisch", "Automatic")} · {b.fileCount} {t("bestanden", "files")}</div>
+                    </div>
+                    <Button size="sm" variant="outline" className="h-8 shrink-0" disabled={restoreBusy === b.id} onClick={() => restoreBackup(b.id)} data-testid={`button-restore-${b.id}`}>
+                      {restoreBusy === b.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : t("Terugzetten", "Restore")}
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      )}
 
       {publishOpen && (
         <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 p-4" onClick={() => { if (!pubBusy) setPublishOpen(false); }}>
