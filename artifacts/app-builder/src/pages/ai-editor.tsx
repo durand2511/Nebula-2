@@ -348,7 +348,7 @@ async function billingApi(path: string, body?: unknown): Promise<{ ok: boolean; 
 function BillingDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [data, setData] = useState<any>(null);
   const [busy, setBusy] = useState(false);
-  const [checkout, setCheckout] = useState<{ clientSecret: string; publishableKey: string } | null>(null);
+  const [checkout, setCheckout] = useState<{ clientSecret: string; publishableKey: string; email?: string } | null>(null);
   const load = () => billingApi("").then((r) => { if (r.ok) setData(r.d); });
   useEffect(() => { if (open) { setData(null); load(); } }, [open]);
   if (!open) return null;
@@ -358,7 +358,7 @@ function BillingDialog({ open, onClose }: { open: boolean; onClose: () => void }
     const r = await billingApi("/subscribe", {});
     setBusy(false);
     if (!r.ok) { alert(r.d.error || "Abonneren mislukt."); return; }
-    if (r.d.clientSecret && r.d.publishableKey) { setCheckout({ clientSecret: r.d.clientSecret, publishableKey: r.d.publishableKey }); return; }
+    if (r.d.clientSecret && r.d.publishableKey) { setCheckout({ clientSecret: r.d.clientSecret, publishableKey: r.d.publishableKey, email: r.d.email || "" }); return; }
     if (r.d.url) { window.location.href = r.d.url; return; }
     alert("Abonneren mislukt.");
   };
@@ -368,7 +368,7 @@ function BillingDialog({ open, onClose }: { open: boolean; onClose: () => void }
   // One dialog at a time: while the checkout is open it fully replaces the plan dialog instead of
   // stacking a popup on a popup. Closing the checkout falls back to the plan; success reloads it.
   if (checkout) {
-    return <CheckoutModal clientSecret={checkout.clientSecret} publishableKey={checkout.publishableKey} price={price} onClose={() => setCheckout(null)} onDone={() => { setCheckout(null); load(); }} />;
+    return <CheckoutModal clientSecret={checkout.clientSecret} publishableKey={checkout.publishableKey} initialEmail={checkout.email || ""} price={price} onClose={() => setCheckout(null)} onDone={() => { setCheckout(null); load(); }} />;
   }
 
   return (
@@ -404,13 +404,18 @@ function BillingDialog({ open, onClose }: { open: boolean; onClose: () => void }
 }
 
 // ── Custom in-app Stripe payment (Payment Element: card + iDEAL) ──
-function CheckoutModal({ clientSecret, publishableKey, price, onClose, onDone }: { clientSecret: string; publishableKey: string; price: number; onClose: () => void; onDone: () => void }) {
+function CheckoutModal({ clientSecret, publishableKey, initialEmail, price, onClose, onDone }: { clientSecret: string; publishableKey: string; initialEmail?: string; price: number; onClose: () => void; onDone: () => void }) {
   const payRef = useRef<HTMLDivElement | null>(null);
   const addrRef = useRef<HTMLDivElement | null>(null);
   const stateRef = useRef<{ stripe: any; elements: any } | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [err, setErr] = useState("");
   const [paying, setPaying] = useState(false);
+  // Own e-mail field so EVERY payment method collects it (the Payment Element only shows one for
+  // iDEAL). Prefilled with the account e-mail; ends up on the Stripe customer → on the invoice.
+  const [email, setEmail] = useState(initialEmail || "");
+  const emailRef = useRef(email);
+  emailRef.current = email;
 
   useEffect(() => {
     let cancelled = false;
@@ -423,7 +428,9 @@ function CheckoutModal({ clientSecret, publishableKey, price, onClose, onDone }:
         const elements = stripe.elements({ clientSecret, appearance: { theme: "stripe", variables: { colorPrimary: "#e0855b", borderRadius: "10px" } } });
         stateRef.current = { stripe, elements };
         const addr = elements.create("address", { mode: "billing" });
-        const pay = elements.create("payment", { layout: "tabs" });
+        // email: "never" — we collect it with our own field above the element (for ALL methods)
+        // and pass it in confirmSetup; without "never" Stripe would double-collect it for iDEAL.
+        const pay = elements.create("payment", { layout: "tabs", fields: { billingDetails: { email: "never" } } });
         // "ready" only when the Payment Element ACTUALLY rendered — mounting can fail (e.g. a
         // live/test key mismatch), and pretending it's ready gives an empty form plus a confusing
         // "elements should have a mounted Payment Element" on submit.
@@ -445,6 +452,8 @@ function CheckoutModal({ clientSecret, publishableKey, price, onClose, onDone }:
   const pay = async () => {
     const st = stateRef.current;
     if (!st) return;
+    const mail = emailRef.current.trim();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(mail)) { setErr("Vul een geldig e-mailadres in — daar sturen we je factuur naartoe."); return; }
     setPaying(true); setErr("");
     try {
       // The clientSecret is a SETUP intent: the customer authorises the payment method here (card
@@ -452,7 +461,10 @@ function CheckoutModal({ clientSecret, publishableKey, price, onClose, onDone }:
       // creates the €50/mo subscription on the saved method via /subscribe/complete.
       const { error, setupIntent } = await st.stripe.confirmSetup({
         elements: st.elements,
-        confirmParams: { return_url: `${window.location.origin}/ai-editor?sub=done` },
+        confirmParams: {
+          return_url: `${window.location.origin}/ai-editor?sub=done`,
+          payment_method_data: { billing_details: { email: mail } },
+        },
         redirect: "if_required",
       });
       if (error) { setErr(error.message || "Betaling mislukt."); setPaying(false); return; }
@@ -478,6 +490,11 @@ function CheckoutModal({ clientSecret, publishableKey, price, onClose, onDone }:
           {status === "error" && <p className="text-sm text-red-600">{err || "Betalen kon niet laden. Probeer het later opnieuw."}</p>}
           <div className={status === "ready" ? "space-y-4" : "hidden"}>
             <div><p className="text-xs font-medium text-neutral-500 mb-1.5">Factuurgegevens</p><div ref={addrRef} /></div>
+            <div>
+              <p className="text-xs font-medium text-neutral-500 mb-1.5">E-mailadres <span className="font-normal text-neutral-400">(voor je factuur)</span></p>
+              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="jouwnaam@voorbeeld.nl" autoComplete="email"
+                className="w-full h-11 rounded-[10px] border border-neutral-300 bg-white px-3 text-[15px] text-neutral-900 placeholder:text-neutral-400 focus:outline-none focus:border-[#e0855b] focus:ring-2 focus:ring-[#e0855b]/25" data-testid="input-checkout-email" />
+            </div>
             <div><p className="text-xs font-medium text-neutral-500 mb-1.5">Betaalmethode</p><div ref={payRef} /></div>
             {err && <p className="text-sm text-red-600">{err}</p>}
             <button onClick={pay} disabled={paying} className="w-full h-11 rounded-xl bg-neutral-900 text-white font-semibold hover:bg-neutral-800 disabled:opacity-60 flex items-center justify-center gap-2" data-testid="button-pay">

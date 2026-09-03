@@ -699,7 +699,7 @@ router.post("/billing/subscribe", async (req, res) => {
       usage: "off_session",
       metadata: { platformUserId: String(u.id) },
     });
-    res.json({ clientSecret: si.client_secret, publishableKey: pk, setupIntentId: si.id });
+    res.json({ clientSecret: si.client_secret, publishableKey: pk, setupIntentId: si.id, email: u.email || "" });
   } catch (err) { logger.error({ err, userId: u.id }, "[billing] subscribe failed"); res.status(500).json({ error: err instanceof Error ? err.message : "Abonneren mislukt." }); }
 });
 
