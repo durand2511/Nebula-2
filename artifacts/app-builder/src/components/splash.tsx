@@ -8,34 +8,17 @@ import { useEffect, useRef, useState } from "react";
 import { bgUrl } from "@/lib/background";
 import { useLang, type Lang } from "@/lib/i18n";
 import logoUrl from "../assets/nebula-logo-home.png";
+import introSoundUrl from "../assets/nebula-intro.m4a";
 
 const SEEN = "nebula_splash";
 
-// A soft two-note "ta-dum" via WebAudio — no audio file, no network, plays on the click gesture.
-function chime(): void {
+// The Nebula intro sound (waterdrop) — plays on the click gesture, so autoplay rules allow it.
+function playIntro(): void {
   try {
-    const Ctor = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-    const ctx = new Ctor();
-    const master = ctx.createGain();
-    master.gain.value = 0.16;
-    master.connect(ctx.destination);
-    const note = (freq: number, at: number, dur: number) => {
-      const o = ctx.createOscillator();
-      const g = ctx.createGain();
-      o.type = "sine";
-      o.frequency.value = freq;
-      g.gain.setValueAtTime(0, ctx.currentTime + at);
-      g.gain.linearRampToValueAtTime(1, ctx.currentTime + at + 0.02);
-      g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + at + dur);
-      o.connect(g).connect(master);
-      o.start(ctx.currentTime + at);
-      o.stop(ctx.currentTime + at + dur + 0.05);
-    };
-    note(392, 0, 0.5);      // G4
-    note(587.33, 0.12, 0.9); // D5 — the swell
-    note(783.99, 0.12, 0.9); // G5 (fifth on top for warmth)
-    window.setTimeout(() => { void ctx.close().catch(() => {}); }, 1600);
-  } catch { /* no audio available — the animation still plays */ }
+    const a = new Audio(introSoundUrl);
+    a.volume = 0.6;
+    void a.play().catch(() => { /* blocked or unsupported — animation still plays */ });
+  } catch { /* no audio available */ }
 }
 
 export function Splash() {
@@ -56,29 +39,30 @@ export function Splash() {
     if (doneRef.current) return;
     doneRef.current = true;
     setLang(l);
-    chime();
+    playIntro();
     const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
     if (reduce) { setShow(false); return; }
     setLeaving(true);
-    window.setTimeout(() => setShow(false), 1250);
+    window.setTimeout(() => setShow(false), 1900);
   };
 
   return (
     <div
       className="fixed inset-0 z-[200] flex flex-col items-center justify-center overflow-hidden"
-      style={{ transition: "opacity .45s ease .75s", opacity: leaving ? 0 : 1 }}
+      style={{ transition: "opacity .55s ease 1.35s", opacity: leaving ? 0 : 1 }}
       aria-label={t("Taalkeuze", "Language choice")}
     >
       <div className="absolute inset-0 bg-cover bg-center" style={{ backgroundImage: `url(${bgUrl})` }} aria-hidden="true" />
       <div className="absolute inset-0 bg-white/55" aria-hidden="true" />
+      {/* Grows SLOWLY and stays comfortably inside the viewport (≈1.35×) — never clipped by the
+          screen edges — then the whole splash gently fades into the app. */}
       <img
         src={logoUrl}
         alt="Nebula"
         className="relative h-56 md:h-80 w-auto select-none"
         style={{
-          transition: "transform 1.15s cubic-bezier(.65,0,.35,1), opacity 1.1s ease .15s",
-          transform: leaving ? "scale(14)" : "scale(1)",
-          opacity: leaving ? 0 : 1,
+          transition: "transform 1.8s cubic-bezier(.22,.7,.3,1)",
+          transform: leaving ? "scale(1.35)" : "scale(1)",
         }}
         draggable={false}
       />
