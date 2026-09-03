@@ -24,7 +24,7 @@ export function normalizeHost(host: string): string {
 // every request on these hosts 301's to the platform homepage — no project, no paywall, no DB row.
 // The list is env-overridable; the hosts are self-registered with Render at boot for TLS.
 export const SEO_REDIRECT_HOSTS = new Set(
-  (process.env.SEO_REDIRECT_HOSTS || "webdesigncolor.com,www.webdesigncolor.com").toLowerCase().split(/[,\s]+/).filter(Boolean),
+  (process.env.SEO_REDIRECT_HOSTS || "webdesigncolor.com,www.webdesigncolor.com,ncwebdesignschool.com,www.ncwebdesignschool.com").toLowerCase().split(/[,\s]+/).filter(Boolean),
 );
 export function isReserved(host: string): boolean {
   const h = normalizeHost(host);
