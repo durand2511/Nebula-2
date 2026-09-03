@@ -22,9 +22,10 @@ export function normalizeHost(host: string): string {
 
 // Owner-level SEO-redirect domains (expired domains with backlinks, bought by the platform owner):
 // every request on these hosts 301's to the platform homepage — no project, no paywall, no DB row.
-// The list is env-overridable; the hosts are self-registered with Render at boot for TLS.
+// EMPTY by default (owner decided the bought domains weren't worth it); set SEO_REDIRECT_HOSTS on
+// Render (comma-separated) to activate one. Hosts self-register with Render at boot for TLS.
 export const SEO_REDIRECT_HOSTS = new Set(
-  (process.env.SEO_REDIRECT_HOSTS || "webdesigncolor.com,www.webdesigncolor.com,ncwebdesignschool.com,www.ncwebdesignschool.com").toLowerCase().split(/[,\s]+/).filter(Boolean),
+  (process.env.SEO_REDIRECT_HOSTS || "").toLowerCase().split(/[,\s]+/).filter(Boolean),
 );
 export function isReserved(host: string): boolean {
   const h = normalizeHost(host);
