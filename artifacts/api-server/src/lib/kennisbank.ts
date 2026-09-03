@@ -101,7 +101,37 @@ export async function generateKennisbankArticle(): Promise<{ status: "published"
   });
   void submitToIndexNow(CANON_HOST, [`https://${CANON_HOST}/kennisbank/${slug}`, `https://${CANON_HOST}/kennisbank`]);
   logger.info({ slug, words }, "[kennisbank] article published");
+  await translatePending().catch(() => {}); // translate the fresh article to English right away
   return { status: "published", slug };
+}
+
+// Translate ONE untranslated article to English (newest first) — called right after publishing and
+// as a backfill from the scheduler, so older articles get their /en/ version too.
+export async function translatePending(): Promise<boolean> {
+  const [row] = await db.select().from(platformBlog).where(eq(platformBlog.htmlEn, "")).orderBy(desc(platformBlog.createdAt)).limit(1);
+  if (!row) return false;
+  const prompt = [
+    "Translate this Dutch knowledge-base article about websites/web design to natural, idiomatic English for an international audience of small business owners. Keep ALL HTML tags and structure exactly as-is; translate only the text. Keep the link to nebulabookings.com intact.",
+    "",
+    "Answer with ONLY valid JSON, exactly this shape:",
+    '{"title":"...","metaTitle":"max 60 chars","metaDescription":"max 155 chars","html":"<p>...translated article..."}',
+    "",
+    `TITLE: ${row.title}`,
+    `META TITLE: ${row.metaTitle}`,
+    `META DESCRIPTION: ${row.metaDescription}`,
+    "HTML:",
+    row.html,
+  ].join("\n");
+  const raw = await ai(prompt, 8000);
+  const tr = parseJson<{ title: string; metaTitle: string; metaDescription: string; html: string }>(raw);
+  if (!tr?.title || !tr?.html) { logger.warn({ slug: row.slug }, "[kennisbank] translation failed"); return false; }
+  await db.update(platformBlog).set({
+    titleEn: tr.title.slice(0, 200), metaTitleEn: (tr.metaTitle || tr.title).slice(0, 70),
+    metaDescriptionEn: (tr.metaDescription || "").slice(0, 170), htmlEn: tr.html,
+  }).where(eq(platformBlog.id, row.id));
+  void submitToIndexNow(CANON_HOST, [`https://${CANON_HOST}/en/kennisbank/${row.slug}`, `https://${CANON_HOST}/en/kennisbank`]);
+  logger.info({ slug: row.slug }, "[kennisbank] translated to English");
+  return true;
 }
 
 // ── Scheduler: one article per day, retried a few times on failure ─────────────────────────────
@@ -120,6 +150,7 @@ export function startKennisbankScheduler(): void {
   started = true;
   if (!process.env.ANTHROPIC_API_KEY) { logger.warn("[kennisbank] ANTHROPIC_API_KEY not set — daily article generation disabled"); return; }
   const tick = async () => {
+    try { await translatePending(); } catch { /* backfill EN for older articles, best-effort */ }
     try {
       if (await publishedToday()) return;
       const day = new Date().toISOString().slice(0, 10);
@@ -138,15 +169,23 @@ export function startKennisbankScheduler(): void {
 
 // Shared shell in the platform's visual language: centered pill nav, warm light background, white
 // rounded cards, system font. Self-contained CSS so these pages never depend on the SPA bundle.
-function shell(opts: { title: string; description: string; canonical: string; jsonLd: object[]; body: string; ogType?: string }): string {
+type PageLang = "nl" | "en";
+function shell(opts: { title: string; description: string; canonical: string; jsonLd: object[]; body: string; ogType?: string; lang?: PageLang; altPath?: string }): string {
+  const lang: PageLang = opts.lang || "nl";
+  // hreflang pair: altPath is THIS page's path in the other language (e.g. /en/kennisbank ↔ /kennisbank).
+  const here = opts.canonical;
+  const other = opts.altPath ? `https://${CANON_HOST}${opts.altPath}` : "";
   return `<!doctype html>
-<html lang="nl">
+<html lang="${lang}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(opts.title)}</title>
 <meta name="description" content="${esc(opts.description)}">
 <link rel="canonical" href="${esc(opts.canonical)}">
+${other ? `<link rel="alternate" hreflang="${lang === "nl" ? "en" : "nl"}" href="${esc(other)}">
+<link rel="alternate" hreflang="${lang}" href="${esc(here)}">
+<link rel="alternate" hreflang="x-default" href="${esc(lang === "nl" ? here : other)}">` : ""}
 <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png?v=3">
 <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png?v=3">
 <link rel="icon" type="image/png" sizes="256x256" href="/favicon.png?v=3">
@@ -215,11 +254,11 @@ ${opts.jsonLd.map((o) => `<script type="application/ld+json">${JSON.stringify(o)
 <body>
 <div class="bg" aria-hidden="true"></div><div class="haze" aria-hidden="true"></div>
 <div class="nav-wrap"><nav class="nav">
-  <a href="/">Home</a><a href="/ai-editor">Nebula</a><a href="/help">Uitleg</a><a class="on" href="/kennisbank">Kennisbank</a>
+  <a href="/">Home</a><a href="/ai-editor">Nebula</a><a href="/help">${lang === "en" ? "Guide" : "Uitleg"}</a><a class="on" href="${lang === "en" ? "/en/kennisbank" : "/kennisbank"}">${lang === "en" ? "Knowledge base" : "Kennisbank"}</a>${opts.altPath ? `<a href="${esc(opts.altPath)}" title="${lang === "en" ? "Nederlands" : "English"}">${lang === "en" ? "🇳🇱" : "🇬🇧"}</a>` : ""}
 </nav></div>
 <main>${opts.body}</main>
 <footer>
-  <div class="links"><a href="/privacy">Privacybeleid</a><a href="/voorwaarden">Algemene voorwaarden</a><a href="mailto:durand2511@gmail.com">Contact</a></div>
+  <div class="links"><a href="/privacy">${lang === "en" ? "Privacy policy" : "Privacybeleid"}</a><a href="/voorwaarden">${lang === "en" ? "Terms & conditions" : "Algemene voorwaarden"}</a><a href="mailto:durand2511@gmail.com">Contact</a></div>
   <div>© ${new Date().getFullYear()} Nebula · Durand van Konijnenburg · KVK 70776857</div>
 </footer>
 </body>
@@ -229,32 +268,40 @@ ${opts.jsonLd.map((o) => `<script type="application/ld+json">${JSON.stringify(o)
 
 const PER_PAGE = 5;
 
-async function renderIndex(req: Request, res: Response): Promise<void> {
+async function renderIndex(req: Request, res: Response, lang: PageLang = "nl"): Promise<void> {
+  const en = lang === "en";
   const all = await db.select().from(platformBlog).orderBy(desc(platformBlog.createdAt)).limit(1000);
   const pages = Math.max(1, Math.ceil(all.length / PER_PAGE));
   const page = Math.min(pages, Math.max(1, Number(req.query.p) || 1));
   const posts = all.slice((page - 1) * PER_PAGE, page * PER_PAGE);
   const base = `https://${CANON_HOST}`;
-  const pageUrl = (n: number) => (n <= 1 ? "/kennisbank" : `/kennisbank?p=${n}`);
+  const root = en ? "/en/kennisbank" : "/kennisbank";
+  const pageUrl = (n: number) => (n <= 1 ? root : `${root}?p=${n}`);
   // Numbered pager (1 2 3 …) once there is more than one page of articles.
-  const pager = pages > 1 ? `<nav class="pager" aria-label="Paginering">
+  const pager = pages > 1 ? `<nav class="pager" aria-label="${en ? "Pagination" : "Paginering"}">
 ${page > 1 ? `<a href="${pageUrl(page - 1)}">←</a>` : ""}
 ${Array.from({ length: pages }, (_, i) => i + 1).map((n) => n === page ? `<span class="on">${n}</span>` : `<a href="${pageUrl(n)}">${n}</a>`).join("\n")}
 ${page < pages ? `<a href="${pageUrl(page + 1)}">→</a>` : ""}
 </nav>` : "";
   const body = `
 <div class="hero">
-  <h1>Kennisbank</h1>
-  <p class="sub">Praktische gidsen over websites, webdesign, online boekingen en gevonden worden in Google — voor ondernemers die het gewoon goed geregeld willen hebben. Elke dag een nieuw artikel.</p>
+  <h1>${en ? "Knowledge base" : "Kennisbank"}</h1>
+  <p class="sub">${en ? "Practical guides about websites, web design, online bookings and getting found on Google — for business owners who just want it done right. A new article every day." : "Praktische gidsen over websites, webdesign, online boekingen en gevonden worden in Google — voor ondernemers die het gewoon goed geregeld willen hebben. Elke dag een nieuw artikel."}</p>
 </div>
 <div class="cards">
-${posts.map((p) => `<a class="card" href="/kennisbank/${esc(p.slug)}"><span class="date">${fmtDate(p.createdAt)}</span><h2>${esc(p.title)}</h2><p>${esc(p.metaDescription)}</p><span class="more">Lees verder →</span></a>`).join("\n")}
-${posts.length === 0 ? `<div class="card"><h2>De eerste artikelen verschijnen binnenkort</h2><p>Elke dag publiceren we hier een nieuw artikel.</p></div>` : ""}
+${posts.map((p) => `<a class="card" href="${root}/${esc(p.slug)}"><span class="date">${fmtDate(p.createdAt)}</span><h2>${esc(en && p.titleEn ? p.titleEn : p.title)}</h2><p>${esc(en && p.metaDescriptionEn ? p.metaDescriptionEn : p.metaDescription)}</p><span class="more">${en ? "Read more →" : "Lees verder →"}</span></a>`).join("\n")}
+${posts.length === 0 ? `<div class="card"><h2>${en ? "The first articles are coming soon" : "De eerste artikelen verschijnen binnenkort"}</h2><p>${en ? "We publish a new article here every day." : "Elke dag publiceren we hier een nieuw artikel."}</p></div>` : ""}
 </div>
 ${pager}`;
   res.type("html").send(shell({
-    title: page > 1 ? `Kennisbank — pagina ${page} | Nebula` : "Kennisbank — websites, webdesign & online boekingen | Nebula",
-    description: "Praktische artikelen over website laten maken, webdesign, boekingssystemen en lokale SEO voor ondernemers. Elke dag nieuw.",
+    lang,
+    altPath: en ? "/kennisbank" : "/en/kennisbank",
+    title: en
+      ? (page > 1 ? `Knowledge base — page ${page} | Nebula` : "Knowledge base — websites, web design & online bookings | Nebula")
+      : (page > 1 ? `Kennisbank — pagina ${page} | Nebula` : "Kennisbank — websites, webdesign & online boekingen | Nebula"),
+    description: en
+      ? "Practical articles about getting a website, web design, booking systems and local SEO for business owners. New every day."
+      : "Praktische artikelen over website laten maken, webdesign, boekingssystemen en lokale SEO voor ondernemers. Elke dag nieuw.",
     canonical: `${base}${pageUrl(page)}`,
     jsonLd: [
       { "@context": "https://schema.org", "@type": "Blog", name: "Nebula Kennisbank", url: `${base}/kennisbank`, inLanguage: "nl" },
@@ -267,31 +314,38 @@ ${pager}`;
   }));
 }
 
-async function renderArticle(req: Request, res: Response): Promise<void> {
+async function renderArticle(req: Request, res: Response, lang: PageLang = "nl"): Promise<void> {
+  const en = lang === "en";
+  const root = en ? "/en/kennisbank" : "/kennisbank";
   const slug = String(req.params.slug || "");
   const [p] = await db.select().from(platformBlog).where(eq(platformBlog.slug, slug));
   if (!p) { res.status(404).type("html").send(shell({ title: "Niet gevonden — Nebula Kennisbank", description: "Dit artikel bestaat niet (meer).", canonical: `https://${CANON_HOST}/kennisbank`, jsonLd: [], body: `<div class="hero"><h1>Artikel niet gevonden</h1><p class="sub">Dit artikel bestaat niet (meer). <a href="/kennisbank">Terug naar de kennisbank</a>.</p></div>` })); return; }
   const base = `https://${CANON_HOST}`;
-  const url = `${base}/kennisbank/${p.slug}`;
+  const url = `${base}${root}/${p.slug}`;
+  const title = en && p.titleEn ? p.titleEn : p.title;
+  const descr = en && p.metaDescriptionEn ? p.metaDescriptionEn : p.metaDescription;
+  const html = en && p.htmlEn ? p.htmlEn : p.html;
   const body = `
-<div class="crumb"><a href="/">Home</a> › <a href="/kennisbank">Kennisbank</a> › ${esc(p.title)}</div>
+<div class="crumb"><a href="/">Home</a> › <a href="${root}">${en ? "Knowledge base" : "Kennisbank"}</a> › ${esc(title)}</div>
 <article>
-  <div class="meta">${fmtDate(p.createdAt)} · Nebula Kennisbank</div>
-  <h1>${esc(p.title)}</h1>
-  ${p.html}
-  <div class="kb-cta"><a class="btn-sub" href="https://${CANON_HOST}/">Zelf zo'n website? Bekijk Nebula →</a></div>
+  <div class="meta">${fmtDate(p.createdAt)} · ${en ? "Nebula Knowledge base" : "Nebula Kennisbank"}</div>
+  <h1>${esc(title)}</h1>
+  ${html}
+  <div class="kb-cta"><a class="btn-sub" href="https://${CANON_HOST}/">${en ? "Want a website like this? See Nebula →" : "Zelf zo'n website? Bekijk Nebula →"}</a></div>
 </article>`;
   res.type("html").send(shell({
-    title: `${p.metaTitle || p.title} | Nebula`,
-    description: p.metaDescription,
+    lang,
+    altPath: en ? `/kennisbank/${p.slug}` : `/en/kennisbank/${p.slug}`,
+    title: `${(en && p.metaTitleEn) || (!en && p.metaTitle) || title} | Nebula`,
+    description: descr,
     canonical: url,
     ogType: "article",
     jsonLd: [
-      { "@context": "https://schema.org", "@type": "Article", headline: p.title, description: p.metaDescription, datePublished: p.createdAt.toISOString(), inLanguage: "nl", mainEntityOfPage: url, author: { "@type": "Organization", name: "Nebula" }, publisher: { "@type": "Organization", name: "Nebula", url: base } },
+      { "@context": "https://schema.org", "@type": "Article", headline: title, description: descr, datePublished: p.createdAt.toISOString(), inLanguage: lang, mainEntityOfPage: url, author: { "@type": "Organization", name: "Nebula" }, publisher: { "@type": "Organization", name: "Nebula", url: base } },
       { "@context": "https://schema.org", "@type": "BreadcrumbList", itemListElement: [
         { "@type": "ListItem", position: 1, name: "Home", item: base },
-        { "@type": "ListItem", position: 2, name: "Kennisbank", item: `${base}/kennisbank` },
-        { "@type": "ListItem", position: 3, name: p.title, item: url },
+        { "@type": "ListItem", position: 2, name: en ? "Knowledge base" : "Kennisbank", item: `${base}${root}` },
+        { "@type": "ListItem", position: 3, name: title, item: url },
       ] },
     ],
     body,
@@ -299,12 +353,14 @@ async function renderArticle(req: Request, res: Response): Promise<void> {
 }
 
 async function renderSitemap(_req: Request, res: Response): Promise<void> {
-  const posts = await db.select({ slug: platformBlog.slug, createdAt: platformBlog.createdAt }).from(platformBlog).orderBy(desc(platformBlog.createdAt)).limit(1000);
+  const posts = await db.select({ slug: platformBlog.slug, createdAt: platformBlog.createdAt, htmlEn: platformBlog.htmlEn }).from(platformBlog).orderBy(desc(platformBlog.createdAt)).limit(1000);
   const base = `https://${CANON_HOST}`;
   const urls = [
     `<url><loc>${base}/</loc></url>`,
     `<url><loc>${base}/kennisbank</loc>${posts[0] ? `<lastmod>${posts[0].createdAt.toISOString().slice(0, 10)}</lastmod>` : ""}</url>`,
+    `<url><loc>${base}/en/kennisbank</loc></url>`,
     ...posts.map((p) => `<url><loc>${base}/kennisbank/${esc(p.slug)}</loc><lastmod>${p.createdAt.toISOString().slice(0, 10)}</lastmod></url>`),
+    ...posts.filter((p) => p.htmlEn).map((p) => `<url><loc>${base}/en/kennisbank/${esc(p.slug)}</loc><lastmod>${p.createdAt.toISOString().slice(0, 10)}</lastmod></url>`),
   ];
   res.type("application/xml").send(`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.join("\n")}\n</urlset>`);
 }
@@ -323,8 +379,10 @@ export function kennisbankRouter(): express.Router {
     res.setHeader("Cache-Control", "public, max-age=3600");
     res.sendFile(bgFile(), (err) => { if (err && !res.headersSent) res.status(404).end(); });
   });
-  r.get("/kennisbank", (req, res) => { renderIndex(req, res).catch(() => res.status(500).send("Er ging iets mis.")); });
-  r.get("/kennisbank/:slug", (req, res) => { renderArticle(req, res).catch(() => res.status(500).send("Er ging iets mis.")); });
+  r.get("/kennisbank", (req, res) => { renderIndex(req, res, "nl").catch(() => res.status(500).send("Er ging iets mis.")); });
+  r.get("/kennisbank/:slug", (req, res) => { renderArticle(req, res, "nl").catch(() => res.status(500).send("Er ging iets mis.")); });
+  r.get("/en/kennisbank", (req, res) => { renderIndex(req, res, "en").catch(() => res.status(500).send("Something went wrong.")); });
+  r.get("/en/kennisbank/:slug", (req, res) => { renderArticle(req, res, "en").catch(() => res.status(500).send("Something went wrong.")); });
   r.get("/sitemap.xml", (req, res) => { renderSitemap(req, res).catch(() => res.status(500).send("")); });
   r.get(`/${INDEXNOW_KEY}.txt`, (_req, res) => { res.type("text/plain").send(INDEXNOW_KEY); });
   return r;

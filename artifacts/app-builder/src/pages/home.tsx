@@ -3,7 +3,7 @@ import logoUrl from "../assets/nebula-logo-home.png";
 import { useLang } from "@/lib/i18n";
 
 export function Home() {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const [phone, setPhone] = useState("");
   const [state, setState] = useState<"idle" | "busy" | "done" | "error">("idle");
 
@@ -13,7 +13,9 @@ export function Home() {
     if (state === "busy" || phone.replace(/\D/g, "").length < 6) { setState("error"); return; }
     setState("busy");
     try {
-      const r = await fetch("/api/contact", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ phone, note: "Briefing/gesprek met de eigenaar (via homepagina)" }) });
+      // The owner's notification e-mail says which language the visitor used — an English signup
+      // means: call back in English.
+      const r = await fetch("/api/contact", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ phone, note: lang === "en" ? "Briefing/gesprek met de eigenaar (via homepagina, ENGELSE versie — bel in het Engels)" : "Briefing/gesprek met de eigenaar (via homepagina, Nederlandse versie)" }) });
       setState(r.ok ? "done" : "error");
       if (r.ok) setPhone("");
     } catch { setState("error"); }

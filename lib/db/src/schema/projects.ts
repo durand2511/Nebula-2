@@ -175,6 +175,11 @@ export const platformBlog = pgTable("platform_blog", {
   metaDescription: text("meta_description").notNull().default(""),
   topic: text("topic").notNull().default(""),
   html: text("html").notNull().default(""),
+  // English version (AI-translated at publish time; backfilled by the scheduler) → /en/kennisbank/…
+  titleEn: text("title_en").notNull().default(""),
+  metaTitleEn: text("meta_title_en").notNull().default(""),
+  metaDescriptionEn: text("meta_description_en").notNull().default(""),
+  htmlEn: text("html_en").notNull().default(""),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
