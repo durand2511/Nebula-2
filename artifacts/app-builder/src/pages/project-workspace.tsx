@@ -1242,7 +1242,7 @@ export function ProjectWorkspace() {
   const saveBackupNow = async () => {
     if (savingBackup) return;
     setSavingBackup(true);
-    try { await fetch(`/api/projects/${projectId}/backup`, { method: "POST" }); loadBackupStatus(); if (backupsOpen) loadBackups(); }
+    try { await fetch(`/api/projects/${projectId}/backup`, { method: "POST" }); await loadBackups(); loadBackupStatus(); }
     catch { /* ignore */ } finally { setSavingBackup(false); }
   };
   const loadBackups = () => fetch(`/api/projects/${projectId}/backups`).then((r) => r.json()).then((d) => setBackupsList(d.backups || [])).catch(() => setBackupsList([]));
@@ -2818,6 +2818,10 @@ export function ProjectWorkspace() {
                 ))}
               </ul>
             )}
+            <p className="mt-4 pt-3 border-t text-[11px] text-muted-foreground text-center">
+              {t("Back-ups van verwijderde projecten vind je in je account onder ", "Back-ups from deleted projects are in your account under ")}
+              <a href="/ai-editor" className="underline hover:text-foreground">{t("Back-ups", "Back-ups")}</a>.
+            </p>
           </div>
         </div>
       )}
