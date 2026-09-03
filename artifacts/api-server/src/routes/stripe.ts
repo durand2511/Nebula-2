@@ -62,6 +62,26 @@ async function nebulaPriceId(): Promise<string> {
   return price.id;
 }
 
+// BTW op de abonnementsfactuur: 21% INCLUSIEF (€50 = €41,32 + €8,68 BTW), zodat de klant een
+// factuur heeft die hij bij de belasting kan opvoeren. NEBULA_VAT_PERCENT=0 zet het uit (KOR).
+const VAT_PERCENT = process.env.NEBULA_VAT_PERCENT === undefined ? 21 : Math.max(0, Number(process.env.NEBULA_VAT_PERCENT) || 0);
+let cachedTaxRate = "";
+async function nebulaTaxRateId(): Promise<string> {
+  if (VAT_PERCENT <= 0) return "";
+  if (cachedTaxRate) return cachedTaxRate;
+  try {
+    const found = await stripeReq("GET", "tax_rates?active=true&limit=100");
+    const hit = (found?.data || []).find((t: any) => t.percentage === VAT_PERCENT && t.inclusive && t.display_name === "BTW");
+    if (hit) return (cachedTaxRate = hit.id);
+  } catch { /* fall through to create */ }
+  const t = await stripeReq("POST", "tax_rates", { display_name: "BTW", percentage: VAT_PERCENT, inclusive: true, country: "NL" });
+  return (cachedTaxRate = t.id);
+}
+
+// Zakelijke gegevens op elke factuur (voetregel + KVK als veld), instelbaar via env.
+const INVOICE_FOOTER = process.env.NEBULA_INVOICE_FOOTER || "Nebula · Durand van Konijnenburg · KVK 70776857 · durand2511@gmail.com";
+const INVOICE_KVK = process.env.NEBULA_KVK || "70776857";
+
 // ── Stripe REST helper ────────────────────────────────────────────────────────
 function toForm(obj: Record<string, unknown>, prefix = ""): string[] {
   const out: string[] = [];
@@ -704,12 +724,32 @@ router.post("/billing/subscribe/complete", async (req, res) => {
     const gen = si.latest_attempt?.payment_method_details?.ideal?.generated_sepa_debit;
     if (gen) pm = String(gen);
     if (!pm) { res.status(400).json({ error: "Geen betaalmethode gevonden." }); return; }
-    await stripeReq("POST", `customers/${encodeURIComponent(customer)}`, { "invoice_settings[default_payment_method]": pm });
+    // Factuurgegevens: naam/e-mail/adres uit het betaalformulier op de Stripe-klant zetten, plus
+    // voetregel + KVK op elke factuur — zo krijgt de klant een factuur die de belasting accepteert.
+    const custParams: Record<string, unknown> = {
+      "invoice_settings[default_payment_method]": pm,
+      "invoice_settings[footer]": INVOICE_FOOTER,
+      "invoice_settings[custom_fields][0][name]": "KVK",
+      "invoice_settings[custom_fields][0][value]": INVOICE_KVK,
+    };
+    try {
+      const pmFull = await stripeReq("GET", `payment_methods/${encodeURIComponent(pm)}`);
+      const bd = pmFull?.billing_details || {};
+      if (bd.name) custParams["name"] = String(bd.name).slice(0, 200);
+      if (bd.email) custParams["email"] = String(bd.email).slice(0, 200);
+      const a = bd.address || {};
+      for (const k of ["line1", "line2", "city", "postal_code", "country"] as const) {
+        if (a[k]) custParams[`address[${k}]`] = String(a[k]).slice(0, 200);
+      }
+    } catch { /* billing details optional */ }
+    await stripeReq("POST", `customers/${encodeURIComponent(customer)}`, custParams);
+    const taxRate = await nebulaTaxRateId().catch(() => "");
     const sub = await stripeReq("POST", "subscriptions", {
       customer,
       items: [{ price: await nebulaPriceId() }],
       default_payment_method: pm,
       payment_behavior: "allow_incomplete",
+      ...(taxRate ? { default_tax_rates: [taxRate] } : {}),
       metadata: { platformUserId: String(u.id) },
     });
     const pe = sub?.current_period_end ? ymdUTC(new Date(sub.current_period_end * 1000)) : "";
