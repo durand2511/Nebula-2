@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useLocation } from "wouter";
+import { useLang } from "@/lib/i18n";
 import {
   useImportProjectFromUrl, useCreateProject, useListProjects, useDeleteProject,
   getListProjectsQueryKey, getGetRecentProjectsQueryKey,
@@ -66,6 +67,7 @@ async function authApi(path: string, body?: unknown): Promise<{ ok: boolean; sta
 
 export function AiEditor() {
   const [, setLocation] = useLocation();
+  const { t } = useLang();
   const queryClient = useQueryClient();
 
   // ── auth state ──
@@ -193,28 +195,28 @@ export function AiEditor() {
         <img src={logoUrl} alt="Nebula" className="h-40 md:h-52 w-auto mb-8" />
         <div className="w-full rounded-2xl border border-border bg-card shadow-lg p-7">
           <h1 className="text-2xl font-bold tracking-tight text-center mb-1">
-            {view === "login" ? "Inloggen" : view === "register" ? "Account aanmaken" : "Wachtwoord vergeten"}
+            {view === "login" ? t("Inloggen", "Log in") : view === "register" ? t("Account aanmaken", "Create account") : t("Wachtwoord vergeten", "Forgot password")}
           </h1>
           <p className="text-sm text-muted-foreground text-center mb-5">
-            {view === "login" ? "Log in op je Nebula-account." : view === "register" ? "Maak je eigen Nebula-werkruimte." : "Vul je e-mail in voor een nieuw wachtwoord."}
+            {view === "login" ? t("Log in op je Nebula-account.", "Log in to your Nebula account.") : view === "register" ? t("Maak je eigen Nebula-werkruimte.", "Create your own Nebula workspace.") : t("Vul je e-mail in voor een nieuw wachtwoord.", "Enter your e-mail to get a new password.")}
           </p>
           {notice && <p className="mb-4 text-sm text-emerald-600 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">{notice}</p>}
 
           {view === "register" && (<>
-            <label className="block text-xs font-medium text-muted-foreground mb-1">Naam</label>
-            <Input className="mb-3" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder="Voor- en achternaam" data-testid="input-name" />
-            <label className="block text-xs font-medium text-muted-foreground mb-1">Geboortedatum</label>
+            <label className="block text-xs font-medium text-muted-foreground mb-1">{t("Naam", "Name")}</label>
+            <Input className="mb-3" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder={t("Voor- en achternaam", "First and last name")} data-testid="input-name" />
+            <label className="block text-xs font-medium text-muted-foreground mb-1">{t("Geboortedatum", "Date of birth")}</label>
             <Input className="mb-3" type="date" value={f.birthdate} onChange={(e) => setF({ ...f, birthdate: e.target.value })} data-testid="input-birthdate" />
-            <label className="block text-xs font-medium text-muted-foreground mb-1">Telefoonnummer (optioneel)</label>
+            <label className="block text-xs font-medium text-muted-foreground mb-1">{t("Telefoonnummer (optioneel)", "Phone number (optional)")}</label>
             <Input className="mb-3" type="tel" value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} placeholder="06 12345678" data-testid="input-phone" />
           </>)}
 
-          <label className="block text-xs font-medium text-muted-foreground mb-1">E-mailadres</label>
+          <label className="block text-xs font-medium text-muted-foreground mb-1">{t("E-mailadres", "E-mail address")}</label>
           <Input className="mb-3" type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} placeholder="naam@voorbeeld.nl" data-testid="input-email"
             onKeyDown={(e) => { if (e.key === "Enter" && view === "forgot") doForgot(); }} />
 
           {view !== "forgot" && (<>
-            <label className="block text-xs font-medium text-muted-foreground mb-1">Wachtwoord</label>
+            <label className="block text-xs font-medium text-muted-foreground mb-1">{t("Wachtwoord", "Password")}</label>
             <Input className="mb-4" type="password" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} placeholder="••••••••" data-testid="input-password"
               onKeyDown={(e) => { if (e.key === "Enter") view === "login" ? doLogin() : doRegister(); }} />
           </>)}
@@ -223,16 +225,16 @@ export function AiEditor() {
 
           <Button className="w-full h-11 font-bold" disabled={authBusy} data-testid="button-auth-submit"
             onClick={() => (view === "login" ? doLogin() : view === "register" ? doRegister() : doForgot())}>
-            {authBusy ? <Loader2 className="h-5 w-5 animate-spin" /> : view === "login" ? "Inloggen" : view === "register" ? "Account aanmaken" : "Nieuw wachtwoord sturen"}
+            {authBusy ? <Loader2 className="h-5 w-5 animate-spin" /> : view === "login" ? t("Inloggen", "Log in") : view === "register" ? t("Account aanmaken", "Create account") : t("Nieuw wachtwoord sturen", "Send new password")}
           </Button>
 
           <div className="mt-4 text-center text-sm text-muted-foreground space-y-1">
             {view === "login" && (<>
-              <p><button className="text-primary font-medium hover:underline" onClick={() => { setView("forgot"); setAuthErr(null); setNotice(null); }}>Wachtwoord vergeten?</button></p>
-              <p>Nog geen account? <button className="text-primary font-medium hover:underline" onClick={() => { setView("register"); setAuthErr(null); setNotice(null); }}>Registreren</button></p>
+              <p><button className="text-primary font-medium hover:underline" onClick={() => { setView("forgot"); setAuthErr(null); setNotice(null); }}>{t("Wachtwoord vergeten?", "Forgot password?")}</button></p>
+              <p>{t("Nog geen account?", "No account yet?")} <button className="text-primary font-medium hover:underline" onClick={() => { setView("register"); setAuthErr(null); setNotice(null); }}>{t("Registreren", "Sign up")}</button></p>
             </>)}
-            {view === "register" && (<p>Al een account? <button className="text-primary font-medium hover:underline" onClick={() => { setView("login"); setAuthErr(null); }}>Inloggen</button></p>)}
-            {view === "forgot" && (<p><button className="text-primary font-medium hover:underline" onClick={() => { setView("login"); setAuthErr(null); }}>← Terug naar inloggen</button></p>)}
+            {view === "register" && (<p>{t("Al een account?", "Already have an account?")} <button className="text-primary font-medium hover:underline" onClick={() => { setView("login"); setAuthErr(null); }}>{t("Inloggen", "Log in")}</button></p>)}
+            {view === "forgot" && (<p><button className="text-primary font-medium hover:underline" onClick={() => { setView("login"); setAuthErr(null); }}>{t("← Terug naar inloggen", "← Back to log in")}</button></p>)}
           </div>
         </div>
       </div>
@@ -254,10 +256,10 @@ export function AiEditor() {
               <div className="font-medium truncate">{user.name}</div>
               <div className="text-xs text-muted-foreground truncate">{user.email}</div>
             </div>
-            <button className="w-full text-left rounded-lg px-3 py-2 hover:bg-muted/50 flex items-center gap-2" onClick={() => { setProfileOpen(true); setMenuOpen(false); }}><UserIcon className="h-4 w-4" /> Profiel</button>
-            <button className="w-full text-left rounded-lg px-3 py-2 hover:bg-muted/50 flex items-center gap-2" onClick={() => { setBillingOpen(true); setMenuOpen(false); }} data-testid="menu-billing"><CreditCard className="h-4 w-4" /> Abonnement</button>
+            <button className="w-full text-left rounded-lg px-3 py-2 hover:bg-muted/50 flex items-center gap-2" onClick={() => { setProfileOpen(true); setMenuOpen(false); }}><UserIcon className="h-4 w-4" /> {t("Profiel", "Profile")}</button>
+            <button className="w-full text-left rounded-lg px-3 py-2 hover:bg-muted/50 flex items-center gap-2" onClick={() => { setBillingOpen(true); setMenuOpen(false); }} data-testid="menu-billing"><CreditCard className="h-4 w-4" /> {t("Abonnement", "Subscription")}</button>
             <button className="w-full text-left rounded-lg px-3 py-2 hover:bg-muted/50 flex items-center gap-2" onClick={doAdminUnlock} data-testid="menu-admin-unlock"><Sparkles className="h-4 w-4" /> Admin code</button>
-            <button className="w-full text-left rounded-lg px-3 py-2 hover:bg-muted/50 flex items-center gap-2 text-destructive" onClick={doLogout}><LogOut className="h-4 w-4" /> Uitloggen</button>
+            <button className="w-full text-left rounded-lg px-3 py-2 hover:bg-muted/50 flex items-center gap-2 text-destructive" onClick={doLogout}><LogOut className="h-4 w-4" /> {t("Uitloggen", "Log out")}</button>
           </div>
         )}
       </div>
@@ -270,43 +272,43 @@ export function AiEditor() {
             <Button variant="ghost" size="icon" className="absolute top-4 right-4 z-10 h-9 w-9 text-muted-foreground hover:text-destructive" onClick={() => setConfirmDel(true)} aria-label="Project verwijderen" data-testid="button-delete-project"><Trash2 className="h-5 w-5" /></Button>
             <div className="h-2 w-full bg-gradient-to-r from-primary to-rose-400" />
             <div className="p-8">
-              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Jouw project</p>
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{t("Jouw project", "Your project")}</p>
               <h1 className="mt-1 text-3xl font-bold tracking-tight pr-10">{project.name}</h1>
-              <p className="mt-2 text-muted-foreground line-clamp-2">{project.description || "Je website."}</p>
+              <p className="mt-2 text-muted-foreground line-clamp-2">{project.description || t("Je website.", "Your website.")}</p>
               <div className="mt-5 flex flex-wrap gap-5 text-sm text-muted-foreground">
-                <span className="flex items-center gap-1.5"><FileCode className="w-4 h-4" />{project.fileCount} bestanden</span>
-                <span className="flex items-center gap-1.5"><MessageSquare className="w-4 h-4" />{project.messageCount} berichten</span>
-                <span className="flex items-center gap-1.5"><Clock className="w-4 h-4" />Bijgewerkt {formatDistanceToNow(new Date(project.updatedAt), { addSuffix: true })}</span>
+                <span className="flex items-center gap-1.5"><FileCode className="w-4 h-4" />{project.fileCount} {t("bestanden", "files")}</span>
+                <span className="flex items-center gap-1.5"><MessageSquare className="w-4 h-4" />{project.messageCount} {t("berichten", "messages")}</span>
+                <span className="flex items-center gap-1.5"><Clock className="w-4 h-4" />{t("Bijgewerkt", "Updated")} {formatDistanceToNow(new Date(project.updatedAt), { addSuffix: true })}</span>
               </div>
-              <Button size="lg" className="mt-7 w-full h-12 font-bold text-base" onClick={() => setLocation(`/projects/${project.id}`)} data-testid="button-open-project">Project openen <ArrowRight className="ml-2 h-5 w-5" /></Button>
+              <Button size="lg" className="mt-7 w-full h-12 font-bold text-base" onClick={() => setLocation(`/projects/${project.id}`)} data-testid="button-open-project">{t("Project openen", "Open project")} <ArrowRight className="ml-2 h-5 w-5" /></Button>
             </div>
           </div>
-          <p className="mt-4 text-center text-xs text-muted-foreground">Eén project tegelijk. Verwijder dit project om een nieuwe website te importeren.</p>
+          <p className="mt-4 text-center text-xs text-muted-foreground">{t("Eén project tegelijk. Verwijder dit project om een nieuwe website te importeren.", "One project at a time. Delete this project to import a new website.")}</p>
         </div>
       ) : (
         <div className="w-full max-w-2xl">
           <div className="relative bg-card rounded-xl border border-border shadow-lg p-2 flex flex-col sm:flex-row gap-2">
             <div className="relative flex-1 flex items-center">
               <Globe className="absolute left-3 h-4 w-4 text-muted-foreground pointer-events-none" />
-              <Input value={url} onChange={(e) => { setUrl(e.target.value); if (error) setError(null); }} onKeyDown={(e) => { if (e.key === "Enter") handleImport(); }} placeholder="bijv. stripe.com of https://voorbeeld.nl" className="h-12 border-0 bg-transparent pl-9 text-base focus-visible:ring-0" data-testid="input-import-url" autoFocus />
+              <Input value={url} onChange={(e) => { setUrl(e.target.value); if (error) setError(null); }} onKeyDown={(e) => { if (e.key === "Enter") handleImport(); }} placeholder={t("bijv. stripe.com of https://voorbeeld.nl", "e.g. stripe.com or https://example.com")} className="h-12 border-0 bg-transparent pl-9 text-base focus-visible:ring-0" data-testid="input-import-url" autoFocus />
             </div>
             <Button size="lg" onClick={handleImport} disabled={!url.trim() || importProject.isPending} className="h-12 font-bold disabled:opacity-100 shrink-0" data-testid="button-import-url">
-              {importProject.isPending ? (<><Loader2 className="mr-2 h-5 w-5 animate-spin" />Importeren...</>) : (<>Website importeren<ArrowRight className="ml-2 h-5 w-5" /></>)}
+              {importProject.isPending ? (<><Loader2 className="mr-2 h-5 w-5 animate-spin" />{t("Importeren...", "Importing...")}</>) : (<>{t("Website importeren", "Import website")}<ArrowRight className="ml-2 h-5 w-5" /></>)}
             </Button>
           </div>
           {error && (<p className="mt-3 text-sm text-destructive text-center" data-testid="text-import-error">{error}</p>)}
-          <div className="mt-3 flex items-center gap-3 text-xs text-muted-foreground"><div className="h-px flex-1 bg-border" /> of <div className="h-px flex-1 bg-border" /></div>
+          <div className="mt-3 flex items-center gap-3 text-xs text-muted-foreground"><div className="h-px flex-1 bg-border" /> {t("of", "or")} <div className="h-px flex-1 bg-border" /></div>
           <Button variant="outline" size="lg" className="mt-3 w-full h-12 font-semibold gap-2" disabled={createProject.isPending} onClick={handleCreateBlank} data-testid="button-new-website">
-            {createProject.isPending ? (<><Loader2 className="h-5 w-5 animate-spin" /> Aanmaken…</>) : (<><Sparkles className="h-5 w-5" /> Nieuwe website vanaf nul met Claude Code</>)}
+            {createProject.isPending ? (<><Loader2 className="h-5 w-5 animate-spin" /> {t("Aanmaken…", "Creating…")}</>) : (<><Sparkles className="h-5 w-5" /> {t("Nieuwe website vanaf nul met Claude Code", "New website from scratch with Claude Code")}</>)}
           </Button>
           <ClaudeStatusCard />
           <div className="mt-8 rounded-2xl border border-border bg-card shadow-lg p-8 text-center">
-            <h2 className="text-2xl font-bold tracking-tight">Begin je project</h2>
-            <p className="mt-2 text-muted-foreground">Importeer je bestaande website hierboven of open een project — daarna bewerk je alles met Claude Code, rechtstreeks in je browser.</p>
+            <h2 className="text-2xl font-bold tracking-tight">{t("Begin je project", "Start your project")}</h2>
+            <p className="mt-2 text-muted-foreground">{t("Importeer je bestaande website hierboven of open een project — daarna bewerk je alles met Claude Code, rechtstreeks in je browser.", "Import your existing website above or open a project — then edit everything with Claude Code, right in your browser.")}</p>
             <div className="mt-7 grid gap-4 sm:grid-cols-3 text-left">
-              <div className="rounded-xl border border-border/70 p-4"><TerminalIcon className="h-6 w-6 text-primary" /><h3 className="mt-2 font-semibold text-sm">Claude Code als editor</h3><p className="text-xs text-muted-foreground mt-1">Vertel in gewone taal wat er anders moet; Claude past de bestanden van je site direct aan.</p></div>
-              <div className="rounded-xl border border-border/70 p-4"><Sparkles className="h-6 w-6 text-primary" /><h3 className="mt-2 font-semibold text-sm">Jouw eigen abonnement</h3><p className="text-xs text-muted-foreground mt-1">Koppel één keer je Claude-account. Je betaalt alleen je Claude-abonnement, niets extra's.</p></div>
-              <div className="rounded-xl border border-border/70 p-4"><Rocket className="h-6 w-6 text-primary" /><h3 className="mt-2 font-semibold text-sm">Jij bent eigenaar</h3><p className="text-xs text-muted-foreground mt-1">Je site, je bestanden, je domein — publiceer op een Nebula-adres of je eigen domein met SSL.</p></div>
+              <div className="rounded-xl border border-border/70 p-4"><TerminalIcon className="h-6 w-6 text-primary" /><h3 className="mt-2 font-semibold text-sm">{t("Claude Code als editor", "Claude Code as your editor")}</h3><p className="text-xs text-muted-foreground mt-1">{t("Vertel in gewone taal wat er anders moet; Claude past de bestanden van je site direct aan.", "Say what should change in plain language; Claude edits your site’s files directly.")}</p></div>
+              <div className="rounded-xl border border-border/70 p-4"><Sparkles className="h-6 w-6 text-primary" /><h3 className="mt-2 font-semibold text-sm">{t("Jouw eigen abonnement", "Your own subscription")}</h3><p className="text-xs text-muted-foreground mt-1">{t("Koppel één keer je Claude-account. Je betaalt alleen je Claude-abonnement, niets extra's.", "Link your Claude account once. You only pay for your Claude subscription, nothing extra.")}</p></div>
+              <div className="rounded-xl border border-border/70 p-4"><Rocket className="h-6 w-6 text-primary" /><h3 className="mt-2 font-semibold text-sm">{t("Jij bent eigenaar", "You own it")}</h3><p className="text-xs text-muted-foreground mt-1">{t("Je site, je bestanden, je domein — publiceer op een Nebula-adres of je eigen domein met SSL.", "Your site, your files, your domain — publish on a Nebula address or your own domain with SSL.")}</p></div>
             </div>
           </div>
         </div>
@@ -346,6 +348,7 @@ async function billingApi(path: string, body?: unknown): Promise<{ ok: boolean; 
 
 // ── Abonnement (€50/maand, volledige toegang) ──
 function BillingDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const { t } = useLang();
   const [data, setData] = useState<any>(null);
   const [busy, setBusy] = useState(false);
   const [checkout, setCheckout] = useState<{ clientSecret: string; publishableKey: string; email?: string } | null>(null);
@@ -374,28 +377,28 @@ function BillingDialog({ open, onClose }: { open: boolean; onClose: () => void }
   return (
     <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
       <div className="w-[min(500px,96%)] max-h-[88vh] overflow-y-auto rounded-xl bg-background border shadow-2xl p-6" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-4"><h3 className="text-lg font-semibold flex items-center gap-2"><CreditCard className="h-5 w-5" /> Abonnement</h3><Button variant="ghost" size="icon" className="h-8 w-8" onClick={onClose}><X className="h-4 w-4" /></Button></div>
+        <div className="flex items-center justify-between mb-4"><h3 className="text-lg font-semibold flex items-center gap-2"><CreditCard className="h-5 w-5" /> {t("Abonnement", "Subscription")}</h3><Button variant="ghost" size="icon" className="h-8 w-8" onClick={onClose}><X className="h-4 w-4" /></Button></div>
         {!data ? (<div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>) : data.subscribed ? (
           <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-5">
-            <div className="flex items-center gap-2 text-emerald-700 font-semibold"><Check className="h-4 w-4" /> Actief abonnement — €{price}/maand</div>
-            {data.currentPeriodEnd && <p className="text-xs text-emerald-700/80 mt-1">Verlengt op {data.currentPeriodEnd}</p>}
-            <p className="text-sm text-emerald-900/80 mt-2">Je hebt volledige toegang: Claude Code instellen &amp; bewerken, je eigen domein koppelen en publiceren zonder watermerk.</p>
-            <Button variant="outline" size="sm" className="mt-3 border-destructive/40 text-destructive hover:bg-destructive/10" disabled={busy} onClick={cancel}>Opzeggen</Button>
+            <div className="flex items-center gap-2 text-emerald-700 font-semibold"><Check className="h-4 w-4" /> {t("Actief abonnement", "Active subscription")} — €{price}{t("/maand", "/month")}</div>
+            {data.currentPeriodEnd && <p className="text-xs text-emerald-700/80 mt-1">{t("Verlengt op", "Renews on")} {data.currentPeriodEnd}</p>}
+            <p className="text-sm text-emerald-900/80 mt-2">{t("Je hebt volledige toegang: Claude Code instellen & bewerken, je eigen domein koppelen en publiceren zonder watermerk.", "You have full access: set up & edit with Claude Code, connect your own domain and publish without a watermark.")}</p>
+            <Button variant="outline" size="sm" className="mt-3 border-destructive/40 text-destructive hover:bg-destructive/10" disabled={busy} onClick={cancel}>{t("Opzeggen", "Cancel plan")}</Button>
           </div>
         ) : (
           <div className="rounded-xl border p-5 text-center">
-            <h4 className="text-xl font-bold">Volledige toegang</h4>
-            <p className="text-4xl font-extrabold mt-1">€{price}<span className="text-base font-medium text-muted-foreground">/maand</span></p>
+            <h4 className="text-xl font-bold">{t("Volledige toegang", "Full access")}</h4>
+            <p className="text-4xl font-extrabold mt-1">€{price}<span className="text-base font-medium text-muted-foreground">{t("/maand", "/month")}</span></p>
             <ul className="text-sm text-muted-foreground mt-4 space-y-1.5 text-left max-w-xs mx-auto">
-              <li className="flex gap-2"><Check className="h-4 w-4 text-primary shrink-0" /> Je website bewerken met Claude Code</li>
-              <li className="flex gap-2"><Check className="h-4 w-4 text-primary shrink-0" /> Je eigen domein koppelen</li>
-              <li className="flex gap-2"><Check className="h-4 w-4 text-primary shrink-0" /> Geen watermerk op je site</li>
-              <li className="flex gap-2"><Check className="h-4 w-4 text-primary shrink-0" /> Auto-SEO en alle platformfuncties</li>
+              <li className="flex gap-2"><Check className="h-4 w-4 text-primary shrink-0" /> {t("Je website bewerken met Claude Code", "Edit your website with Claude Code")}</li>
+              <li className="flex gap-2"><Check className="h-4 w-4 text-primary shrink-0" /> {t("Je eigen domein koppelen", "Connect your own domain")}</li>
+              <li className="flex gap-2"><Check className="h-4 w-4 text-primary shrink-0" /> {t("Geen watermerk op je site", "No watermark on your site")}</li>
+              <li className="flex gap-2"><Check className="h-4 w-4 text-primary shrink-0" /> {t("Auto-SEO en alle platformfuncties", "Auto-SEO and all platform features")}</li>
             </ul>
-            <Button className="mt-5 w-full h-11 font-bold" disabled={busy} onClick={subscribe} data-testid="button-subscribe">{busy ? <Loader2 className="h-5 w-5 animate-spin" /> : "Abonneren met iDEAL of creditcard"}</Button>
-            <p className="text-[11px] text-muted-foreground mt-2">Betalen gaat veilig via Stripe (iDEAL, creditcard). Je vult je naam en adres in voor de factuur. Maandelijks opzegbaar.</p>
-            <p className="text-[11px] text-muted-foreground mt-1">Het bewerken zelf werkt op je eigen Claude-abonnement.</p>
-            <button className="mt-3 text-xs text-muted-foreground underline hover:text-destructive" disabled={busy} onClick={cancel} data-testid="button-cancel-inline">Al een abonnement? Opzeggen</button>
+            <Button className="mt-5 w-full h-11 font-bold" disabled={busy} onClick={subscribe} data-testid="button-subscribe">{busy ? <Loader2 className="h-5 w-5 animate-spin" /> : t("Abonneren met iDEAL of creditcard", "Subscribe with iDEAL or credit card")}</Button>
+            <p className="text-[11px] text-muted-foreground mt-2">{t("Betalen gaat veilig via Stripe (iDEAL, creditcard). Je vult je naam en adres in voor de factuur. Maandelijks opzegbaar.", "Payments are handled securely by Stripe (iDEAL, credit card). You fill in your name and address for the invoice. Cancel monthly.")}</p>
+            <p className="text-[11px] text-muted-foreground mt-1">{t("Het bewerken zelf werkt op je eigen Claude-abonnement.", "Editing itself runs on your own Claude subscription.")}</p>
+            <button className="mt-3 text-xs text-muted-foreground underline hover:text-destructive" disabled={busy} onClick={cancel} data-testid="button-cancel-inline">{t("Al een abonnement? Opzeggen", "Already subscribed? Cancel")}</button>
           </div>
         )}
       </div>
@@ -510,6 +513,7 @@ function CheckoutModal({ clientSecret, publishableKey, initialEmail, price, onCl
 
 // ── Profile editor (name / birthdate / phone + change password) ──
 function ProfileDialog({ open, onClose, user, onSaved, onDeleted }: { open: boolean; onClose: () => void; user: PlatformUser; onSaved: (u: PlatformUser) => void; onDeleted: () => void }) {
+  const { t } = useLang();
   const [name, setName] = useState(user.name);
   const [birthdate, setBirthdate] = useState(user.birthdate);
   const [phone, setPhone] = useState(user.phone);
@@ -548,9 +552,9 @@ function ProfileDialog({ open, onClose, user, onSaved, onDeleted }: { open: bool
     <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
       <div className="w-[min(460px,96%)] rounded-xl bg-background border shadow-2xl p-6" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4"><h3 className="text-lg font-semibold">Profiel</h3><Button variant="ghost" size="icon" className="h-8 w-8" onClick={onClose}><X className="h-4 w-4" /></Button></div>
-        <label className="block text-xs text-muted-foreground mb-1">Naam</label>
+        <label className="block text-xs text-muted-foreground mb-1">{t("Naam", "Name")}</label>
         <Input className="mb-3" value={name} onChange={(e) => setName(e.target.value)} />
-        <label className="block text-xs text-muted-foreground mb-1">Geboortedatum</label>
+        <label className="block text-xs text-muted-foreground mb-1">{t("Geboortedatum", "Date of birth")}</label>
         <Input className="mb-3" type="date" value={birthdate} onChange={(e) => setBirthdate(e.target.value)} />
         <label className="block text-xs text-muted-foreground mb-1">Telefoonnummer</label>
         <Input className="mb-3" type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} />

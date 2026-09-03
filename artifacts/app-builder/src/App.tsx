@@ -3,6 +3,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import "@/lib/session"; // registers the Bearer-token getter for the api-client
+import { LangProvider } from "@/lib/i18n";
+import { Splash } from "@/components/splash";
 import { Layout } from "@/components/layout";
 import { Home } from "@/pages/home";
 import { AiEditor } from "@/pages/ai-editor";
@@ -48,12 +50,15 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
-        <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
-          <Layout>
-            <Router />
-          </Layout>
-        </WouterRouter>
-        <Toaster />
+        <LangProvider>
+          <Splash />
+          <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
+            <Layout>
+              <Router />
+            </Layout>
+          </WouterRouter>
+          <Toaster />
+        </LangProvider>
       </TooltipProvider>
     </QueryClientProvider>
   );
