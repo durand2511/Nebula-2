@@ -12,7 +12,7 @@ import { loginBlocked, loginFailure, loginSuccess, clientIp } from "../lib/login
 import { createSession, getSessionUser, deleteSession, tokenFrom, publicUser, seedStaffAccounts } from "../lib/studio-auth.js";
 import { sendBookingEmail, sendPaymentEmail } from "../lib/email.js";
 import { type Wallet, type CreditLot, ymd, applyMonthlyReset, sumActiveCredits, pickLotToConsume, soonestExpiry, lotActive, creditDecision, isPast, bookTooEarly, bookOpensOn, cancelClosed, purchaseWalletUpdate, addMonths } from "../lib/studio-rules.js";
-import { verifyStripeSession, stripeRefund, cancelStripeSubscription } from "./stripe.js";
+import { verifyStripeSession, verifyStripePaymentIntent, completeSetupSubscription, stripeRefund, cancelStripeSubscription } from "./stripe.js";
 import { getInvoiceSettings, createInvoice, renderInvoiceHtml, renderInvoicePdf } from "../lib/invoice.js";
 import { reqBaseUrl } from "../lib/req-url.js";
 import { ensureCalendar } from "../lib/calendar.js";
@@ -563,9 +563,39 @@ router.post("/projects/:id/studio/stripe/finalize", body, async (req, res) => {
   const u = await authed(req, res); if (!u) return;
   const projectId = pid(req as any); const b = req.body || {};
   const sessionId = String(b.session_id || ""); const kind = b.kind;
-  if (!sessionId) { res.status(400).json({ error: "missing session_id" }); return; }
+  // The custom in-app checkout (own-keys mode) finalizes with a payment_intent (one-off) or a
+  // setup_intent (abonnement — the subscription is created HERE, on the saved payment method);
+  // hosted Checkout keeps finalizing with a session_id.
+  const paymentIntentId = String(b.payment_intent || "");
+  const setupIntentId = String(b.setup_intent || "");
+  if (!sessionId && !paymentIntentId && !setupIntentId) { res.status(400).json({ error: "missing session_id" }); return; }
   try {
-    const v = await verifyStripeSession(projectId, sessionId);
+    let v: { paid: boolean; paymentIntent: string | null; subscription: string | null; amountTotal: number | null };
+    if (setupIntentId) {
+      // Recurring: price comes from the DB (minus the server-validated discount) — never from the client.
+      let subName = "", price = 0;
+      if (kind === "buy") {
+        const [m] = await db.select().from(studioMembers).where(and(eq(studioMembers.projectId, projectId), eq(studioMembers.id, Number(b.memberId))));
+        if (!m) { res.status(404).json({ error: "Lidmaatschap niet gevonden." }); return; }
+        subName = m.name; price = m.price;
+      } else if (kind === "video") {
+        const [pl] = await db.select().from(studioVideoPlans).where(and(eq(studioVideoPlans.projectId, projectId), eq(studioVideoPlans.category, String(b.category || ""))));
+        if (!pl) { res.status(404).json({ error: "Video-abonnement niet gevonden." }); return; }
+        subName = "Video-abonnement " + pl.category; price = pl.price;
+      } else { res.status(400).json({ error: "Onbekend type." }); return; }
+      // Idempotent: a retried finalize (double click / revisit of the return URL) must not create a
+      // second subscription — the setup_intent id is stored as the purchase's payment reference.
+      const dup = await db.select().from(studioPurchases).where(and(eq(studioPurchases.projectId, projectId), eq(studioPurchases.paymentIntent, setupIntentId)));
+      if (dup.length) { res.json({ ok: true, already: true }); return; }
+      const cents = Math.round(Math.max(0.5, price - Math.max(0, Number(b.discount) || 0)) * 100);
+      const r = await completeSetupSubscription(projectId, setupIntentId, { name: subName, amountCents: cents, email: u.email });
+      if (!r.ok) { res.status(400).json({ error: r.error || "Betaling kon niet bevestigd worden — er is niets toegekend." }); return; }
+      v = { paid: true, paymentIntent: setupIntentId, subscription: r.subscription, amountTotal: cents };
+    } else if (paymentIntentId) {
+      v = await verifyStripePaymentIntent(projectId, paymentIntentId);
+    } else {
+      v = await verifyStripeSession(projectId, sessionId);
+    }
     if (!v.paid) { res.status(400).json({ error: "Betaling kon niet bevestigd worden — er is niets toegekend." }); return; }
     const amount = (v.amountTotal || 0) / 100;
     if (kind === "book") {

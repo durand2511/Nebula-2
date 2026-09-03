@@ -438,26 +438,84 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
   function setPending(p){try{localStorage.setItem(KEY+'_pending',JSON.stringify(p));}catch(e){}}
   function getPending(){try{return JSON.parse(localStorage.getItem(KEY+'_pending')||'null');}catch(e){return null;}}
   function clearPending(){try{localStorage.removeItem(KEY+'_pending');}catch(e){}}
-  // Open a payment dialog with ONE reliable "Betaal met Stripe" link (Stripe can't be iframed,
-  // so it opens a new tab). The overlay blocks repeat-clicks. We stash what's being paid for;
-  // ONLY after returning (?betaald=1) AND server-verifying the payment are credits/booking granted.
+  // Strip Stripe return params so a return_url/success_url never doubles them up.
+  function payCleanUrl(){return location.href.replace(/[?&](betaald|geannuleerd)=1/g,'').replace(/[?&](session_id|payment_intent|payment_intent_client_secret|setup_intent|setup_intent_client_secret|redirect_status)=[^&]*/g,'');}
+  // Load Stripe.js once (needed for the custom in-app checkout — own-keys mode).
+  var stripeJsP=null;
+  function loadStripeJs(){if(window.Stripe)return Promise.resolve();if(stripeJsP)return stripeJsP;
+    stripeJsP=new Promise(function(ok,bad){var s=document.createElement('script');s.src='https://js.stripe.com/v3/';s.onload=function(){ok();};s.onerror=function(){stripeJsP=null;bad(new Error('load'));};document.head.appendChild(s);});
+    return stripeJsP;}
+  // In-app success (card, no bank redirect): finalize server-side right away, then refresh.
+  function finalizePaidNow(p,ref){
+    clearPending();var ov=root.querySelector('#ba-pay-ov');if(ov&&ov.parentNode)ov.parentNode.removeChild(ov);
+    spost('stripe/finalize',Object.assign({kind:p.kind,classId:p.classId,date:p.date,memberId:p.memberId,category:p.category,code:p.code,discount:p.discount},ref)).then(function(r){
+      if(r.ok){refreshAndRender();setTimeout(function(){alert('Betaling gelukt! Je boeking/aankoop is bevestigd.');},60);}
+      else setTimeout(function(){alert((r.d&&r.d.error)||'Betaling kon niet bevestigd worden — er is niets toegekend.');},60);
+    });
+  }
+  // Open the payment dialog. Studios that pay on their OWN Stripe account get the custom in-app
+  // checkout (Payment Element: iDEAL, kaart, …) right in this modal; Connect studios keep the
+  // hosted-Checkout link (Stripe can't be iframed, so that opens a new tab). We stash what's being
+  // paid for; ONLY after server-verifying the payment are credits/booking granted.
   function payViaStripe(kind,name,amount,pending){
     if(!projId()){alert('Betalen werkt in de gepubliceerde app.');return;}
     if(root.querySelector('#ba-pay-ov'))return; // al een betaalvenster open
     setPending(pending);
     var ov=document.createElement('div');ov.id='ba-pay-ov';
-    ov.style.cssText='position:fixed;inset:0;z-index:2147483647;background:rgba(15,23,42,.55);display:flex;align-items:center;justify-content:center;padding:20px';
-    ov.innerHTML='<div style="background:#fff;border-radius:14px;max-width:380px;width:100%;padding:22px;font:inherit;font-family:inherit;color:#1f2937"><h3 style="margin:0 0 4px;font-size:18px">Betalen</h3><p style="color:#6b7280;font-size:14px;margin:0 0 16px">'+esc(name)+' — €'+amount+'</p><div id="ba-pay-body" style="font-size:14px;color:#6b7280">Betaling voorbereiden…</div><div style="margin-top:18px;text-align:right"><button id="ba-pay-cancel" class="ba-btn ghost sm">Sluiten</button></div></div>';
+    ov.style.cssText='position:fixed;inset:0;z-index:2147483647;background:rgba(15,23,42,.55);display:flex;align-items:flex-start;justify-content:center;padding:20px;overflow:auto';
+    ov.innerHTML='<div style="background:#fff;border-radius:14px;max-width:440px;width:100%;padding:22px;margin:auto 0;font:inherit;font-family:inherit;color:#1f2937"><h3 style="margin:0 0 4px;font-size:18px">Betalen</h3><p style="color:#6b7280;font-size:14px;margin:0 0 16px">'+esc(name)+' — €'+amount+'</p><div id="ba-pay-body" style="font-size:14px;color:#6b7280">Betaling voorbereiden…</div><div style="margin-top:18px;text-align:right"><button id="ba-pay-cancel" class="ba-btn ghost sm">Sluiten</button></div></div>';
     root.appendChild(ov);
     ov.querySelector('#ba-pay-cancel').onclick=function(){clearPending();ov.parentNode&&ov.parentNode.removeChild(ov);};
-    var base=location.href.replace(/[?&](betaald|geannuleerd)=1/g,'').replace(/[?&]session_id=[^&]*/g,'');
+    var base=payCleanUrl();
     var sep=base.indexOf('?')>-1?'&':'?';
-    fetch(api('stripe/checkout'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kind:kind,name:name,amount:amount,successUrl:base+sep+'betaald=1&session_id={CHECKOUT_SESSION_ID}',cancelUrl:base+sep+'geannuleerd=1'})})
-      .then(function(r){return r.json();}).then(function(d){
+    function hostedFallback(){
+      fetch(api('stripe/checkout'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kind:kind,name:name,amount:amount,successUrl:base+sep+'betaald=1&session_id={CHECKOUT_SESSION_ID}',cancelUrl:base+sep+'geannuleerd=1'})})
+        .then(function(r){return r.json();}).then(function(d){
+          var body=ov.querySelector('#ba-pay-body');if(!body)return;
+          if(d.url){body.innerHTML='<a href="'+d.url+'" target="_blank" rel="noopener" style="display:inline-block;background:var(--ba);color:#fff;text-decoration:none;font-weight:700;padding:10px 16px;border-radius:10px">Betaal met Stripe ↗</a><p style="color:#9ca3af;font-size:12px;margin:10px 0 0">Opent in een nieuw tabblad. Daarna kom je terug en wordt je aankoop bevestigd.</p>';}
+          else{clearPending();body.textContent=d.error||'Afrekenen mislukt.';}
+        }).catch(function(){clearPending();var body=ov.querySelector('#ba-pay-body');if(body)body.textContent='Afrekenen mislukt.';});
+    }
+    // Custom in-app checkout: mount the Payment Element in this modal, confirm in place. Cards
+    // finish in-app (finalize direct); iDEAL hops to the bank and returns via ?betaald=1.
+    function mountElements(d){
+      loadStripeJs().then(function(){
         var body=ov.querySelector('#ba-pay-body');if(!body)return;
-        if(d.url){body.innerHTML='<a href="'+d.url+'" target="_blank" rel="noopener" style="display:inline-block;background:var(--ba);color:#fff;text-decoration:none;font-weight:700;padding:10px 16px;border-radius:10px">Betaal met Stripe ↗</a><p style="color:#9ca3af;font-size:12px;margin:10px 0 0">Opent in een nieuw tabblad. Daarna kom je terug en wordt je aankoop bevestigd.</p>';}
-        else{clearPending();body.textContent=d.error||'Afrekenen mislukt.';}
-      }).catch(function(){clearPending();var body=ov.querySelector('#ba-pay-body');if(body)body.textContent='Afrekenen mislukt.';});
+        body.innerHTML='<div id="ba-pay-el"></div><p id="ba-pay-err" style="color:#dc2626;font-size:13px;margin:10px 0 0;display:none"></p>'+
+          '<button id="ba-pay-go" class="ba-btn" style="width:100%;margin-top:14px">Betaal €'+amount+(d.intentType==='setup'?'/maand':'')+'</button>'+
+          '<p style="color:#9ca3af;font-size:12px;margin:10px 0 0;text-align:center">Veilig betalen via Stripe · iDEAL &amp; kaart</p>';
+        var st=window.Stripe(d.publishableKey);
+        var el=st.elements({clientSecret:d.clientSecret,locale:'auto',appearance:{theme:'stripe',variables:{colorPrimary:(getComputedStyle(root).getPropertyValue('--ba')||'#e0855b').trim()||'#e0855b',borderRadius:'10px'}}});
+        var pe=el.create('payment',{layout:'tabs'});
+        pe.on('loaderror',function(ev){clearPending();var b2=ov.querySelector('#ba-pay-body');if(b2)b2.textContent=(ev&&ev.error&&ev.error.message)||'Het betaalformulier kon niet laden.';});
+        pe.mount(ov.querySelector('#ba-pay-el'));
+        var btn=ov.querySelector('#ba-pay-go'),errEl=ov.querySelector('#ba-pay-err');
+        function showErr(m){if(errEl){errEl.textContent=m||'Betaling mislukt.';errEl.style.display='block';}btn.disabled=false;btn.textContent='Betaal €'+amount+(d.intentType==='setup'?'/maand':'');}
+        btn.onclick=function(){
+          btn.disabled=true;btn.textContent='Even geduld…';if(errEl)errEl.style.display='none';
+          var ret=base+sep+'betaald=1';
+          if(d.intentType==='setup'){
+            st.confirmSetup({elements:el,confirmParams:{return_url:ret},redirect:'if_required'}).then(function(r){
+              if(r.error){showErr(r.error.message);return;}
+              if(r.setupIntent&&r.setupIntent.status==='succeeded'){finalizePaidNow(pending,{setup_intent:r.setupIntent.id});}
+              else showErr('De betaalmethode is nog niet bevestigd.');
+            }).catch(function(){showErr();});
+          }else{
+            st.confirmPayment({elements:el,confirmParams:{return_url:ret},redirect:'if_required'}).then(function(r){
+              if(r.error){showErr(r.error.message);return;}
+              if(r.paymentIntent&&r.paymentIntent.status==='succeeded'){finalizePaidNow(pending,{payment_intent:r.paymentIntent.id});}
+              else if(r.paymentIntent&&r.paymentIntent.status==='processing'){showErr('De betaling wordt nog verwerkt — je aankoop wordt bevestigd zodra de betaling binnen is.');}
+              else showErr();
+            }).catch(function(){showErr();});
+          }
+        };
+      }).catch(function(){hostedFallback();});
+    }
+    fetch(api('stripe/pay-element'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kind:kind,name:name,amount:amount,email:myEmail()})})
+      .then(function(r){return r.json();}).then(function(d){
+        if(d&&d.elements&&d.clientSecret&&d.publishableKey&&SRV)mountElements(d);
+        else hostedFallback();
+      }).catch(function(){hostedFallback();});
   }
 
   // Ask for an optional discount code / gift card, validate it server-side, then run go()
@@ -1882,9 +1940,15 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
   var stripeReturn=null;
   (function(){
     if(!/[?&]betaald=1(&|$)/.test(location.search||''))return;
-    var p=getPending();var sid=(location.search.match(/[?&]session_id=([^&]+)/)||[])[1];
-    if(!p)return; if(!sid){clearPending();return;}
-    stripeReturn={p:p,sid:decodeURIComponent(sid)};clearPending();
+    var p=getPending();
+    var sid=(location.search.match(/[?&]session_id=([^&]+)/)||[])[1];
+    // Custom in-app checkout returns from the bank (iDEAL) with payment_intent / setup_intent.
+    var pi=(location.search.match(/[?&]payment_intent=([^&]+)/)||[])[1];
+    var si=(location.search.match(/[?&]setup_intent=([^&]+)/)||[])[1];
+    var rs=(location.search.match(/[?&]redirect_status=([^&]+)/)||[])[1];
+    if(!p)return; if(!sid&&!pi&&!si){clearPending();return;}
+    if(rs==='failed'){clearPending();setTimeout(function(){alert('De betaling is niet gelukt — er is niets toegekend.');},400);return;}
+    stripeReturn={p:p,sid:sid?decodeURIComponent(sid):'',pi:pi?decodeURIComponent(pi):'',si:si?decodeURIComponent(si):''};clearPending();
   })();
   // Local-mode grant (server-mode uses /studio/stripe/finalize — see finalizeStripeReturn).
   function localStripeGrant(p,sid){
@@ -1901,13 +1965,14 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
   }
   // Called by boot once SRV is known: finalize a stashed Stripe return server-side or locally.
   function finalizeStripeReturn(){
-    if(!stripeReturn)return;var p=stripeReturn.p,sid=stripeReturn.sid;stripeReturn=null;
+    if(!stripeReturn)return;var p=stripeReturn.p,sid=stripeReturn.sid,pi=stripeReturn.pi,si=stripeReturn.si;stripeReturn=null;
     if(SRV){
-      spost('stripe/finalize',{session_id:sid,kind:p.kind,classId:p.classId,date:p.date,memberId:p.memberId,category:p.category,code:p.code,discount:p.discount}).then(function(r){
+      var ref=si?{setup_intent:si}:pi?{payment_intent:pi}:{session_id:sid};
+      spost('stripe/finalize',Object.assign({kind:p.kind,classId:p.classId,date:p.date,memberId:p.memberId,category:p.category,code:p.code,discount:p.discount},ref)).then(function(r){
         if(r.ok){refreshAndRender();setTimeout(function(){alert('Betaling gelukt! Je boeking/aankoop is bevestigd.');},60);}
         else setTimeout(function(){alert((r.d&&r.d.error)||'Betaling kon niet bevestigd worden — er is niets toegekend.');},60);
       });
-    } else { localStripeGrant(p,sid); }
+    } else if(sid){ localStripeGrant(p,sid); }
   }
 
   // Mindbody activation bridge: an e-mailed link carries ?activate=<token>. We consume it once at the

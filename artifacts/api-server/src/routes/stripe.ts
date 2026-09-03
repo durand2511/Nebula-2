@@ -103,8 +103,13 @@ function toForm(obj: Record<string, unknown>, prefix = ""): string[] {
   return out;
 }
 
-async function stripeReq(method: string, path: string, params?: Record<string, unknown>, account?: string): Promise<any> {
-  const sk = process.env.STRIPE_SECRET_KEY;
+// Auth for a Stripe call: a plain string = Connect account on the platform key (historic call
+// sites); { sk } = the studio's OWN Stripe account via its own secret key (no Connect header).
+type StripeAuth = string | { sk?: string; account?: string } | undefined | null;
+async function stripeReq(method: string, path: string, params?: Record<string, unknown>, auth?: StripeAuth): Promise<any> {
+  const own = auth && typeof auth === "object" ? auth.sk : undefined;
+  const account = auth ? (typeof auth === "string" ? auth : auth.account) : undefined;
+  const sk = own || process.env.STRIPE_SECRET_KEY;
   if (!sk) throw new Error("STRIPE_SECRET_KEY ontbreekt in .env");
   const headers: Record<string, string> = { Authorization: `Bearer ${sk}` };
   if (account) headers["Stripe-Account"] = account;
@@ -130,9 +135,22 @@ async function stripeAccountId(projectId: number): Promise<string | null> {
   return row?.accountId ?? null;
 }
 
+// Resolve how a project pays: OWN keys (studio's own Stripe account — custom in-app checkout) win
+// over the Connect account. Returns null when Stripe isn't linked at all.
+async function projectAuth(projectId: number): Promise<{ auth: { sk?: string; account?: string }; own: boolean; pk: string; enabled: boolean; row: typeof projectStripe.$inferSelect } | null> {
+  const [row] = await db.select().from(projectStripe).where(eq(projectStripe.projectId, projectId));
+  if (!row) return null;
+  if (row.secretKey && row.secretKey.startsWith("sk_")) {
+    return { auth: { sk: row.secretKey }, own: true, pk: row.publishableKey || "", enabled: true, row };
+  }
+  if (!row.accountId) return null;
+  return { auth: { account: row.accountId }, own: false, pk: "", enabled: row.chargesEnabled === "true", row };
+}
+
 /** Verify a Checkout session was actually paid (so a customer can't fake it by visiting success_url). */
 export async function verifyStripeSession(projectId: number, sessionId: string): Promise<{ paid: boolean; paymentIntent: string | null; subscription: string | null; amountTotal: number | null }> {
-  const acct = await stripeAccountId(projectId);
+  const pa = await projectAuth(projectId);
+  const acct = pa?.auth;
   if (!acct || !sessionId) return { paid: false, paymentIntent: null, subscription: null, amountTotal: null };
   const session = await stripeReq("GET", `checkout/sessions/${encodeURIComponent(sessionId)}`, undefined, acct);
   const paid = session.payment_status === "paid" || session.status === "complete";
@@ -141,7 +159,7 @@ export async function verifyStripeSession(projectId: number, sessionId: string):
 
 /** Cancel a recurring subscription at period end (no refund) — used to "opzeggen" a video plan. */
 export async function cancelStripeSubscription(projectId: number, subscriptionId: string): Promise<boolean> {
-  const acct = await stripeAccountId(projectId);
+  const acct = (await projectAuth(projectId))?.auth;
   if (!acct || !subscriptionId) return false;
   await stripeReq("POST", `subscriptions/${encodeURIComponent(subscriptionId)}`, { cancel_at_period_end: true }, acct);
   return true;
@@ -151,7 +169,7 @@ const ymdUTC = (d: Date) => d.toISOString().slice(0, 10);
 
 /** Refund a one-off payment (optionally partial) or cancel+refund a subscription. */
 export async function stripeRefund(projectId: number, opts: { paymentIntent?: string; subscription?: string; amount?: number }): Promise<{ ok: boolean; refunded: boolean; amount: number; cancelled?: boolean; error?: string }> {
-  const acct = await stripeAccountId(projectId);
+  const acct = (await projectAuth(projectId))?.auth;
   if (!acct) return { ok: false, refunded: false, amount: 0, error: "Stripe niet gekoppeld." };
   if (opts.subscription) {
     const sub = await stripeReq("GET", `subscriptions/${encodeURIComponent(opts.subscription)}`, undefined, acct);
@@ -173,6 +191,63 @@ export async function stripeRefund(projectId: number, opts: { paymentIntent?: st
   if (opts.amount != null && Number(opts.amount) > 0) params.amount = Math.round(Number(opts.amount) * 100);
   const refund = await stripeReq("POST", "refunds", params, acct);
   return { ok: true, refunded: true, amount: (refund.amount || 0) / 100 };
+}
+
+/** Verify a Payment Element payment (own-keys mode): did this PaymentIntent actually succeed? */
+export async function verifyStripePaymentIntent(projectId: number, paymentIntentId: string): Promise<{ paid: boolean; paymentIntent: string | null; subscription: string | null; amountTotal: number | null }> {
+  const pa = await projectAuth(projectId);
+  if (!pa || !/^pi_/.test(paymentIntentId)) return { paid: false, paymentIntent: null, subscription: null, amountTotal: null };
+  const pi = await stripeReq("GET", `payment_intents/${encodeURIComponent(paymentIntentId)}`, undefined, pa.auth);
+  const paid = pi.status === "succeeded";
+  return { paid, paymentIntent: paid ? pi.id : null, subscription: null, amountTotal: typeof pi.amount_received === "number" ? pi.amount_received : null };
+}
+
+/** Own-keys abonnement: after the customer confirmed the SetupIntent (card in-app, iDEAL via bank
+ * redirect → reusable SEPA mandate), create the monthly subscription on the saved payment method.
+ * Mirrors the platform's /billing/subscribe/complete, but on the studio's own account. */
+export async function completeSetupSubscription(projectId: number, setupIntentId: string, opts: { name: string; amountCents: number; email: string }): Promise<{ ok: boolean; subscription: string; error?: string }> {
+  const pa = await projectAuth(projectId);
+  if (!pa?.own) return { ok: false, subscription: "", error: "Eigen Stripe-koppeling ontbreekt." };
+  if (!/^seti_/.test(setupIntentId)) return { ok: false, subscription: "", error: "Ongeldige betaling." };
+  const si = await stripeReq("GET", `setup_intents/${encodeURIComponent(setupIntentId)}?expand[]=latest_attempt`, undefined, pa.auth);
+  if (si.status !== "succeeded") return { ok: false, subscription: "", error: "De betaalmethode is nog niet bevestigd." };
+  if (si.metadata?.projectId !== String(projectId)) return { ok: false, subscription: "", error: "Deze betaling hoort niet bij deze studio." };
+  // iDEAL itself is single-use; the reusable method is the SEPA mandate it generated.
+  let pm = String(si.payment_method || "");
+  const gen = si.latest_attempt?.payment_method_details?.ideal?.generated_sepa_debit;
+  if (gen) pm = String(gen);
+  if (!pm) return { ok: false, subscription: "", error: "Geen betaalmethode gevonden." };
+  const customer = String(si.customer || "");
+  if (!customer) return { ok: false, subscription: "", error: "Geen klant gevonden." };
+  await stripeReq("POST", `customers/${encodeURIComponent(customer)}`, { "invoice_settings[default_payment_method]": pm }, pa.auth);
+  const product = await stripeReq("POST", "products", { name: opts.name || "Abonnement" }, pa.auth);
+  const sub = await stripeReq("POST", "subscriptions", {
+    customer,
+    items: [{ price_data: { currency: "eur", unit_amount: opts.amountCents, recurring: { interval: "month" }, product: product.id } }],
+    default_payment_method: pm,
+    payment_behavior: "allow_incomplete",
+    metadata: { projectId: String(projectId), email: opts.email || "" },
+  }, pa.auth);
+  return { ok: true, subscription: String(sub.id) };
+}
+
+// Auto-create (once) a webhook endpoint on the studio's OWN account so renewals/dunning of their
+// subscriptions reach us. The signing secret is stored per project; the webhook route tries the
+// platform secret first and falls back to these. Best-effort: payments work without it, renewals
+// just wouldn't extend access.
+async function ensureOwnWebhook(projectId: number, req: Request): Promise<void> {
+  try {
+    const pa = await projectAuth(projectId);
+    if (!pa?.own || pa.row.webhookSecret) return;
+    const url = `${(process.env.PUBLIC_API_URL || reqBaseUrl(req)).replace(/\/$/, "")}/api/stripe/webhook`;
+    if (url.includes("localhost")) return; // Stripe rejects localhost endpoints
+    const ep = await stripeReq("POST", "webhook_endpoints", {
+      url,
+      enabled_events: ["invoice.paid", "invoice.payment_succeeded", "invoice.payment_failed", "customer.subscription.deleted"],
+      description: "Nebula booking app (project " + projectId + ")",
+    }, pa.auth);
+    if (ep?.secret) await db.update(projectStripe).set({ webhookSecret: String(ep.secret) }).where(eq(projectStripe.projectId, projectId));
+  } catch (err) { logger.warn({ err, projectId }, "[stripe] own webhook create failed (best-effort)"); }
 }
 
 // A Stripe statement_descriptor (what the customer sees on their bank statement) must be 5–22 chars,
@@ -255,6 +330,12 @@ router.get("/projects/:id/stripe/status", async (req, res) => {
   try {
     const [row] = await db.select().from(projectStripe).where(eq(projectStripe.projectId, projectId));
     if (!row) { res.json({ connected: false }); return; }
+    // Own-keys mode: the studio pays on its own Stripe account — always "connected", no Connect
+    // requirements/payout gating to report.
+    if (row.secretKey && row.secretKey.startsWith("sk_")) {
+      res.json({ connected: true, chargesEnabled: true, payoutsEnabled: true, requirementsDue: [], disabledReason: null, payoutSchedule: null, accountId: "", detailsSubmitted: true, ownKeys: true });
+      return;
+    }
     const acct = await stripeReq("GET", `accounts/${row.accountId}`);
     const enabled = !!acct.charges_enabled;
     if (String(enabled) !== row.chargesEnabled) {
@@ -306,9 +387,9 @@ export type ProjectPayment = { id: string; amount: number; created: number; curr
 
 /** Succeeded Stripe payments (PaymentIntents) for a project's connected account, or [] if none. */
 export async function fetchProjectPayments(projectId: number): Promise<ProjectPayment[]> {
-  const [row] = await db.select().from(projectStripe).where(eq(projectStripe.projectId, projectId));
-  if (!row || !row.accountId) return [];
-  const list = await stripeReq("GET", "payment_intents?limit=50&expand[]=data.latest_charge", undefined, row.accountId);
+  const pa = await projectAuth(projectId);
+  if (!pa) return [];
+  const list = await stripeReq("GET", "payment_intents?limit=50&expand[]=data.latest_charge", undefined, pa.auth);
   const raw = Array.isArray(list.data) ? list.data : [];
   return raw
     .filter((p: any) => p && p.status === "succeeded")
@@ -377,12 +458,12 @@ router.get("/projects/:id/stripe/payments", async (req, res) => {
   const u = await getStudioUser(projectId, tokenFrom(req as any));
   if (!u || u.role !== "admin") { res.status(401).json({ error: "Niet ingelogd." }); return; }
   try {
-    const [row] = await db.select().from(projectStripe).where(eq(projectStripe.projectId, projectId));
-    if (!row || !row.accountId) { res.json({ connected: false, payments: [] }); return; }
+    const pa = await projectAuth(projectId);
+    if (!pa) { res.json({ connected: false, payments: [] }); return; }
     const payments = await fetchProjectPayments(projectId);
     // Auto-book product sales + deduct stock (leaves appointment-priced payments for manual reconcile).
     const rec = await reconcileProducts(projectId, payments).catch(() => ({ deducted: 0 }));
-    res.json({ connected: row.chargesEnabled === "true", payments, reconciled: rec.deducted });
+    res.json({ connected: pa.enabled, payments, reconciled: rec.deducted });
   } catch (err) { logger.error({ err, projectId }, "[stripe] payments failed"); res.status(500).json({ error: "Betalingen ophalen mislukt.", payments: [] }); }
 });
 
@@ -461,8 +542,8 @@ router.post("/projects/:id/stripe/checkout", async (req, res) => {
   const amountCents = Math.round(Number(b.amount) * 100);
   if (!amountCents || amountCents < 50) { res.status(400).json({ error: "Ongeldig bedrag (minimaal €0,50)." }); return; }
   try {
-    const [row] = await db.select().from(projectStripe).where(eq(projectStripe.projectId, projectId));
-    if (!row || row.chargesEnabled !== "true") {
+    const pa = await projectAuth(projectId);
+    if (!pa || !pa.enabled) {
       res.status(400).json({ error: "De studio heeft Stripe nog niet (volledig) gekoppeld." });
       return;
     }
@@ -479,11 +560,100 @@ router.post("/projects/:id/stripe/checkout", async (req, res) => {
       line_items: [{ price_data: priceData, quantity: 1 }],
       success_url: (typeof b.successUrl === "string" && b.successUrl) || `${baseUrl(req)}/projects/${projectId}?betaald=1`,
       cancel_url: (typeof b.cancelUrl === "string" && b.cancelUrl) || `${baseUrl(req)}/projects/${projectId}?geannuleerd=1`,
-    }, row.accountId);
+    }, pa.auth);
     res.json({ url: session.url, id: session.id });
   } catch (err) {
     logger.error({ err, projectId }, "[stripe] checkout failed");
     res.status(500).json({ error: err instanceof Error ? err.message : "Afrekenen mislukt" });
+  }
+});
+
+// ── 3a-bis. Custom in-app checkout (Payment Element: iDEAL + kaart) — own-keys mode only ──
+// The booking app calls this first; when the studio pays on its OWN Stripe account it gets a
+// clientSecret to render the Payment Element in-app (like the Nebula platform checkout). Studios on
+// Connect get { elements: false } and the app falls back to hosted Checkout.
+router.post("/projects/:id/stripe/pay-element", json({ limit: "16kb" }), async (req, res) => {
+  const projectId = Number(req.params.id);
+  if (isNaN(projectId)) { res.status(400).json({ error: "Invalid project ID" }); return; }
+  const b = req.body ?? {};
+  const kind = b.kind === "abonnement" ? "abonnement" : b.kind === "strippenkaart" ? "strippenkaart" : "les";
+  const name = typeof b.name === "string" && b.name.trim() ? b.name.trim().slice(0, 200) : "Boeking";
+  const email = typeof b.email === "string" ? b.email.trim().slice(0, 200) : "";
+  const amountCents = Math.round(Number(b.amount) * 100);
+  if (!amountCents || amountCents < 50) { res.status(400).json({ error: "Ongeldig bedrag (minimaal €0,50)." }); return; }
+  try {
+    const pa = await projectAuth(projectId);
+    if (!pa || !pa.enabled) { res.status(400).json({ error: "De studio heeft Stripe nog niet (volledig) gekoppeld." }); return; }
+    if (!pa.own || !pa.pk) { res.json({ elements: false }); return; } // Connect → hosted Checkout fallback
+    void ensureOwnWebhook(projectId, req as any); // renewals must reach us; best-effort, don't block
+    // Explicit payment_method_types (NOT automatic_payment_methods): the dashboard's "automatic" set
+    // often misses iDEAL even when the capability is active. A method the account hasn't activated
+    // makes Stripe reject the whole intent, so retry without the rejected method (minimum: card).
+    const createWithMethods = async (path: string, params: Record<string, unknown>, methods: string[]): Promise<any> => {
+      for (;;) {
+        try {
+          return await stripeReq("POST", path, { ...params, payment_method_types: methods }, pa.auth);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "";
+          const bad = methods.find((m) => m !== "card" && msg.includes(`"${m}"`));
+          if (!bad || !/activated|activate/i.test(msg)) throw err;
+          methods = methods.filter((m) => m !== bad);
+        }
+      }
+    };
+    if (kind === "abonnement") {
+      // Recurring: authorise the payment method via a SETUP intent; the subscription itself is
+      // created server-side at finalize (studio/stripe/finalize). iDEAL only stays in the list when
+      // SEPA is activated too — an iDEAL mandate is charged as SEPA-incasso on renewal, so without
+      // SEPA every following month would bounce.
+      const customer = await stripeReq("POST", "customers", { ...(email ? { email } : {}), description: name, metadata: { projectId: String(projectId) } }, pa.auth);
+      let si: any;
+      try {
+        si = await stripeReq("POST", "setup_intents", {
+          customer: customer.id, payment_method_types: ["card", "ideal", "sepa_debit"],
+          usage: "off_session", metadata: { projectId: String(projectId), kind, name },
+        }, pa.auth);
+      } catch {
+        si = await stripeReq("POST", "setup_intents", {
+          customer: customer.id, payment_method_types: ["card"],
+          usage: "off_session", metadata: { projectId: String(projectId), kind, name },
+        }, pa.auth);
+      }
+      res.json({ elements: true, intentType: "setup", clientSecret: si.client_secret, publishableKey: pa.pk });
+      return;
+    }
+    // One-off (les / strippenkaart): a PaymentIntent with iDEAL, kaart, Klarna en Bancontact.
+    const pi = await createWithMethods("payment_intents", {
+      amount: amountCents, currency: "eur", description: name,
+      ...(email ? { receipt_email: email } : {}),
+      metadata: { projectId: String(projectId), kind, name },
+    }, ["card", "ideal", "klarna", "bancontact"]);
+    res.json({ elements: true, intentType: "payment", clientSecret: pi.client_secret, publishableKey: pa.pk });
+  } catch (err) {
+    logger.error({ err, projectId }, "[stripe] pay-element failed");
+    res.status(500).json({ error: err instanceof Error ? err.message : "Afrekenen mislukt" });
+  }
+});
+
+// Store a studio's OWN Stripe keys (switches the project from Connect to own-keys mode and turns on
+// the custom in-app checkout). Body: { publishableKey: "pk_…", secretKey: "sk_…" }.
+router.post("/projects/:id/stripe/own-keys", json({ limit: "16kb" }), async (req, res) => {
+  const projectId = Number(req.params.id);
+  if (isNaN(projectId)) { res.status(400).json({ error: "Invalid project ID" }); return; }
+  const pk = String(req.body?.publishableKey || "").trim();
+  const sk = String(req.body?.secretKey || "").trim();
+  if (!/^pk_(live|test)_/.test(pk) || !/^sk_(live|test)_/.test(sk)) { res.status(400).json({ error: "Ongeldige keys (pk_… en sk_… verwacht)." }); return; }
+  if (pk.split("_")[1] !== sk.split("_")[1]) { res.status(400).json({ error: "De keys horen niet bij elkaar (live/test gemengd)." }); return; }
+  try {
+    await stripeReq("GET", "balance", undefined, { sk }); // validate the secret key actually works
+    const [row] = await db.select().from(projectStripe).where(eq(projectStripe.projectId, projectId));
+    if (row) await db.update(projectStripe).set({ secretKey: sk, publishableKey: pk, webhookSecret: "" }).where(eq(projectStripe.projectId, projectId));
+    else await db.insert(projectStripe).values({ projectId, accountId: "", chargesEnabled: "true", secretKey: sk, publishableKey: pk });
+    void ensureOwnWebhook(projectId, req as any);
+    res.json({ ok: true });
+  } catch (err) {
+    logger.error({ err, projectId }, "[stripe] own-keys failed");
+    res.status(400).json({ error: err instanceof Error ? err.message : "Keys opslaan mislukt" });
   }
 });
 
@@ -495,9 +665,9 @@ router.get("/projects/:id/stripe/verify", async (req, res) => {
   const sessionId = typeof req.query.session_id === "string" ? req.query.session_id : "";
   if (isNaN(projectId) || !sessionId) { res.status(400).json({ paid: false, error: "missing session_id" }); return; }
   try {
-    const [row] = await db.select().from(projectStripe).where(eq(projectStripe.projectId, projectId));
-    if (!row) { res.json({ paid: false }); return; }
-    const session = await stripeReq("GET", `checkout/sessions/${encodeURIComponent(sessionId)}`, undefined, row.accountId);
+    const pa = await projectAuth(projectId);
+    if (!pa) { res.json({ paid: false }); return; }
+    const session = await stripeReq("GET", `checkout/sessions/${encodeURIComponent(sessionId)}`, undefined, pa.auth);
     const paid = session.payment_status === "paid" || session.status === "complete";
     // Return the payment references so the app can store them for later refunds.
     res.json({
@@ -520,9 +690,9 @@ router.post("/projects/:id/stripe/refund", async (req, res) => {
   if (isNaN(projectId)) { res.status(400).json({ error: "Invalid project ID" }); return; }
   const b = req.body ?? {};
   try {
-    const [row] = await db.select().from(projectStripe).where(eq(projectStripe.projectId, projectId));
-    if (!row) { res.status(400).json({ error: "De studio heeft Stripe niet gekoppeld." }); return; }
-    const acct = row.accountId;
+    const pa = await projectAuth(projectId);
+    if (!pa) { res.status(400).json({ error: "De studio heeft Stripe niet gekoppeld." }); return; }
+    const acct = pa.auth;
 
     if (typeof b.subscription === "string" && b.subscription) {
       const sub = await stripeReq("GET", `subscriptions/${encodeURIComponent(b.subscription)}`, undefined, acct);
@@ -562,17 +732,27 @@ router.post("/stripe/webhook", raw({ type: "*/*" }), async (req, res) => {
   const secret = process.env.STRIPE_WEBHOOK_SECRET;
   const sig = req.headers["stripe-signature"];
   const payload: Buffer = Buffer.isBuffer(req.body) ? req.body : Buffer.from(String(req.body ?? ""));
+  // An event signed with a per-project secret comes from a studio's OWN Stripe account (own-keys
+  // mode): no event.account, but it must be routed to the STUDIO logic, never the platform branch.
+  let fromOwnAccount = false;
   if (secret && typeof sig === "string") {
     const parts = Object.fromEntries(sig.split(",").map((p) => p.split("=") as [string, string]));
-    const expected = createHmac("sha256", secret).update(`${parts.t}.${payload.toString("utf8")}`).digest("hex");
-    const ok = parts.v1 && expected.length === parts.v1.length && timingSafeEqual(Buffer.from(expected), Buffer.from(parts.v1));
-    if (!ok) { res.status(400).send("invalid signature"); return; }
+    const check = (s: string) => {
+      const expected = createHmac("sha256", s).update(`${parts.t}.${payload.toString("utf8")}`).digest("hex");
+      return !!(parts.v1 && expected.length === parts.v1.length && timingSafeEqual(Buffer.from(expected), Buffer.from(parts.v1)));
+    };
+    if (!check(secret)) {
+      const rows = await db.select().from(projectStripe).where(eq(projectStripe.chargesEnabled, "true"));
+      fromOwnAccount = rows.some((r) => r.webhookSecret && check(r.webhookSecret));
+      if (!fromOwnAccount) { res.status(400).send("invalid signature"); return; }
+    }
   }
   try {
     const event = JSON.parse(payload.toString("utf8"));
     // PLATFORM (Nebula) billing events fire on OUR account (no event.account). Connect/studio events
-    // carry event.account and fall through to the studio logic below.
-    if (!event.account) {
+    // carry event.account — and own-account studio events are recognised by their signing secret —
+    // and fall through to the studio logic below.
+    if (!event.account && !fromOwnAccount) {
       const obj = event.data?.object || {};
       const findUser = async () => {
         const pid = obj.metadata?.platformUserId || obj.client_reference_id;

@@ -88,6 +88,21 @@ export const projectSnapshots = pgTable("project_snapshots", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
+// Auto + manual project back-ups (restore points). Deliberately NOT foreign-keyed to projects, so a
+// back-up SURVIVES project deletion — the owner can always recover a deleted project's work. `files`
+// is gzip+base64 of the JSON [{path,content,language}]; `hash` dedupes identical snapshots.
+export const projectBackups = pgTable("project_backups", {
+  id: serial("id").primaryKey(),
+  ownerId: integer("owner_id"),            // platform user (no FK: keep even if account row changes)
+  projectId: integer("project_id"),        // source project (no FK: kept after the project is deleted)
+  projectName: text("project_name").notNull().default(""),
+  kind: text("kind").notNull().default("auto"), // auto | manual
+  hash: text("hash").notNull().default(""),
+  files: text("files").notNull().default(""),   // gzip(base64) of JSON [{path,content,language}]
+  fileCount: integer("file_count").notNull().default(0),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
 // One Stripe Connect (Express) account per project/studio, so customer payments go to the
 // right studio. Created during onboarding; charges_enabled flips true once onboarding is done.
 export const projectStripe = pgTable("project_stripe", {
