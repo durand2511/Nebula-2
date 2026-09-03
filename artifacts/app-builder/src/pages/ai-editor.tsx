@@ -411,6 +411,7 @@ function CheckoutModal({ clientSecret, publishableKey, initialEmail, price, onCl
   const payRef = useRef<HTMLDivElement | null>(null);
   const addrRef = useRef<HTMLDivElement | null>(null);
   const stateRef = useRef<{ stripe: any; elements: any } | null>(null);
+  const { t, lang } = useLang();
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [err, setErr] = useState("");
   const [paying, setPaying] = useState(false);
@@ -428,7 +429,7 @@ function CheckoutModal({ clientSecret, publishableKey, initialEmail, price, onCl
         const stripe = await loadStripe(publishableKey);
         if (!stripe) throw new Error("Stripe kon niet laden.");
         if (cancelled) return;
-        const elements = stripe.elements({ clientSecret, appearance: { theme: "stripe", variables: { colorPrimary: "#e0855b", borderRadius: "10px" } } });
+        const elements = stripe.elements({ clientSecret, locale: lang, appearance: { theme: "stripe", variables: { colorPrimary: "#e0855b", borderRadius: "10px" } } });
         stateRef.current = { stripe, elements };
         const addr = elements.create("address", { mode: "billing" });
         // email: "never" — we collect it with our own field above the element (for ALL methods)
@@ -438,7 +439,7 @@ function CheckoutModal({ clientSecret, publishableKey, initialEmail, price, onCl
         // live/test key mismatch), and pretending it's ready gives an empty form plus a confusing
         // "elements should have a mounted Payment Element" on submit.
         pay.on("ready", () => { if (!cancelled) setStatus("ready"); });
-        pay.on("loaderror", (ev: any) => { if (!cancelled) { setErr(ev?.error?.message || "Het betaalformulier kon niet laden. Probeer het later opnieuw."); setStatus("error"); } });
+        pay.on("loaderror", (ev: any) => { if (!cancelled) { setErr(ev?.error?.message || t("Het betaalformulier kon niet laden. Probeer het later opnieuw.", "The payment form could not load. Please try again later.")); setStatus("error"); } });
         const mount = () => {
           if (cancelled) return;
           if (addrRef.current) addr.mount(addrRef.current);
@@ -446,7 +447,7 @@ function CheckoutModal({ clientSecret, publishableKey, initialEmail, price, onCl
         };
         setTimeout(mount, 30);
       } catch (e) {
-        if (!cancelled) { setErr((e as Error).message || "Betalen kon niet laden."); setStatus("error"); }
+        if (!cancelled) { setErr((e as Error).message || t("Betalen kon niet laden.", "Payments could not load.")); setStatus("error"); }
       }
     })();
     return () => { cancelled = true; };
@@ -456,7 +457,7 @@ function CheckoutModal({ clientSecret, publishableKey, initialEmail, price, onCl
     const st = stateRef.current;
     if (!st) return;
     const mail = emailRef.current.trim();
-    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(mail)) { setErr("Vul een geldig e-mailadres in — daar sturen we je factuur naartoe."); return; }
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(mail)) { setErr(t("Vul een geldig e-mailadres in — daar sturen we je factuur naartoe.", "Enter a valid e-mail address — that's where we send your invoice.")); return; }
     setPaying(true); setErr("");
     try {
       // The clientSecret is a SETUP intent: the customer authorises the payment method here (card
@@ -470,40 +471,40 @@ function CheckoutModal({ clientSecret, publishableKey, initialEmail, price, onCl
         },
         redirect: "if_required",
       });
-      if (error) { setErr(error.message || "Betaling mislukt."); setPaying(false); return; }
+      if (error) { setErr(error.message || t("Betaling mislukt.", "Payment failed.")); setPaying(false); return; }
       if (setupIntent?.status === "succeeded") {
         const r = await billingApi("/subscribe/complete", { setupIntentId: setupIntent.id });
-        if (!r.ok) { setErr(r.d.error || "Abonneren mislukt."); setPaying(false); return; }
+        if (!r.ok) { setErr(r.d.error || t("Abonneren mislukt.", "Subscribing failed.")); setPaying(false); return; }
         onDone();
         return;
       }
       // A redirect flow (iDEAL) navigates away — nothing more to do here.
-    } catch (e) { setErr((e as Error).message || "Betaling mislukt."); setPaying(false); }
+    } catch (e) { setErr((e as Error).message || t("Betaling mislukt.", "Payment failed.")); setPaying(false); }
   };
 
   return (
     <div className="fixed inset-0 z-[95] flex items-start justify-center overflow-y-auto bg-black/50 p-4" onClick={onClose}>
       <div className="w-[min(480px,96%)] my-8 rounded-2xl bg-white shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-3 border-b border-neutral-200">
-          <span className="font-semibold text-neutral-900">Afrekenen — €{price}/maand</span>
+          <span className="font-semibold text-neutral-900">{t("Afrekenen", "Checkout")} — €{price}{t("/maand", "/month")}</span>
           <button onClick={onClose} className="h-8 w-8 rounded-full hover:bg-neutral-100 flex items-center justify-center text-neutral-500" data-testid="button-close-checkout"><X className="h-4 w-4" /></button>
         </div>
         <div className="p-5 space-y-4 max-h-[70vh] overflow-y-auto">
           {status === "loading" && <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-neutral-400" /></div>}
-          {status === "error" && <p className="text-sm text-red-600">{err || "Betalen kon niet laden. Probeer het later opnieuw."}</p>}
+          {status === "error" && <p className="text-sm text-red-600">{err || t("Betalen kon niet laden. Probeer het later opnieuw.", "Payments could not load. Please try again later.")}</p>}
           <div className={status === "ready" ? "space-y-4" : "hidden"}>
-            <div><p className="text-xs font-medium text-neutral-500 mb-1.5">Factuurgegevens</p><div ref={addrRef} /></div>
+            <div><p className="text-xs font-medium text-neutral-500 mb-1.5">{t("Factuurgegevens", "Billing details")}</p><div ref={addrRef} /></div>
             <div>
-              <p className="text-xs font-medium text-neutral-500 mb-1.5">E-mailadres <span className="font-normal text-neutral-400">(voor je factuur)</span></p>
-              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="jouwnaam@voorbeeld.nl" autoComplete="email"
+              <p className="text-xs font-medium text-neutral-500 mb-1.5">{t("E-mailadres", "E-mail address")} <span className="font-normal text-neutral-400">{t("(voor je factuur)", "(for your invoice)")}</span></p>
+              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder={t("jouwnaam@voorbeeld.nl", "yourname@example.com")} autoComplete="email"
                 className="w-full h-11 rounded-[10px] border border-neutral-300 bg-white px-3 text-[15px] text-neutral-900 placeholder:text-neutral-400 focus:outline-none focus:border-[#e0855b] focus:ring-2 focus:ring-[#e0855b]/25" data-testid="input-checkout-email" />
             </div>
-            <div><p className="text-xs font-medium text-neutral-500 mb-1.5">Betaalmethode</p><div ref={payRef} /></div>
+            <div><p className="text-xs font-medium text-neutral-500 mb-1.5">{t("Betaalmethode", "Payment method")}</p><div ref={payRef} /></div>
             {err && <p className="text-sm text-red-600">{err}</p>}
             <button onClick={pay} disabled={paying} className="w-full h-11 rounded-xl bg-neutral-900 text-white font-semibold hover:bg-neutral-800 disabled:opacity-60 flex items-center justify-center gap-2" data-testid="button-pay">
-              {paying ? <Loader2 className="h-5 w-5 animate-spin" /> : `Betaal €${price}/maand`}
+              {paying ? <Loader2 className="h-5 w-5 animate-spin" /> : t(`Betaal €${price}/maand`, `Pay €${price}/month`)}
             </button>
-            <p className="text-[11px] text-neutral-400 text-center">Veilig betalen via Stripe · iDEAL &amp; creditcard · maandelijks opzegbaar</p>
+            <p className="text-[11px] text-neutral-400 text-center">{t("Veilig betalen via Stripe · iDEAL & creditcard · maandelijks opzegbaar", "Secure payment via Stripe · iDEAL & credit card · cancel monthly")}</p>
           </div>
         </div>
       </div>
