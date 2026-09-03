@@ -10,6 +10,7 @@
  */
 import fsSync from "node:fs";
 import { createRequire } from "node:module";
+import { makePreviewTicket } from "./preview-ticket.js";
 import { logger } from "./logger";
 
 const require = createRequire(import.meta.url);
@@ -101,7 +102,7 @@ async function doCapture(opts: { projectId: number; page: string; clip: Clip; vi
     await pg.setRequestInterception(true);
     pg.on("request", (r: any) => { (r.resourceType() === "media" ? r.abort() : r.continue()).catch(() => {}); });
     const port = process.env.PORT || "8080";
-    const url = `http://127.0.0.1:${port}/api/projects/${opts.projectId}/preview-page?page=${encodeURIComponent(opts.page)}&sid=shot`;
+    const url = `http://127.0.0.1:${port}/api/projects/${opts.projectId}/preview-page?page=${encodeURIComponent(opts.page)}&sid=shot&pt=${makePreviewTicket(opts.projectId)}`;
     // Proceed after AT MOST ~2.5s even when the page's load event hasn't fired (slow CDN images
     // kept eating the full timeout on every capture) — we screenshot whatever has rendered.
     await Promise.race([

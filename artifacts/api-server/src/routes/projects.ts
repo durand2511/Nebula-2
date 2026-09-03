@@ -6,6 +6,10 @@ import { Agent, ProxyAgent, fetch as safeFetch } from "undici";
 import { load as cheerioLoad } from "cheerio";
 import { db, projects, projectMessages, projectFiles, projectSnapshots, importAssets, learnings, emailReminders, studioClasses, studioUsers, studioBookings, type PlatformUser } from "@workspace/db";
 import { getSessionUser, tokenFrom } from "../lib/platform-auth.js";
+import { getSessionUser as getStudioSessionUser } from "../lib/studio-auth.js";
+import { findByHost } from "../lib/domains.js";
+import { makePreviewTicket, checkPreviewTicket } from "../lib/preview-ticket.js";
+import { peekActivationToken } from "../lib/activation.js";
 import { isSubscribed, isBookingRequest, chargeTrackedUsage } from "../lib/billing.js";
 import { runWithUsage, recordUsage } from "../lib/ai-usage.js";
 import { runAgentEdit } from "../lib/agent-editor.js";
@@ -38,6 +42,67 @@ export type { WritePlan, FileRole, IntentForEnforcement } from "../lib/write-pla
 export { checkWritePlanViolation } from "../lib/write-plan.js";
 
 const router = Router();
+
+// ── Default-deny toegangsguard voor ALLES onder /projects/:id ─────────────────────────────────
+// Dit draait vóór elke route in deze router én vóór de routers die erna gemount zijn (studio,
+// stripe, import, domains, gcal, gsc, seo — zie routes/index.ts). Drie lagen:
+//   • PUBLIC — anoniem bereikbaar: authenticeert zichzelf in de route (preview-ticket, eenmalig
+//     activatietoken, studio-token in routes/studio.ts) of is bewust publiek (lead-formulier,
+//     klant-betaalflow, factuurlink uit de booking-app-UI, iCal-feed met eigen token).
+//   • SITE — de admin-calls van de gepubliceerde booking-app. Die stuurt (historisch) geen token
+//     mee, dus toegestaan voor: de ingelogde platform-eigenaar, een geldige studio-sessie van dít
+//     project, of een request dat binnenkomt op een domein dat écht aan dit project gekoppeld is.
+//   • al het overige — uitsluitend de ingelogde platform-eigenaar.
+const PUBLIC_PROJECT_RE: RegExp[] = [
+  /^\/preview-page$/,                    // eigen check in de route: owner-token, ticket of activatietoken
+  /^\/asset\/[^/]+$/,                    // eigen check in de route: owner-token of ticket
+  /^\/studio(\/|$)/,                     // booking-app data-API: studio-token-auth in routes/studio.ts
+  /^\/import\/activate$/,                // verbruikt zijn eigen eenmalige e-mailtoken
+  /^\/lead$/,                            // publiek contactformulier op gepubliceerde sites
+  /^\/invoice\/\d+\/(view|pdf)$/,        // factuurlinks geopend vanuit de booking-app (<a>, geen headers)
+  /^\/stripe\/(checkout|pay-element|verify)$/, // klant-betaalflow op gepubliceerde sites
+  /^\/calendar\/(?!sync$)[A-Za-z0-9._-]+$/,    // iCal-feed: het token in het pad ís het geheim
+  /^\/email$/,                           // geeft alleen {configured, from} terug
+];
+const SITE_PROJECT_RE: RegExp[] = [
+  /^\/notify$/, /^\/invoice$/, /^\/invoice-settings$/,
+  /^\/invoices(\/|$)/, /^\/teacher-payout$/,
+  /^\/calendar$/, /^\/calendar\/sync$/,
+  /^\/stripe(\/|$)/,                     // onboard/status/dashboard/payments/oauth/own-keys/refund
+  /^\/gcal(\/|$)/,
+  /^\/email\/(test|broadcast)$/,
+  /^\/import\/(summary|mindbody|customers|send-activations)$/,
+];
+router.use(async (req, res, next) => {
+  const m = req.path.match(/^\/projects\/(\d+)(\/.*)?$/);
+  if (!m) return next();
+  const projectId = Number(m[1]);
+  const rest = m[2] || "/";
+  if (PUBLIC_PROJECT_RE.some((re) => re.test(rest))) return next();
+  const token = tokenFrom(req as { headers: Record<string, unknown>; query?: Record<string, unknown> });
+  try {
+    if (token) {
+      const u = await getSessionUser(token);
+      if (u) {
+        const [p] = await db.select({ ownerId: projects.ownerId }).from(projects).where(eq(projects.id, projectId));
+        if (!p) { res.status(404).json({ error: "Project niet gevonden." }); return; }
+        if (p.ownerId == null || p.ownerId === u.id) return next();
+        res.status(403).json({ error: "Geen toegang tot dit project." }); return;
+      }
+    }
+    if (SITE_PROJECT_RE.some((re) => re.test(rest))) {
+      if (token) {
+        const su = await getStudioSessionUser(projectId, token);
+        if (su) return next();
+      }
+      const match = await findByHost(String(req.headers.host || "")).catch(() => null);
+      if (match && match.status === "active" && match.projectId === projectId) return next();
+    }
+  } catch (err) {
+    logger.error({ err, path: req.path }, "[guard] project guard failed");
+  }
+  res.status(401).json({ error: "Niet ingelogd." });
+});
 
 // Tolerant parser: LANGUAGE line is optional, and the language may instead sit
 // on the opening fence (e.g. ```html). Handles CRLF and extra fence metadata.
@@ -703,6 +768,7 @@ async function crawlSite(
 router.get("/projects/:projectId/asset/:name", async (req, res) => {
   const projectId = Number(req.params.projectId);
   if (isNaN(projectId)) { res.status(400).send("Invalid project ID"); return; }
+  if (!(await previewAccessAllowed(req, projectId))) { res.status(401).send("Niet ingelogd."); return; }
   const [asset] = await db.select().from(importAssets)
     .where(and(eq(importAssets.projectId, projectId), eq(importAssets.path, "assets/" + req.params.name)));
   if (!asset) { res.status(404).send("Not found"); return; }
@@ -716,12 +782,29 @@ router.get("/projects/:projectId/asset/:name", async (req, res) => {
 // the site domain and route everything through the proxy → "upstream error".
 const PREVIEW_ORIGIN_SKIP = /(^|\.)(google|gstatic|googleapis|googletagmanager|googlesyndication|doubleclick|youtube|youtu\.be|vimeo|facebook|fbcdn|instagram|twitter|x\.com|linkedin|tiktok|pinterest|wa\.me|whatsapp|t\.me|telegram|gmpg\.org|wpconsent|jsdelivr|unpkg|cloudflare|jquery|gravatar|schema\.org|w3\.org|wordpress\.org|paypal|stripe)/i;
 
+// Preview-toegang: geldig HMAC-ticket (?pt=…, gemunt door de server zelf voor screenshots en voor
+// de asset-URLs in een al geautoriseerde preview) óf een ingelogde eigenaar (?token=/Authorization).
+async function previewAccessAllowed(req: { query: Record<string, unknown>; headers: Record<string, unknown> }, projectId: number): Promise<boolean> {
+  if (checkPreviewTicket(projectId, String(req.query.pt || ""))) return true;
+  const u = await currentUser(req);
+  if (!u) return false;
+  const [p] = await db.select({ ownerId: projects.ownerId }).from(projects).where(eq(projects.id, projectId));
+  return !!p && (p.ownerId == null || p.ownerId === u.id);
+}
+
 //
 // GET /api/projects/:id/preview-page?page=index.html&sid=<session-id>
 router.get("/projects/:id/preview-page", async (req, res) => {
   const projectId = Number(req.params.id);
   const page = (req.query.page as string) || "index.html";
   const sid = (req.query.sid as string) || "";
+
+  // Toegang: eigenaar/ticket, of een geldige (nog niet verbruikte) activatielink uit de e-mail —
+  // die serveert booking-app.html aan een studio-klant die zijn account komt activeren.
+  if (!(await previewAccessAllowed(req as never, projectId))) {
+    const activate = String(req.query.activate || "");
+    if (!activate || !(await peekActivationToken(projectId, activate))) { res.status(401).send("Niet ingelogd."); return; }
+  }
 
   const fileRows = await db.select().from(projectFiles).where(eq(projectFiles.projectId, projectId));
   const file = fileRows.find((f) => f.path === page) ?? fileRows.find((f) => f.path === "index.html");
@@ -1098,7 +1181,9 @@ document.addEventListener("submit",function(e){
   // Localised assets live at /assets/… (served directly by the published site). In the EDITOR PREVIEW
   // point them at the project-scoped asset route so images + CSS url() load here too (base href only
   // affects original-domain URLs; these root-relative ones resolve to our origin → the asset route).
-  html = html.replace(/\/assets\/([0-9a-f]{8}\.[a-z0-9]{2,5})\b/gi, `/api/projects/${projectId}/asset/$1`);
+  // Het meegebakken ticket laat de (anonieme) iframe-requests voor deze assets door de asset-route.
+  const assetTicket = makePreviewTicket(projectId);
+  html = html.replace(/\/assets\/([0-9a-f]{8}\.[a-z0-9]{2,5})\b/gi, `/api/projects/${projectId}/asset/$1?pt=${assetTicket}`);
 
   res.setHeader("Content-Type", "text/html; charset=utf-8");
   res.setHeader("Cache-Control", "no-store");

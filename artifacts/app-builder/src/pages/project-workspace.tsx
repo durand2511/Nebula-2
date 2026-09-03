@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback, useMemo, Fragment } from "react";
 import { useRoute, Link } from "wouter";
+import { getToken } from "@/lib/session";
 import {
   useGetProject,
   getGetProjectQueryKey,
@@ -3341,7 +3342,7 @@ export function ProjectWorkspace() {
                     ref={previewIframeRef}
                     {...(isImported
                       ? {
-                          src: `/api/projects/${projectId}/preview-page?page=${encodeURIComponent(previewPage ?? "index.html")}&sid=${previewSessionId}&k=${previewKey}`,
+                          src: `/api/projects/${projectId}/preview-page?page=${encodeURIComponent(previewPage ?? "index.html")}&sid=${previewSessionId}&k=${previewKey}&token=${encodeURIComponent(getToken() || "")}`,
                           sandbox: "allow-scripts allow-same-origin allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-presentation",
                         }
                       : {

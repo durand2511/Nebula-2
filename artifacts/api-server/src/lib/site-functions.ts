@@ -14,7 +14,7 @@
  *   • 10s harde timeout, 1MB output-cap, max 4 gelijktijdige uitvoeringen (kleine instance)
  *   • alleen Node-standaardbibliotheek (incl. global fetch) — geen node_modules
  */
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -74,8 +74,15 @@ export async function handleSiteFunction(projectId: number, name: string, files:
     await fs.mkdir(dir, { recursive: true });
     if (!fsSync.existsSync(runnerPath)) await fs.writeFile(runnerPath, RUNNER, "utf8");
     if (!fsSync.existsSync(handlerPath)) await fs.writeFile(handlerPath, file.content, "utf8");
-    // The isolated uid must be able to read them (files are written by the server user).
-    for (const f of [dir, handlerPath, runnerPath, FN_ROOT]) { try { fsSync.chmodSync(f, 0o755); } catch { /* best effort */ } }
+    // De runner en de root zijn generiek (geen geheimen) en mogen wereld-leesbaar zijn; de
+    // per-project-map met de handler-code van de klant (kan eigen API-keys bevatten) is privé
+    // voor de uid van die klant — een andere klant met een shell kan er niet in.
+    try { fsSync.chmodSync(FN_ROOT, 0o755); fsSync.chmodSync(runnerPath, 0o644); } catch { /* best effort */ }
+    try {
+      if (u) execFileSync("chown", ["-R", `${u.uid}:${u.gid}`, dir], { stdio: "ignore" });
+      fsSync.chmodSync(dir, 0o700);
+      fsSync.chmodSync(handlerPath, 0o600);
+    } catch { /* best effort */ }
 
     // Raw body (no body-parser runs on customer-domain requests).
     const chunks: Buffer[] = [];

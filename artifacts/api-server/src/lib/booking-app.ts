@@ -1389,7 +1389,9 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
   function toast(msg){var o=root.querySelector('#ba-comm-out');if(o)o.textContent=msg;}
   function q(id){return root.querySelector('#'+id);}
   function projId(){try{if(window.__BA_PID__)return String(window.__BA_PID__);}catch(e){}var m=(location.pathname||'').match(/projects\\/(\\d+)/);return m?m[1]:'';}
-  function api(p){return '/api/projects/'+projId()+'/'+p;}
+  // Studio-sessietoken als query-param meesturen (werkt ook voor <a href>-links zoals de factuur-PDF):
+  // de server-guard eist op admin-endpoints een studio-sessie, eigenaar-login of het eigen sitedomein.
+  function api(p){var t='';try{t=srvToken();}catch(e){}return '/api/projects/'+projId()+'/'+p+(t?((p.indexOf('?')>=0?'&':'?')+'token='+encodeURIComponent(t)):'');}
   // ── Server API (step 3: booking data moves server-side). Only the SESSION TOKEN is kept in
   // localStorage — never accounts/passwords/bookings. These helpers are wired into the UI in 3b. ──
   var SKEY=KEY+'_token';

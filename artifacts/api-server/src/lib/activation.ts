@@ -18,6 +18,14 @@ export async function createActivationToken(projectId: number, email: string): P
   return raw;
 }
 
+/** Check a token WITHOUT consuming it — the preview-page route validates the e-mailed link before
+ *  serving booking-app.html; the booking app itself consumes the token pas bij het activeren. */
+export async function peekActivationToken(projectId: number, raw: string): Promise<boolean> {
+  if (!raw) return false;
+  const [row] = await db.select().from(activationTokens).where(and(eq(activationTokens.projectId, projectId), eq(activationTokens.tokenHash, hash(raw))));
+  return !!row && row.used !== "true" && new Date(row.expiresAt).getTime() >= Date.now();
+}
+
 /** Validate + consume a token (single-use, not expired). Returns the e-mail or null. */
 export async function consumeActivationToken(projectId: number, raw: string): Promise<string | null> {
   if (!raw) return null;
