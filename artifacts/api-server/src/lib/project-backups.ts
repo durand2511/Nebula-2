@@ -7,11 +7,13 @@
  *  • Rows are NOT foreign-keyed to projects, so deleting a project keeps its back-ups — the owner
  *    can restore them (into the project, or as a fresh project if it was deleted).
  *
- * `files` is gzip+base64 of JSON [{path,content,language}] to keep the DB small.
+ * `files` is gzip+base64 of JSON. v1 = a bare array [{path,content,language}] (files only). v2 =
+ * { v:2, files:[…], assets:[{path,contentType,sha}] } where the binary bytes live once in
+ * backup_assets (content-addressed) — so images/fonts survive a restore without bloating every blob.
  */
 import { gzipSync, gunzipSync } from "node:zlib";
 import { createHash } from "node:crypto";
-import { db, projects, projectFiles, projectBackups } from "@workspace/db";
+import { db, projects, projectFiles, projectBackups, importAssets, backupAssets } from "@workspace/db";
 import { eq, and, desc, sql } from "drizzle-orm";
 import { logger } from "./logger";
 
@@ -19,21 +21,58 @@ const SETTLE_MS = 5 * 60 * 1000;   // back up 5 min after the last change
 const KEEP_AUTO = 12;              // retained auto back-ups per project (manual ones are always kept)
 
 type FileRec = { path: string; content: string; language: string };
+type AssetRef = { path: string; contentType: string; sha: string };
+type Payload = { files: FileRec[]; assets: AssetRef[] };
 
-function pack(files: FileRec[]): { blob: string; hash: string; count: number } {
-  const json = JSON.stringify(files);
+function pack(files: FileRec[], assets: AssetRef[]): { blob: string; hash: string; count: number } {
+  const json = JSON.stringify({ v: 2, files, assets });
   const hash = createHash("sha256").update(json).digest("hex");
   const blob = gzipSync(Buffer.from(json, "utf8")).toString("base64");
   return { blob, hash, count: files.length };
 }
-export function unpackBackup(blob: string): FileRec[] {
-  try { return JSON.parse(gunzipSync(Buffer.from(blob, "base64")).toString("utf8")); } catch { return []; }
+/** Parse a blob into files + asset refs, tolerating the old v1 (bare files array) format. */
+function unpack(blob: string): Payload {
+  try {
+    const o = JSON.parse(gunzipSync(Buffer.from(blob, "base64")).toString("utf8"));
+    if (Array.isArray(o)) return { files: o, assets: [] };            // v1
+    return { files: o.files || [], assets: o.assets || [] };          // v2
+  } catch { return { files: [], assets: [] }; }
 }
+/** Back-compat export: callers that only want the files keep working. */
+export function unpackBackup(blob: string): FileRec[] { return unpack(blob).files; }
 
 async function projectFileRecs(projectId: number): Promise<FileRec[]> {
   const rows = await db.select({ path: projectFiles.path, content: projectFiles.content, language: projectFiles.language })
     .from(projectFiles).where(eq(projectFiles.projectId, projectId));
   return rows.map((r) => ({ path: r.path, content: r.content ?? "", language: r.language ?? "plaintext" }));
+}
+
+// Snapshot a project's binary assets into the content-addressed store, returning light refs. Each
+// unique image is written to backup_assets ONCE (on-conflict-do-nothing), so N back-ups of the same
+// site share one copy of each asset.
+async function snapshotAssets(projectId: number): Promise<AssetRef[]> {
+  const rows = await db.select({ path: importAssets.path, contentType: importAssets.contentType, data: importAssets.data })
+    .from(importAssets).where(eq(importAssets.projectId, projectId));
+  const refs: AssetRef[] = [];
+  for (const r of rows) {
+    const data = r.data ?? "";
+    const sha = createHash("sha256").update(data).digest("hex");
+    await db.insert(backupAssets).values({ sha, contentType: r.contentType ?? "application/octet-stream", data }).onConflictDoNothing();
+    refs.push({ path: r.path, contentType: r.contentType ?? "application/octet-stream", sha });
+  }
+  return refs;
+}
+
+// Write asset refs back into a target project's import_assets (fetching bytes from the store).
+async function restoreAssets(projectId: number, assets: AssetRef[]): Promise<number> {
+  let n = 0;
+  for (const a of assets) {
+    const [row] = await db.select({ data: backupAssets.data }).from(backupAssets).where(eq(backupAssets.sha, a.sha));
+    if (!row) continue; // bytes gone (shouldn't happen — store is never GC'd here)
+    await db.insert(importAssets).values({ projectId, path: a.path, contentType: a.contentType, data: row.data }).onConflictDoNothing();
+    n++;
+  }
+  return n;
 }
 
 /** Create a back-up of a project's current files. Skips when identical to the newest back-up (unless
@@ -43,7 +82,8 @@ export async function createBackup(projectId: number, kind: "auto" | "manual" = 
   if (!proj) return null;
   const files = await projectFileRecs(projectId);
   if (!files.length) return null;
-  const { blob, hash, count } = pack(files);
+  const assets = await snapshotAssets(projectId); // images/fonts (content-addressed) — restore needs these
+  const { blob, hash, count } = pack(files, assets);
   const [latest] = await db.select({ hash: projectBackups.hash }).from(projectBackups)
     .where(eq(projectBackups.projectId, projectId)).orderBy(desc(projectBackups.createdAt)).limit(1);
   if (kind === "auto" && latest?.hash === hash) return null; // nothing changed → no new auto backup
@@ -73,7 +113,7 @@ export async function backupStatus(projectId: number): Promise<{ saved: boolean;
 export async function restoreBackup(backupId: number, targetProjectId: number): Promise<boolean> {
   const [bk] = await db.select().from(projectBackups).where(eq(projectBackups.id, backupId));
   if (!bk) return false;
-  const files = unpackBackup(bk.files);
+  const { files, assets } = unpack(bk.files);
   if (!files.length) return false;
   // Safety net: snapshot the current state before overwriting, so a wrong restore is itself undoable.
   await createBackup(targetProjectId, "manual").catch(() => {});
@@ -81,8 +121,11 @@ export async function restoreBackup(backupId: number, targetProjectId: number): 
   for (const f of files) {
     await db.insert(projectFiles).values({ projectId: targetProjectId, path: f.path, content: f.content, language: f.language || "plaintext" });
   }
+  // Restore binary assets too (images/fonts) — replace the target's set to match the back-up.
+  await db.delete(importAssets).where(eq(importAssets.projectId, targetProjectId));
+  const nAssets = await restoreAssets(targetProjectId, assets);
   await db.update(projects).set({ updatedAt: new Date() }).where(eq(projects.id, targetProjectId));
-  logger.info({ backupId, targetProjectId, count: files.length }, "[backups] restored");
+  logger.info({ backupId, targetProjectId, count: files.length, assets: nAssets }, "[backups] restored");
   return true;
 }
 
@@ -90,13 +133,14 @@ export async function restoreBackup(backupId: number, targetProjectId: number): 
 export async function restoreAsNewProject(backupId: number, ownerId: number): Promise<number | null> {
   const [bk] = await db.select().from(projectBackups).where(eq(projectBackups.id, backupId));
   if (!bk || bk.ownerId !== ownerId) return null;
-  const files = unpackBackup(bk.files);
+  const { files, assets } = unpack(bk.files);
   if (!files.length) return null;
   const [proj] = await db.insert(projects).values({ ownerId, name: bk.projectName || "Hersteld project", description: "Hersteld uit back-up" }).returning({ id: projects.id });
   for (const f of files) {
     await db.insert(projectFiles).values({ projectId: proj.id, path: f.path, content: f.content, language: f.language || "plaintext" });
   }
-  logger.info({ backupId, newProjectId: proj.id, ownerId }, "[backups] restored as new project");
+  const nAssets = await restoreAssets(proj.id, assets); // images/fonts mee (content-addressed)
+  logger.info({ backupId, newProjectId: proj.id, ownerId, assets: nAssets }, "[backups] restored as new project");
   return proj.id;
 }
 

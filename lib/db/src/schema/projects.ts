@@ -103,6 +103,17 @@ export const projectBackups = pgTable("project_backups", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
+// Content-addressed store for binary assets referenced by back-ups (images/fonts/media live in
+// import_assets, NOT in project_files, so a back-up must capture them too). Keyed by sha256(data)
+// and shared across ALL back-ups → each unique image is stored ONCE no matter how many back-ups
+// reference it (no storage bomb). A back-up blob only stores light refs {path, contentType, sha}.
+export const backupAssets = pgTable("backup_assets", {
+  sha: text("sha").primaryKey(),                    // sha256 hex of the raw bytes
+  contentType: text("content_type").notNull().default("application/octet-stream"),
+  data: text("data").notNull().default(""),         // base64-encoded bytes
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
 // One Stripe Connect (Express) account per project/studio, so customer payments go to the
 // right studio. Created during onboarding; charges_enabled flips true once onboarding is done.
 export const projectStripe = pgTable("project_stripe", {
