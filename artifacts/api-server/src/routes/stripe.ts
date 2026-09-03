@@ -622,12 +622,12 @@ router.post("/projects/:id/stripe/pay-element", json({ limit: "16kb" }), async (
       res.json({ elements: true, intentType: "setup", clientSecret: si.client_secret, publishableKey: pa.pk });
       return;
     }
-    // One-off (les / strippenkaart): a PaymentIntent with iDEAL, kaart, Klarna en Bancontact.
+    // One-off (les / strippenkaart): a PaymentIntent with iDEAL, kaart en SEPA-incasso.
     const pi = await createWithMethods("payment_intents", {
       amount: amountCents, currency: "eur", description: name,
       ...(email ? { receipt_email: email } : {}),
       metadata: { projectId: String(projectId), kind, name },
-    }, ["card", "ideal", "klarna", "bancontact"]);
+    }, ["ideal", "card", "sepa_debit"]);
     res.json({ elements: true, intentType: "payment", clientSecret: pi.client_secret, publishableKey: pa.pk });
   } catch (err) {
     logger.error({ err, projectId }, "[stripe] pay-element failed");

@@ -463,9 +463,13 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
     setPending(pending);
     var ov=document.createElement('div');ov.id='ba-pay-ov';
     ov.style.cssText='position:fixed;inset:0;z-index:2147483647;background:rgba(15,23,42,.55);display:flex;align-items:flex-start;justify-content:center;padding:20px;overflow:auto';
-    ov.innerHTML='<div style="background:#fff;border-radius:14px;max-width:440px;width:100%;padding:22px;margin:auto 0;font:inherit;font-family:inherit;color:#1f2937"><h3 style="margin:0 0 4px;font-size:18px">Betalen</h3><p style="color:#6b7280;font-size:14px;margin:0 0 16px">'+esc(name)+' — €'+amount+'</p><div id="ba-pay-body" style="font-size:14px;color:#6b7280">Betaling voorbereiden…</div><div style="margin-top:18px;text-align:right"><button id="ba-pay-cancel" class="ba-btn ghost sm">Sluiten</button></div></div>';
+    ov.innerHTML='<div style="background:#fff;border-radius:16px;max-width:460px;width:100%;margin:auto 0;max-height:92vh;display:flex;flex-direction:column;font:inherit;font-family:inherit;color:#1f2937;box-shadow:0 20px 60px rgba(0,0,0,.3)"><div style="position:relative;padding:20px 22px 14px;border-bottom:1px solid #eef0f2;flex:0 0 auto"><button id="ba-pay-x" aria-label="Sluiten" style="position:absolute;top:14px;right:14px;width:32px;height:32px;border:none;background:#f3f4f6;border-radius:999px;font-size:20px;line-height:1;color:#6b7280;cursor:pointer">&times;</button><h3 style="margin:0 4px 4px 0;font-size:18px;padding-right:34px">Betalen</h3><p style="color:#6b7280;font-size:14px;margin:0">'+esc(name)+' — €'+amount+'</p></div><div id="ba-pay-body" style="font-size:14px;color:#6b7280;padding:18px 22px;overflow:auto">Betaling voorbereiden…</div></div>';
     root.appendChild(ov);
-    ov.querySelector('#ba-pay-cancel').onclick=function(){clearPending();ov.parentNode&&ov.parentNode.removeChild(ov);};
+    function closePay(){clearPending();ov.parentNode&&ov.parentNode.removeChild(ov);document.removeEventListener('keydown',onEsc);}
+    function onEsc(e){if(e.key==='Escape')closePay();}
+    document.addEventListener('keydown',onEsc);
+    ov.querySelector('#ba-pay-x').onclick=closePay;
+    ov.addEventListener('mousedown',function(e){if(e.target===ov)closePay();}); // klik op de donkere achtergrond sluit ook
     var base=payCleanUrl();
     var sep=base.indexOf('?')>-1?'&':'?';
     function hostedFallback(){
@@ -481,33 +485,50 @@ const BOOKING_APP_MAIN = `<section id="booking-app">
     function mountElements(d){
       loadStripeJs().then(function(){
         var body=ov.querySelector('#ba-pay-body');if(!body)return;
-        body.innerHTML='<div id="ba-pay-el"></div><p id="ba-pay-err" style="color:#dc2626;font-size:13px;margin:10px 0 0;display:none"></p>'+
+        var lbl='font-weight:600;font-size:13px;color:#374151;margin:16px 0 7px';
+        body.innerHTML='<div style="'+lbl+';margin-top:0">Betaalmethode</div><div id="ba-pay-el"></div>'+
+          '<div style="'+lbl+'">Factuurgegevens</div><div id="ba-pay-addr"></div>'+
+          '<label style="display:block;'+lbl+'" for="ba-pay-email">E-mailadres</label>'+
+          '<input id="ba-pay-email" type="email" autocomplete="email" placeholder="jouwnaam@voorbeeld.nl" value="'+esc(myEmail()||'')+'" style="width:100%;border:1px solid #d7dbe0;border-radius:10px;padding:11px 12px;font:inherit;font-size:14px;color:#1f2937">'+
+          '<p id="ba-pay-err" style="color:#dc2626;font-size:13px;margin:10px 0 0;display:none"></p>'+
           '<button id="ba-pay-go" class="ba-btn" style="width:100%;margin-top:14px">Betaal €'+amount+(d.intentType==='setup'?'/maand':'')+'</button>'+
-          '<p style="color:#9ca3af;font-size:12px;margin:10px 0 0;text-align:center">Veilig betalen via Stripe · iDEAL &amp; kaart</p>';
+          '<p style="color:#9ca3af;font-size:12px;margin:10px 0 0;text-align:center">Veilig betalen via Stripe · iDEAL, kaart &amp; SEPA-incasso</p>';
         var st=window.Stripe(d.publishableKey);
         var el=st.elements({clientSecret:d.clientSecret,locale:'auto',appearance:{theme:'stripe',variables:{colorPrimary:(getComputedStyle(root).getPropertyValue('--ba')||'#e0855b').trim()||'#e0855b',borderRadius:'10px'}}});
-        var pe=el.create('payment',{layout:'tabs'});
+        // We collect name/e-mail/address ourselves (address element + e-mail field) so it's always
+        // captured for the invoice; the Payment Element itself asks for none of it.
+        var pe=el.create('payment',{layout:'tabs',fields:{billingDetails:{name:'never',email:'never',phone:'never',address:'never'}}});
+        var addr=el.create('address',{mode:'billing',fields:{phone:'never'}});
         pe.on('loaderror',function(ev){clearPending();var b2=ov.querySelector('#ba-pay-body');if(b2)b2.textContent=(ev&&ev.error&&ev.error.message)||'Het betaalformulier kon niet laden.';});
         pe.mount(ov.querySelector('#ba-pay-el'));
-        var btn=ov.querySelector('#ba-pay-go'),errEl=ov.querySelector('#ba-pay-err');
-        function showErr(m){if(errEl){errEl.textContent=m||'Betaling mislukt.';errEl.style.display='block';}btn.disabled=false;btn.textContent='Betaal €'+amount+(d.intentType==='setup'?'/maand':'');}
+        addr.mount(ov.querySelector('#ba-pay-addr'));
+        var btn=ov.querySelector('#ba-pay-go'),errEl=ov.querySelector('#ba-pay-err'),emailEl=ov.querySelector('#ba-pay-email');
+        function reset(){btn.disabled=false;btn.textContent='Betaal €'+amount+(d.intentType==='setup'?'/maand':'');}
+        function showErr(m){if(errEl){errEl.textContent=m||'Betaling mislukt.';errEl.style.display='block';}reset();}
         btn.onclick=function(){
+          var email=(emailEl.value||'').trim();
+          if(!/^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/.test(email)){showErr('Vul een geldig e-mailadres in.');return;}
           btn.disabled=true;btn.textContent='Even geduld…';if(errEl)errEl.style.display='none';
-          var ret=base+sep+'betaald=1';
-          if(d.intentType==='setup'){
-            st.confirmSetup({elements:el,confirmParams:{return_url:ret},redirect:'if_required'}).then(function(r){
-              if(r.error){showErr(r.error.message);return;}
-              if(r.setupIntent&&r.setupIntent.status==='succeeded'){finalizePaidNow(pending,{setup_intent:r.setupIntent.id});}
-              else showErr('De betaalmethode is nog niet bevestigd.');
-            }).catch(function(){showErr();});
-          }else{
-            st.confirmPayment({elements:el,confirmParams:{return_url:ret},redirect:'if_required'}).then(function(r){
-              if(r.error){showErr(r.error.message);return;}
-              if(r.paymentIntent&&r.paymentIntent.status==='succeeded'){finalizePaidNow(pending,{payment_intent:r.paymentIntent.id});}
-              else if(r.paymentIntent&&r.paymentIntent.status==='processing'){showErr('De betaling wordt nog verwerkt — je aankoop wordt bevestigd zodra de betaling binnen is.');}
-              else showErr();
-            }).catch(function(){showErr();});
-          }
+          addr.getValue().then(function(a){
+            if(!a.complete||!a.value||!a.value.name){showErr('Vul je volledige naam en adres in.');return;}
+            var bd={name:a.value.name,email:email,address:a.value.address};
+            var ret=base+sep+'betaald=1';
+            var cp={return_url:ret,payment_method_data:{billing_details:bd}};
+            if(d.intentType==='setup'){
+              st.confirmSetup({elements:el,confirmParams:cp,redirect:'if_required'}).then(function(r){
+                if(r.error){showErr(r.error.message);return;}
+                if(r.setupIntent&&r.setupIntent.status==='succeeded'){finalizePaidNow(pending,{setup_intent:r.setupIntent.id});}
+                else showErr('De betaalmethode is nog niet bevestigd.');
+              }).catch(function(){showErr();});
+            }else{
+              st.confirmPayment({elements:el,confirmParams:cp,redirect:'if_required'}).then(function(r){
+                if(r.error){showErr(r.error.message);return;}
+                if(r.paymentIntent&&r.paymentIntent.status==='succeeded'){finalizePaidNow(pending,{payment_intent:r.paymentIntent.id});}
+                else if(r.paymentIntent&&r.paymentIntent.status==='processing'){showErr('De betaling wordt nog verwerkt — je aankoop wordt bevestigd zodra de betaling binnen is.');}
+                else showErr();
+              }).catch(function(){showErr();});
+            }
+          }).catch(function(){showErr('Vul je volledige naam en adres in.');});
         };
       }).catch(function(){hostedFallback();});
     }
