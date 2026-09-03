@@ -242,7 +242,7 @@ function claudeMd(projectName: string): string {
     "Sommige bestanden zijn grote, geminificeerde HTML van een geïmporteerde site — herschrijf die niet. Voor een site-brede restyle: schrijf/verleng `.nebula-restyle.css` (wordt automatisch op elke pagina na de eigen CSS geladen) en richt je op de echte selectors van de site.",
     "",
     "## Taal",
-    "Antwoord in het Nederlands, kort en duidelijk, en vat aan het einde samen wat je veranderd hebt.",
+    "Antwoord in de taal waarin de gebruiker schrijft (Nederlands → Nederlands, Engels → Engels). Kort en duidelijk, en vat aan het einde samen wat je veranderd hebt.",
   ].join("\n");
 }
 
