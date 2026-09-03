@@ -4,7 +4,7 @@ import { useLang } from "@/lib/i18n";
 
 export function Layout({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
-  const { t } = useLang();
+  const { t, lang, setLang } = useLang();
   const isWorkspace = location.startsWith("/projects/") && location !== "/projects";
 
   return (
@@ -35,6 +35,16 @@ export function Layout({ children }: { children: React.ReactNode }) {
             <a href={t("/kennisbank", "/en/kennisbank")} className="rounded-full px-3.5 py-1 text-xs font-medium transition-colors text-foreground/60 hover:text-foreground hover:bg-foreground/5">
               {t("Kennisbank", "Knowledge base")}
             </a>
+            {/* Language toggle — switches the WHOLE platform; shows the flag of the language you switch to. */}
+            <button
+              onClick={() => setLang(lang === "en" ? "nl" : "en")}
+              className="ml-0.5 rounded-full px-2 py-1 text-base leading-none transition-colors hover:bg-foreground/5"
+              title={lang === "en" ? "Nederlands" : "English"}
+              aria-label={lang === "en" ? "Schakel naar Nederlands" : "Switch to English"}
+              data-testid="button-lang-toggle"
+            >
+              {lang === "en" ? "🇳🇱" : "🇬🇧"}
+            </button>
           </nav>
         </header>
       )}

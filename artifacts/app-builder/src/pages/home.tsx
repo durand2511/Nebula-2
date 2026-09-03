@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useLocation } from "wouter";
-import { Check, Minus, ArrowRight } from "lucide-react";
+import { Check, Minus, ArrowRight, ChevronDown, Phone } from "lucide-react";
 import logoUrl from "../assets/nebula-logo-home.png";
 import { useLang } from "@/lib/i18n";
 
@@ -10,8 +10,6 @@ export function Home() {
   const [phone, setPhone] = useState("");
   const [state, setState] = useState<"idle" | "busy" | "done" | "error">("idle");
 
-  // Subtle callback line under the tagline: leave a phone number → POST /api/contact e-mails the
-  // owner (existing endpoint), who calls back for a briefing/chat.
   const submit = async () => {
     if (state === "busy" || phone.replace(/\D/g, "").length < 6) { setState("error"); return; }
     setState("busy");
@@ -21,6 +19,8 @@ export function Home() {
       if (r.ok) setPhone("");
     } catch { setState("error"); }
   };
+
+  const scrollDown = () => document.getElementById("meer")?.scrollIntoView({ behavior: "smooth", block: "start" });
 
   const bureau = [
     t("€2.000–5.000+ vooraf betalen", "€2,000–5,000+ up front"),
@@ -46,57 +46,33 @@ export function Home() {
 
   return (
     <div className="flex-1 w-full flex flex-col items-center">
-      {/* Hero */}
-      <section className="min-h-[calc(100vh-5rem)] w-full flex flex-col items-center justify-center px-4 gap-9 py-12">
+      {/* Hero — clean: logo, tagline, one CTA, a divider, and a scroll cue. Nothing else. */}
+      <section className="relative min-h-[calc(100vh-5rem)] w-full flex flex-col items-center justify-center px-4 py-12">
         <img src={logoUrl} alt="Nebula" className="h-56 md:h-80 w-auto" />
-        <p className="text-sm md:text-base uppercase tracking-[0.25em] text-muted-foreground text-center">
+        <p className="mt-7 text-sm md:text-base uppercase tracking-[0.25em] text-muted-foreground text-center">
           {t("Web design bureau", "Web design bureau")}
         </p>
-
-        <div className="flex flex-col items-center gap-2 -mt-3">
-          {state === "done" ? (
-            <p className="text-xs text-emerald-700/90" data-testid="text-callback-done">
-              {t("Dankjewel — je wordt snel gebeld voor een gesprek.", "Thank you — you'll get a call soon.")}
-            </p>
-          ) : (
-            <>
-              <p className="text-xs text-foreground/45">
-                {t("Liever eerst een gesprek? Laat je nummer achter en de eigenaar belt je.", "Prefer a chat first? Leave your number and the owner will call you.")}
-              </p>
-              <div className="flex items-center gap-1.5">
-                <input
-                  type="tel"
-                  value={phone}
-                  onChange={(e) => { setPhone(e.target.value); if (state === "error") setState("idle"); }}
-                  onKeyDown={(e) => { if (e.key === "Enter") void submit(); }}
-                  placeholder={t("06 12345678", "+31 6 12345678")}
-                  className="h-8 w-44 rounded-full border border-border/70 bg-card/70 backdrop-blur px-3.5 text-xs text-foreground placeholder:text-foreground/35 focus:outline-none focus:border-foreground/30"
-                  data-testid="input-callback-phone"
-                />
-                <button
-                  onClick={() => void submit()}
-                  disabled={state === "busy"}
-                  className="h-8 rounded-full bg-foreground/85 px-3.5 text-xs font-medium text-background hover:bg-foreground transition-colors disabled:opacity-60"
-                  data-testid="button-callback"
-                >
-                  {state === "busy" ? "…" : t("Bel mij", "Call me")}
-                </button>
-              </div>
-              {state === "error" && <p className="text-[11px] text-destructive/80">{t("Vul een geldig telefoonnummer in.", "Please enter a valid phone number.")}</p>}
-            </>
-          )}
-          <button
-            onClick={() => setLocation("/ai-editor")}
-            className="mt-4 inline-flex items-center gap-2 rounded-full bg-foreground px-6 py-3 text-sm font-semibold text-background shadow-lg shadow-black/10 hover:-translate-y-0.5 transition-transform"
-            data-testid="button-hero-start"
-          >
-            {t("Begin met je website", "Start your website")} <ArrowRight className="h-4 w-4" />
-          </button>
-        </div>
+        <button
+          onClick={() => setLocation("/ai-editor")}
+          className="mt-8 inline-flex items-center gap-2 rounded-full bg-foreground px-7 py-3.5 text-sm font-semibold text-background shadow-lg shadow-black/10 hover:-translate-y-0.5 transition-transform"
+          data-testid="button-hero-start"
+        >
+          {t("Begin met je website", "Start your website")} <ArrowRight className="h-4 w-4" />
+        </button>
+        <div className="mt-10 h-px w-16 bg-foreground/20" aria-hidden="true" />
+        <button
+          onClick={scrollDown}
+          className="absolute bottom-9 flex flex-col items-center gap-1.5 text-foreground/50 hover:text-foreground transition-colors"
+          aria-label={t("Scroll naar beneden", "Scroll down")}
+          data-testid="button-scroll-down"
+        >
+          <span className="text-[11px] uppercase tracking-[0.2em]">{t("Scroll naar beneden", "Scroll down")}</span>
+          <ChevronDown className="h-5 w-5 nebula-bob" />
+        </button>
       </section>
 
       {/* Manifesto */}
-      <section className="w-full max-w-3xl px-6 py-16 text-center">
+      <section id="meer" className="w-full max-w-3xl px-6 pt-20 pb-14 text-center scroll-mt-20">
         <h2 className="text-3xl md:text-[2.7rem] font-bold tracking-tight leading-[1.1] text-balance">
           {t("Geen bureau dat je laat wachten.", "Not an agency that keeps you waiting.")}<br />
           <span className="text-foreground/55">{t("Een platform waar jij de baas bent.", "A platform where you're in charge.")}</span>
@@ -110,7 +86,7 @@ export function Home() {
       </section>
 
       {/* Comparison */}
-      <section className="w-full max-w-4xl px-4 pb-4">
+      <section className="w-full max-w-4xl px-4 pb-6">
         <div className="grid gap-4 md:grid-cols-2">
           <div className="rounded-3xl border border-white/50 bg-card/70 backdrop-blur p-7 shadow-[0_8px_30px_rgba(0,0,0,0.06)]">
             <h3 className="text-lg font-semibold text-foreground/70">{t("Een webdesign bureau", "A web design agency")}</h3>
@@ -138,7 +114,7 @@ export function Home() {
       </section>
 
       {/* Pricing */}
-      <section className="w-full max-w-md px-4 py-16">
+      <section className="w-full max-w-md px-4 py-14">
         <div className="rounded-3xl border border-white/60 bg-card/90 backdrop-blur p-8 text-center shadow-[0_16px_50px_rgba(0,0,0,0.14)]">
           <p className="text-sm font-medium uppercase tracking-[0.18em] text-muted-foreground">{t("Volledige toegang", "Full access")}</p>
           <div className="mt-3 flex items-end justify-center gap-1">
@@ -162,6 +138,39 @@ export function Home() {
             {t("Begin nu", "Start now")} <ArrowRight className="h-4 w-4" />
           </button>
           <p className="mt-3 text-[11px] text-muted-foreground">{t("Het bewerken werkt op je eigen Claude-abonnement.", "Editing runs on your own Claude subscription.")}</p>
+        </div>
+      </section>
+
+      {/* Contact / callback — its own tidy section */}
+      <section className="w-full max-w-md px-4 pb-20">
+        <div className="rounded-3xl border border-white/50 bg-card/70 backdrop-blur p-7 text-center shadow-[0_8px_30px_rgba(0,0,0,0.06)]">
+          <div className="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-foreground/5"><Phone className="h-5 w-5 text-foreground/70" /></div>
+          <h3 className="text-lg font-bold tracking-tight">{t("Liever eerst een gesprek?", "Prefer a chat first?")}</h3>
+          <p className="mt-1.5 text-sm text-muted-foreground">{t("Laat je nummer achter en de eigenaar belt je persoonlijk terug voor een vrijblijvende briefing.", "Leave your number and the owner will personally call you back for a no-obligation briefing.")}</p>
+          {state === "done" ? (
+            <p className="mt-5 text-sm text-emerald-700" data-testid="text-callback-done">{t("Dankjewel — je wordt snel gebeld.", "Thank you — you'll get a call soon.")}</p>
+          ) : (
+            <div className="mt-5 flex items-center gap-2">
+              <input
+                type="tel"
+                value={phone}
+                onChange={(e) => { setPhone(e.target.value); if (state === "error") setState("idle"); }}
+                onKeyDown={(e) => { if (e.key === "Enter") void submit(); }}
+                placeholder={t("06 12345678", "+31 6 12345678")}
+                className="h-11 flex-1 rounded-full border border-border bg-background px-4 text-sm text-foreground placeholder:text-foreground/35 focus:outline-none focus:border-foreground/40"
+                data-testid="input-callback-phone"
+              />
+              <button
+                onClick={() => void submit()}
+                disabled={state === "busy"}
+                className="h-11 shrink-0 rounded-full bg-foreground px-5 text-sm font-semibold text-background hover:bg-foreground/90 transition-colors disabled:opacity-60"
+                data-testid="button-callback"
+              >
+                {state === "busy" ? "…" : t("Bel mij", "Call me")}
+              </button>
+            </div>
+          )}
+          {state === "error" && <p className="mt-2 text-[12px] text-destructive/80">{t("Vul een geldig telefoonnummer in.", "Please enter a valid phone number.")}</p>}
         </div>
       </section>
     </div>

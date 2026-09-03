@@ -195,3 +195,11 @@
     @apply font-sans antialiased bg-background text-foreground;
   }
 }
+
+/* Gentle scroll-cue bob on the landing hero. */
+@keyframes nebula-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(5px); }
+}
+.nebula-bob { animation: nebula-bob 1.8s cubic-bezier(0.45, 0, 0.55, 1) infinite; }
+@media (prefers-reduced-motion: reduce) { .nebula-bob { animation: none; } }
