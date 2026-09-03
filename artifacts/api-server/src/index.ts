@@ -9,6 +9,7 @@ import { startDomainHealthcheck } from "./lib/domain-healthcheck";
 import { startKennisbankScheduler } from "./lib/kennisbank";
 import { SEO_REDIRECT_HOSTS } from "./lib/domains";
 import { addRenderDomain } from "./lib/render";
+import { startBackupScheduler } from "./lib/project-backups";
 import { anthropic } from "@workspace/integrations-openai-ai-server";
 import { instrumentAnthropic } from "./lib/ai-usage";
 import { attachClaudeTerminal } from "./lib/claude-terminal";
@@ -44,6 +45,7 @@ const server = app.listen(port, (err) => {
   startProductScheduler();
   startDomainHealthcheck();
   startKennisbankScheduler();
+  startBackupScheduler();
   // SEO-redirect domains: make sure Render serves them (TLS) so the 301s work on https too.
   for (const h of SEO_REDIRECT_HOSTS) void addRenderDomain(h);
 });

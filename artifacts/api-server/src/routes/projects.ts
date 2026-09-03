@@ -12,6 +12,8 @@ import { runAgentEdit } from "../lib/agent-editor.js";
 import { unlazyImages, RENDER_FIX_STYLE, NEBULA_RESTYLE_PATH, BOOK_FLOAT_BUTTON, showBookButtonOn, TICKER_SCRIPT } from "../lib/host-site.js";
 import { smtpConfigFromEnv, sendMail } from "../lib/smtp.js";
 import { resolvePublishedDomain } from "../lib/seo.js";
+import { createBackup, backupStatus, restoreBackup, restoreAsNewProject } from "../lib/project-backups.js";
+import { projectBackups } from "@workspace/db";
 import {
   CreateProjectBody,
   GetProjectParams,
@@ -3629,12 +3631,83 @@ router.delete("/projects/:projectId", async (req, res) => {
   }
   try {
     if (!(await requireOwner(req, res, parsed.data.projectId))) return;
+    // Final safety back-up right before deletion, so a deleted project can always be recovered.
+    await createBackup(parsed.data.projectId, "manual").catch(() => {});
     await db.delete(projects).where(eq(projects.id, parsed.data.projectId));
     res.status(204).send();
   } catch (err) {
     req.log.error({ err }, "Failed to delete project");
     res.status(500).json({ error: "Internal server error" });
   }
+});
+
+// ── Back-ups (restore points; survive project deletion) ─────────────────────────────────────────
+// Save status for the top-bar pill.
+router.get("/projects/:projectId/backup-status", async (req, res) => {
+  const projectId = Number(req.params.projectId);
+  if (isNaN(projectId)) { res.status(400).json({ error: "Invalid project ID" }); return; }
+  if (!(await requireOwner(req, res, projectId))) return;
+  try { res.json(await backupStatus(projectId)); }
+  catch (err) { req.log.error({ err }, "[backups] status failed"); res.status(500).json({ error: "Ophalen mislukt." }); }
+});
+
+// List a project's back-ups (newest first).
+router.get("/projects/:projectId/backups", async (req, res) => {
+  const projectId = Number(req.params.projectId);
+  if (isNaN(projectId)) { res.status(400).json({ error: "Invalid project ID" }); return; }
+  if (!(await requireOwner(req, res, projectId))) return;
+  try {
+    const rows = await db.select({ id: projectBackups.id, kind: projectBackups.kind, fileCount: projectBackups.fileCount, createdAt: projectBackups.createdAt })
+      .from(projectBackups).where(eq(projectBackups.projectId, projectId)).orderBy(desc(projectBackups.createdAt)).limit(60);
+    res.json({ backups: rows });
+  } catch (err) { req.log.error({ err }, "[backups] list failed"); res.status(500).json({ error: "Ophalen mislukt." }); }
+});
+
+// Manual save now.
+router.post("/projects/:projectId/backup", async (req, res) => {
+  const projectId = Number(req.params.projectId);
+  if (isNaN(projectId)) { res.status(400).json({ error: "Invalid project ID" }); return; }
+  if (!(await requireOwner(req, res, projectId))) return;
+  try { const id = await createBackup(projectId, "manual"); res.json({ ok: true, backupId: id }); }
+  catch (err) { req.log.error({ err }, "[backups] manual failed"); res.status(500).json({ error: "Opslaan mislukt." }); }
+});
+
+// Restore a back-up into this project (full replace; a safety back-up is taken first).
+router.post("/projects/:projectId/backups/:backupId/restore", async (req, res) => {
+  const projectId = Number(req.params.projectId), backupId = Number(req.params.backupId);
+  if (isNaN(projectId) || isNaN(backupId)) { res.status(400).json({ error: "Invalid ID" }); return; }
+  const u = await requireOwner(req, res, projectId);
+  if (!u) return;
+  try {
+    const [bk] = await db.select({ ownerId: projectBackups.ownerId }).from(projectBackups).where(eq(projectBackups.id, backupId));
+    if (!bk || (bk.ownerId != null && bk.ownerId !== u.id)) { res.status(404).json({ error: "Back-up niet gevonden." }); return; }
+    const ok = await restoreBackup(backupId, projectId);
+    res.json({ ok });
+  } catch (err) { req.log.error({ err }, "[backups] restore failed"); res.status(500).json({ error: "Herstellen mislukt." }); }
+});
+
+// All of the logged-in owner's back-ups, grouped, INCLUDING ones whose project was deleted — the
+// recovery view so nothing is ever lost.
+router.get("/backups", async (req, res) => {
+  const u = await currentUser(req);
+  if (!u) { res.status(401).json({ error: "Niet ingelogd." }); return; }
+  try {
+    const rows = await db.select({ id: projectBackups.id, projectId: projectBackups.projectId, projectName: projectBackups.projectName, kind: projectBackups.kind, fileCount: projectBackups.fileCount, createdAt: projectBackups.createdAt })
+      .from(projectBackups).where(eq(projectBackups.ownerId, u.id)).orderBy(desc(projectBackups.createdAt)).limit(300);
+    const live = await db.select({ id: projects.id }).from(projects).where(eq(projects.ownerId, u.id));
+    const liveIds = new Set(live.map((p) => p.id));
+    res.json({ backups: rows.map((r) => ({ ...r, deleted: r.projectId == null || !liveIds.has(r.projectId) })) });
+  } catch (err) { req.log.error({ err }, "[backups] owner list failed"); res.status(500).json({ error: "Ophalen mislukt." }); }
+});
+
+// Recreate a NEW project from a back-up whose original project was deleted.
+router.post("/backups/:backupId/restore-new", async (req, res) => {
+  const backupId = Number(req.params.backupId);
+  if (isNaN(backupId)) { res.status(400).json({ error: "Invalid ID" }); return; }
+  const u = await currentUser(req);
+  if (!u) { res.status(401).json({ error: "Niet ingelogd." }); return; }
+  try { const id = await restoreAsNewProject(backupId, u.id); if (!id) { res.status(404).json({ error: "Back-up niet gevonden." }); return; } res.json({ ok: true, projectId: id }); }
+  catch (err) { req.log.error({ err }, "[backups] restore-new failed"); res.status(500).json({ error: "Herstellen mislukt." }); }
 });
 
 router.get("/projects/:projectId/messages", async (req, res) => {
