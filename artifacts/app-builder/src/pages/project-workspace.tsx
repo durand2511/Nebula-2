@@ -2928,7 +2928,7 @@ export function ProjectWorkspace() {
                     data-testid="button-fullscreen"
                   >
                     <Maximize2 className="h-3.5 w-3.5 mr-1.5" />
-                    Volledig scherm
+                    {t("Volledig scherm", "Full screen")}
                   </Button>
                 )}
                 {!isStreaming && activeTab === "preview" && previewHtml && (
@@ -2958,7 +2958,7 @@ export function ProjectWorkspace() {
                       } catch { setSeoAuto(!next); }
                     }}
                   >
-                    Auto-SEO {seoAuto ? "aan" : "uit"}
+                    Auto-SEO {seoAuto ? t("aan", "on") : t("uit", "off")}
                   </Button>
                 )}
               </div>
