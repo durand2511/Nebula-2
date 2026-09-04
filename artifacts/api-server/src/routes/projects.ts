@@ -3333,7 +3333,15 @@ function fontMime(url: string): string {
 async function fetchImportAsset(url: string): Promise<Buffer | null> {
   const safe = await assertSafeUrl(url).catch(() => null);
   if (!safe) return null;
-  const headers = { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36" };
+  // Send a Referer from the asset's OWN site + an image Accept header. Many sites use hotlink
+  // protection: a request without a same-site Referer gets a "This image was hotlinked" placeholder
+  // (or a 403). With the site's own origin as Referer the real image comes through.
+  let referer = ""; try { referer = new URL(safe.toString()).origin + "/"; } catch { /* ignore */ }
+  const headers: Record<string, string> = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    Accept: "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+    ...(referer ? { Referer: referer } : {}),
+  };
   // Each attempt gets its OWN timeout signal (shared signals let a slow direct try starve the proxy).
   const get = async (dispatcher: Agent | ProxyAgent, timeoutMs: number): Promise<Buffer | null> => {
     try { const r = await safeFetch(safe.toString(), { dispatcher, signal: AbortSignal.timeout(timeoutMs), headers }); if (r.ok) { const b = Buffer.from(await r.arrayBuffer()); if (b.length) return b; } } catch { /* fall through */ }
