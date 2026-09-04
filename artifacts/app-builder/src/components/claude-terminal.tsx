@@ -176,8 +176,13 @@ export const ClaudeTerminal = forwardRef<ClaudeTerminalHandle, Props>(function C
   }, [projectId, gen, setStat]);
 
   return (
-    <div className={`relative flex flex-col min-h-0 ${className ?? ""}`}>
-      <div ref={hostRef} className="flex-1 min-h-0 bg-[#0f0e14] p-2 rounded-lg overflow-hidden" data-testid="claude-terminal" />
+    <div className={`relative flex flex-col min-h-0 overflow-hidden ${className ?? ""}`}>
+      {/* The xterm host is ABSOLUTELY positioned inside a bounded box, so its size always equals that
+          box (from the flex layout) and never grows with content. Without this, FitAddon on Windows
+          (Chrome/Edge) measured a content-driven height and blew the terminal up to a giant scroll. */}
+      <div className="flex-1 min-h-0 relative">
+        <div ref={hostRef} className="absolute inset-0 bg-[#0f0e14] p-2 rounded-lg overflow-hidden" data-testid="claude-terminal" />
+      </div>
       {status === "connecting" && (
         <div className="absolute inset-0 flex items-center justify-center bg-[#0f0e14]/70 rounded-lg pointer-events-none">
           <Loader2 className="h-5 w-5 animate-spin text-white/70" />

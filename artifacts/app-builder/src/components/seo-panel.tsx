@@ -188,10 +188,24 @@ function AuditView({ projectId, kind, onFix, changeSignal = 0 }: { projectId: nu
   const [fixing, setFixing] = useState<string | null>(null);
   const fixAll = () => {
     if (!fixable.length) return;
-    const list = fixable.map((f, i) => `${i + 1}. ${f.fixPrompt}`).join("\n");
-    const head = kind === "a11y" ? t(`Verbeter de toegankelijkheid van deze website. Los deze ${fixable.length} punten op`, `Improve this website's accessibility. Fix these ${fixable.length} issues`)
-      : kind === "speed" ? t(`Maak deze website sneller. Los deze ${fixable.length} punten op`, `Make this website faster. Fix these ${fixable.length} issues`)
-      : t(`Verbeter de SEO van deze website. Los deze ${fixable.length} punten op`, `Improve this website's SEO. Fix these ${fixable.length} issues`);
+    // Group by finding TITLE and list the affected pages compactly — a per-page enumeration on a big
+    // (100-page) site would paste hundreds of lines into the terminal (huge scroll / freeze). Grouped,
+    // it's a handful of lines. One representative fix-instruction per group + the pages.
+    const groups = new Map<string, { fix: string; pages: string[] }>();
+    for (const f of fixable) {
+      const g = groups.get(f.title) ?? { fix: (f.fix || f.title), pages: [] };
+      if (f.page) g.pages.push(f.page);
+      groups.set(f.title, g);
+    }
+    const list = [...groups.entries()].map(([title, g], i) => {
+      const pageStr = g.pages.length
+        ? ` (op ${g.pages.slice(0, 12).join(", ")}${g.pages.length > 12 ? ` en nog ${g.pages.length - 12}` : ""})`
+        : "";
+      return `${i + 1}. ${title}: ${g.fix}${pageStr}`;
+    }).join("\n");
+    const head = kind === "a11y" ? t("Verbeter de toegankelijkheid van deze website. Los deze punten op", "Improve this website's accessibility. Fix these points")
+      : kind === "speed" ? t("Maak deze website sneller. Los deze punten op", "Make this website faster. Fix these points")
+      : t("Verbeter de SEO van deze website. Los deze punten op", "Improve this website's SEO. Fix these points");
     const msg = `${head}, ${t("behoud de bestaande vormgeving en tekst zoveel mogelijk", "keep the existing design and copy as much as possible")}:\n${list}`;
     if (onFix(msg)) markWorking(fixable.map((f) => ({ id: f.id, title: f.title })));
   };

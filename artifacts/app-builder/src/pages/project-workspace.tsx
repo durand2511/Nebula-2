@@ -2715,8 +2715,11 @@ export function ProjectWorkspace() {
   };
 
   // SEO panel → send a fix instruction into the Claude terminal (returns whether it was delivered).
+  // Collapse newlines to spaces so the whole instruction goes in as ONE line + one Enter — a multi-line
+  // string would make Claude Code's prompt submit line-by-line (chaotic, huge scroll).
   const sendSeoFix = (prompt: string): boolean => {
-    const sent = termHandleRef.current?.send(prompt.trim() + "\r");
+    const oneLine = prompt.replace(/\s*\n\s*/g, " ").trim();
+    const sent = termHandleRef.current?.send(oneLine + "\r");
     if (!sent) window.alert(t("Koppel eerst Claude Code — log in de terminal links in.", "Connect Claude Code first — log in in the terminal on the left."));
     return !!sent;
   };
