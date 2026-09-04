@@ -56,7 +56,7 @@ function auditablePages(rows: { path: string; content: string }[]): { path: stri
     if (seen.has(key)) return false;      // never audit the same path twice
     seen.add(key);
     return true;
-  }).slice(0, 25);
+  }).slice(0, 500); // generous ceiling (all pages of any normal site) — only a guard against runaways
 }
 
 async function loadPages(projectId: number) {

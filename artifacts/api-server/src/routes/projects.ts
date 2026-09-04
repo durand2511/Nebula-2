@@ -637,8 +637,8 @@ const MIN_IMPORT_CONTENT_SCORE = 80;
 // Max number of pages we crawl+store for an imported site. Keeps import time and
 // project size bounded while still capturing a typical brochure site in full
 // (most have well under this many pages); huge blogs get the first N pages.
-const IMPORT_MAX_PAGES = 30;
-const IMPORT_CRAWL_CONCURRENCY = 5;
+const IMPORT_MAX_PAGES = 100;
+const IMPORT_CRAWL_CONCURRENCY = 8;
 
 // File-extensions / paths that are never standalone HTML pages worth crawling.
 const SKIP_LINK_EXT =
