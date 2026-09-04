@@ -2765,7 +2765,7 @@ export function ProjectWorkspace() {
   }
 
   return (
-    <div className="flex-1 flex flex-col h-[calc(100vh)] overflow-hidden bg-background">
+    <div className="flex-1 flex flex-col min-h-0 overflow-hidden bg-background">
       {/* Top Bar */}
       <header className="h-14 border-b border-border bg-card/50 flex items-center px-4 shrink-0">
         <div className="flex items-center gap-4">

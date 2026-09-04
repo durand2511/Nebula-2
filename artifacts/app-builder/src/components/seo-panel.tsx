@@ -122,10 +122,10 @@ const AUDIT_META: Record<AuditKind, { title: string; blurb: string }> = {
   speed: { title: "Snelheid", blurb: "Hoe snel je pagina's laden (Core Web Vitals)." },
 };
 
-// Session caches (keyed by project + audit kind) so the analysis runs ONCE and the resolved/working
-// state survives switching sub-tabs. The report auto-updates after Claude changes files.
+// Small in-session cache (per project + kind) so switching sub-tabs is instant. The SERVER is the
+// source of truth: the audit is analysed ONCE and remembered per project (report + resolved state),
+// so it survives reloads, sessions and devices — and never re-analyses unless we ask for ?fresh=1.
 const auditCache = new Map<string, Report>();
-const resolvedCache = new Map<string, { id: string; title: string }[]>();
 const workingCache = new Map<string, Map<string, { title: string; at: number }>>();
 
 function AuditView({ projectId, kind, onFix, changeSignal = 0 }: { projectId: number; kind: AuditKind; onFix: (prompt: string) => boolean; changeSignal?: number }) {
@@ -134,26 +134,30 @@ function AuditView({ projectId, kind, onFix, changeSignal = 0 }: { projectId: nu
   const [data, setData] = useState<Report | null>(() => auditCache.get(cacheKey) ?? null);
   const [loading, setLoading] = useState(() => !auditCache.get(cacheKey));
   const [err, setErr] = useState(false);
-  // Findings sent to Claude and awaiting resolution (id → {title, since}); and the ones ticked off green.
-  // Restored from the caches so they persist when you leave and come back.
+  // Findings sent to Claude and awaiting resolution (session only); and the ones ticked off green (from
+  // the server, so they're remembered permanently).
   const [working, setWorking] = useState<Map<string, { title: string; at: number }>>(() => new Map(workingCache.get(cacheKey) ?? new Map()));
-  const [resolved, setResolved] = useState<{ id: string; title: string }[]>(() => resolvedCache.get(cacheKey) ?? []);
+  const [resolved, setResolved] = useState<{ id: string; title: string }[]>([]);
   const workingRef = useRef(working); workingRef.current = working;
-  useEffect(() => { resolvedCache.set(cacheKey, resolved); }, [resolved]);
   useEffect(() => { workingCache.set(cacheKey, working); }, [working]);
 
-  const fetchReport = () => fetch(`/api/projects/${projectId}/seo-audit?kind=${kind}`).then((r) => { if (!r.ok) throw new Error(); return r.json() as Promise<Report>; });
-  const retry = () => { setLoading(true); setErr(false); fetchReport().then((rep) => { setData(rep); auditCache.set(cacheKey, rep); }).catch(() => setErr(true)).finally(() => setLoading(false)); };
-  // Analyse ONCE — only the first time we open this kind. After that it's cached; no re-analysis on
-  // tab switches, and it updates itself when Claude changes files (below).
-  useEffect(() => { if (!auditCache.get(cacheKey)) retry(); }, []);
+  const getReport = (fresh = false) => fetch(`/api/projects/${projectId}/seo-audit?kind=${kind}${fresh ? "&fresh=1" : ""}`).then((r) => { if (!r.ok) throw new Error(); return r.json() as Promise<Report>; });
+  const saveResolved = (list: { id: string; title: string }[]) => { void fetch(`/api/projects/${projectId}/audit-resolved`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind, resolved: list }) }).catch(() => {}); };
+  const retry = () => { setLoading(true); setErr(false); getReport().then((rep) => { setData(rep); auditCache.set(cacheKey, rep); }).catch(() => setErr(true)).finally(() => setLoading(false)); };
 
-  // Auto re-scan (silent) shortly after Claude Code changes files → keeps it fresh AND ticks off the
-  // findings that are now resolved (gone from the report) → green "opgelost". Debounced so edits settle.
+  // On open: load the REMEMBERED report + resolved state from the server (analyse once). No re-analysis
+  // on tab switches (session cache) and none on reload (the server has it).
+  useEffect(() => {
+    fetch(`/api/projects/${projectId}/audit-resolved?kind=${kind}`).then((r) => r.json()).then((d) => { if (Array.isArray(d.resolved)) setResolved(d.resolved); }).catch(() => {});
+    if (!auditCache.get(cacheKey)) retry();
+  }, []);
+
+  // After Claude Code changes files: re-analyse (fresh) → tick off findings that are now resolved →
+  // remember them on the server. Debounced so multiple edits settle first.
   useEffect(() => {
     if (changeSignal === 0) return;
     const timer = setTimeout(() => {
-      fetchReport().then((rep) => {
+      getReport(true).then((rep) => {
         const present = new Set(rep.findings.map((f) => f.id));
         const newlyResolved: { id: string; title: string }[] = [];
         const stillWorking = new Map<string, { title: string; at: number }>();
@@ -163,7 +167,11 @@ function AuditView({ projectId, kind, onFix, changeSignal = 0 }: { projectId: nu
         }
         setData(rep); auditCache.set(cacheKey, rep);
         setWorking(stillWorking);
-        if (newlyResolved.length) setResolved((prev) => [...prev, ...newlyResolved.filter((r) => !prev.some((p) => p.id === r.id))]);
+        if (newlyResolved.length) setResolved((prev) => {
+          const merged = [...prev, ...newlyResolved.filter((r) => !prev.some((p) => p.id === r.id))];
+          saveResolved(merged);
+          return merged;
+        });
       }).catch(() => {});
     }, 2500);
     return () => clearTimeout(timer);

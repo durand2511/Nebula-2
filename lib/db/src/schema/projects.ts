@@ -479,6 +479,17 @@ export const analyticsOnline = pgTable("analytics_online", {
   seenAt: timestamp("seen_at", { withTimezone: true }).defaultNow().notNull(),
 }, (t) => ({ pk: uniqueIndex("analytics_online_pk").on(t.projectId, t.visitorId) }));
 
+// Stored SEO/a11y/speed audit per project+kind, so we analyse ONCE and remember it (incl. which
+// findings the user has ticked off as resolved) across reloads, sessions and devices. Re-analysed only
+// on demand (?fresh=1) — e.g. after Claude fixes something.
+export const projectAudit = pgTable("project_audit", {
+  projectId: integer("project_id").notNull(),
+  kind: text("kind").notNull(),                       // seo | a11y | speed
+  report: text("report").notNull().default(""),       // JSON of the SeoReport
+  resolved: text("resolved").notNull().default("[]"),  // JSON of [{id,title}] the user fixed
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => ({ pk: uniqueIndex("project_audit_pk").on(t.projectId, t.kind) }));
+
 // Newsletter sign-ups collected by the injected subscribe widget (privacy-friendly, opt-in).
 export const newsletterSubscribers = pgTable("newsletter_subscribers", {
   id: serial("id").primaryKey(),
@@ -781,3 +792,4 @@ export type AnalyticsEvent = typeof analyticsEvents.$inferSelect;
 export type NewsletterSubscriber = typeof newsletterSubscribers.$inferSelect;
 export type ClickEvent = typeof clickEvents.$inferSelect;
 export type AnalyticsOnline = typeof analyticsOnline.$inferSelect;
+export type ProjectAudit = typeof projectAudit.$inferSelect;

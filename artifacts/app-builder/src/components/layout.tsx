@@ -8,7 +8,9 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const isWorkspace = location.startsWith("/projects/") && location !== "/projects";
 
   return (
-    <div className={`relative min-h-screen text-foreground flex flex-col flex-1 light ${isWorkspace ? "bg-background" : ""}`}>
+    // The editor workspace must be EXACTLY viewport height (h-screen + overflow-hidden) so its terminal
+    // and panels scroll internally. Other pages keep min-h-screen so they grow + scroll normally.
+    <div className={`relative text-foreground flex flex-col light ${isWorkspace ? "h-screen overflow-hidden bg-background" : "min-h-screen flex-1"}`}>
       {!isWorkspace && (
         <>
           <div
@@ -48,7 +50,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
           </nav>
         </header>
       )}
-      <main className="flex-1 flex flex-col">{children}</main>
+      <main className={`flex-1 flex flex-col ${isWorkspace ? "min-h-0" : ""}`}>{children}</main>
       {!isWorkspace && (
         <footer className="w-full mt-auto py-6 px-4">
           <div className="mx-auto max-w-3xl flex flex-col items-center gap-2 text-xs text-foreground/60">

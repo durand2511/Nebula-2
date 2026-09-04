@@ -22,7 +22,7 @@ import { getSearchPositions } from "../lib/gsc.js";
 import { makeZip } from "../lib/zip.js";
 import { createBackup, backupStatus, restoreBackup, restoreAsNewProject, deleteBackup } from "../lib/project-backups.js";
 import { projectBackups } from "@workspace/db";
-import { clickEvents, newsletterSubscribers } from "@workspace/db";
+import { clickEvents, newsletterSubscribers, projectAudit } from "@workspace/db";
 import {
   CreateProjectBody,
   GetProjectParams,
@@ -3875,8 +3875,42 @@ router.get("/projects/:projectId/seo-audit", async (req, res) => {
   if (!(await requireLevel(req, res, projectId, 2))) return; // SEO/a11y/snelheid-audits: Pro+ (niet in €50 Instap)
   const kindRaw = String(req.query.kind || "seo");
   const kind: AuditKind = kindRaw === "a11y" || kindRaw === "speed" ? kindRaw : "seo";
-  try { res.json(await runAudit(projectId, kind)); }
-  catch (err) { req.log.error({ err }, "[seo-audit] failed"); res.status(500).json({ error: "Audit mislukt." }); }
+  const fresh = String(req.query.fresh || "") === "1";
+  try {
+    // Analyse ONCE and remember it server-side per project. Return the stored report unless ?fresh=1
+    // (e.g. after Claude fixed something) forces a re-analysis.
+    if (!fresh) {
+      const [row] = await db.select({ report: projectAudit.report }).from(projectAudit)
+        .where(and(eq(projectAudit.projectId, projectId), eq(projectAudit.kind, kind)));
+      if (row?.report) { res.json(JSON.parse(row.report)); return; }
+    }
+    const report = await runAudit(projectId, kind);
+    await db.insert(projectAudit).values({ projectId, kind, report: JSON.stringify(report), updatedAt: new Date() })
+      .onConflictDoUpdate({ target: [projectAudit.projectId, projectAudit.kind], set: { report: JSON.stringify(report), updatedAt: new Date() } });
+    res.json(report);
+  } catch (err) { req.log.error({ err }, "[seo-audit] failed"); res.status(500).json({ error: "Audit mislukt." }); }
+});
+
+// The "opgelost"-state (which findings the user ticked off) — remembered server-side per project+kind.
+router.get("/projects/:projectId/audit-resolved", async (req, res) => {
+  const projectId = Number(req.params.projectId);
+  if (isNaN(projectId)) { res.status(400).json({ error: "Invalid project ID" }); return; }
+  if (!(await requireLevel(req, res, projectId, 2))) return;
+  const kind = String(req.query.kind || "seo");
+  const [row] = await db.select({ resolved: projectAudit.resolved }).from(projectAudit)
+    .where(and(eq(projectAudit.projectId, projectId), eq(projectAudit.kind, kind)));
+  let resolved: unknown = []; try { resolved = row?.resolved ? JSON.parse(row.resolved) : []; } catch { resolved = []; }
+  res.json({ resolved });
+});
+router.put("/projects/:projectId/audit-resolved", async (req, res) => {
+  const projectId = Number(req.params.projectId);
+  if (isNaN(projectId)) { res.status(400).json({ error: "Invalid project ID" }); return; }
+  if (!(await requireLevel(req, res, projectId, 2))) return;
+  const kind = String(req.body?.kind || "seo");
+  const resolved = Array.isArray(req.body?.resolved) ? req.body.resolved.slice(0, 500) : [];
+  await db.insert(projectAudit).values({ projectId, kind, resolved: JSON.stringify(resolved), updatedAt: new Date() })
+    .onConflictDoUpdate({ target: [projectAudit.projectId, projectAudit.kind], set: { resolved: JSON.stringify(resolved) } });
+  res.json({ ok: true });
 });
 
 // Compare your homepage's on-page SEO against a competitor URL (owner-only). One plain GET, best-effort.
