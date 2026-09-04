@@ -193,6 +193,16 @@ function detectOriginDomain(html: string): string {
  * navigation stays on the NEW (published) domain. Only links whose target page exists locally are
  * rewritten; unknown pages keep their original absolute URL (they only live on the old site).
  */
+// Flatten a URL path to the SAME key the importer stores (pageKeyFromPath in routes/projects.ts):
+// strip extension, then replace slashes/other chars with "-". Keep the two in sync.
+function linkPathToKey(rawPath: string): string {
+  let p: string;
+  try { p = decodeURIComponent(rawPath); } catch { p = rawPath; }
+  p = p.split("#")[0].split("?")[0].replace(/^\/+|\/+$/g, "").replace(/\.(html?|php|aspx?)$/i, "");
+  if (!p) return "";
+  return p.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").toLowerCase();
+}
+
 export function rewriteInternalLinks(html: string, paths: string[]): string {
   const orig = detectOriginDomain(html);
   if (!orig) return html;
@@ -201,7 +211,7 @@ export function rewriteInternalLinks(html: string, paths: string[]): string {
   return html.replace(re, (full, attr, q, rawPath) => {
     const raw = String(rawPath || "/");
     const hash = raw.includes("#") ? raw.slice(raw.indexOf("#")) : "";
-    const slug = raw.split("#")[0].split("?")[0].replace(/^\/+|\/+$/g, "").toLowerCase();
+    const slug = linkPathToKey(raw); // flatten nested paths (/blogs/x → blogs-x) to match the stored key
     if (slug === "") return `${attr}${q}/${hash}${q}`;          // homepage
     if (slugs.has(slug)) return `${attr}${q}/${slug}${hash}${q}`; // local page (serveProjectSite resolves .html)
     return full;                                                  // not imported locally → leave original
