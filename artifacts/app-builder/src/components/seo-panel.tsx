@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useLang } from "@/lib/i18n";
+import { getToken } from "@/lib/session";
 
 type Severity = "error" | "warn" | "good" | "info";
 type AuditKind = "seo" | "a11y" | "speed";
@@ -320,17 +321,21 @@ function VisitorsView({ projectId }: { projectId: number }) {
   const [online, setOnline] = useState(0);
   const onlineTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  useEffect(() => {
-    setLoading(true);
-    fetch(`/api/projects/${projectId}/analytics?days=${days}`).then((r) => r.json()).then((d: Summary) => { setData(d); setOnline(d.online || 0); }).catch(() => setData(null)).finally(() => setLoading(false));
-  }, [projectId, days]);
+  // Load the full summary (spinner only on the very first load; later refreshes are silent).
+  const loadSummary = (spinner = false) => {
+    if (spinner) setLoading(true);
+    fetch(`/api/projects/${projectId}/analytics?days=${days}`).then((r) => r.json()).then((d: Summary) => { setData(d); setOnline(d.online || 0); }).catch(() => { if (spinner) setData(null); }).finally(() => { if (spinner) setLoading(false); });
+  };
+  useEffect(() => { loadSummary(true); }, [projectId, days]);
 
-  // Poll the "online now" counter every 20s.
+  // Live: refresh the "online now" counter every 5s, and quietly refresh the whole overview every 20s
+  // so the numbers keep updating without the user pressing anything.
   useEffect(() => {
-    const tick = () => fetch(`/api/projects/${projectId}/analytics/live`).then((r) => r.json()).then((d) => setOnline(d.online || 0)).catch(() => {});
-    onlineTimer.current = setInterval(tick, 20000);
-    return () => { if (onlineTimer.current) clearInterval(onlineTimer.current); };
-  }, [projectId]);
+    const live = setInterval(() => fetch(`/api/projects/${projectId}/analytics/live`).then((r) => r.json()).then((d) => setOnline(d.online || 0)).catch(() => {}), 5000);
+    const full = setInterval(() => loadSummary(false), 20000);
+    onlineTimer.current = live;
+    return () => { clearInterval(live); clearInterval(full); };
+  }, [projectId, days]);
 
   const maxDay = useMemo(() => Math.max(1, ...(data?.byDay || []).map((d) => d.views)), [data]);
   const fmtDur = (s: number) => s >= 60 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${s}s`;
@@ -718,25 +723,51 @@ function GoogleView({ projectId }: { projectId: number }) {
 }
 
 // ── Click heat-map ──────────────────────────────────────────────────────────────────────────────
+// Map a tracked click path ("/", "/contact", "/contact.html") to the project's page file.
+function heatmapPageFile(path: string): string {
+  let p = (path || "/").split("?")[0].split("#")[0];
+  if (p === "/" || p === "") return "index.html";
+  p = p.replace(/^\//, "").replace(/\/$/, "");
+  if (!/\.html$/i.test(p)) p += ".html";
+  return p;
+}
+
 function HeatmapPanel({ projectId }: { projectId: number }) {
   const { t } = useLang();
   const [data, setData] = useState<null | { page: string; pages: { path: string; clicks: number }[]; points: { x: number; y: number }[] }>(null);
   const [page, setPage] = useState<string>("");
   const [loading, setLoading] = useState(true);
-  useEffect(() => {
-    setLoading(true);
+  const [frameH, setFrameH] = useState(900);
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
+
+  const load = () => {
     const q = page ? `?page=${encodeURIComponent(page)}` : "";
     fetch(`/api/projects/${projectId}/heatmap${q}`).then((r) => r.json()).then((d) => { setData(d); if (!page && d.page) setPage(d.page); }).catch(() => setData(null)).finally(() => setLoading(false));
-  }, [projectId, page]);
+  };
+  useEffect(() => { setLoading(true); load(); }, [projectId, page]);
+  // Keep the heat-map fresh (new clicks come in live).
+  useEffect(() => { const id = setInterval(load, 10000); return () => clearInterval(id); }, [projectId, page]);
+
+  // The rendered page is served same-origin (/api/...preview-page), so we can read its real height and
+  // size the overlay to it → the dots line up with the actual page.
+  const onFrameLoad = () => {
+    try {
+      const doc = iframeRef.current?.contentWindow?.document;
+      const h = doc ? Math.max(doc.documentElement.scrollHeight, doc.body?.scrollHeight || 0) : 0;
+      if (h > 100) setFrameH(Math.min(h, 8000));
+    } catch { /* cross-origin or blocked — keep the fallback height */ }
+  };
 
   if (loading && !data) return <Centered><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></Centered>;
   if (!data || !data.pages.length) return (
     <div className="rounded-2xl border border-dashed border-border bg-card/30 p-8 text-center">
       <Flame className="h-9 w-9 mx-auto text-muted-foreground/40" />
       <h3 className="mt-3 text-sm font-medium text-foreground">{t("Nog geen klikken gemeten", "No clicks measured yet")}</h3>
-      <p className="mt-1.5 text-xs text-muted-foreground max-w-sm mx-auto leading-relaxed">{t("Zodra bezoekers op je gepubliceerde site klikken, zie je hier waar ze klikken — handig om te zien wat opvalt en wat genegeerd wordt.", "Once visitors click on your published site, you'll see where they click — great for seeing what draws attention and what's ignored.")}</p>
+      <p className="mt-1.5 text-xs text-muted-foreground max-w-sm mx-auto leading-relaxed">{t("Zodra bezoekers op je gepubliceerde site klikken, zie je hier — over je échte pagina heen — waar ze klikken. Handig om te zien wat opvalt en wat genegeerd wordt.", "Once visitors click on your published site, you'll see — right over your real page — where they click. Great for spotting what draws attention and what's ignored.")}</p>
     </div>
   );
+  const file = heatmapPageFile(page || data.page || "/");
+  const src = `/api/projects/${projectId}/preview-page?page=${encodeURIComponent(file)}&token=${encodeURIComponent(getToken() || "")}`;
   return (
     <div>
       <div className="flex items-center gap-2 mb-3 flex-wrap">
@@ -746,16 +777,21 @@ function HeatmapPanel({ projectId }: { projectId: number }) {
           </button>
         ))}
       </div>
-      <div className="relative mx-auto rounded-xl border border-border bg-gradient-to-b from-muted/30 to-muted/10 overflow-hidden" style={{ maxWidth: 760, aspectRatio: "3 / 4" }}>
-        {data.points.map((pt, i) => (
-          <span key={i} className="absolute rounded-full" style={{
-            left: `${pt.x / 10}%`, top: `${pt.y / 10}%`, width: 26, height: 26, transform: "translate(-50%,-50%)",
-            background: "radial-gradient(circle, rgba(244,63,94,.55) 0%, rgba(244,63,94,0) 70%)", mixBlendMode: "multiply",
-          }} />
-        ))}
-        {data.points.length === 0 && <div className="absolute inset-0 flex items-center justify-center text-sm text-muted-foreground">{t("Geen klikken op deze pagina.", "No clicks on this page.")}</div>}
+      <div className="relative mx-auto rounded-xl border border-border overflow-hidden bg-white" style={{ maxWidth: 900, height: frameH }}>
+        {/* The real page as background (non-interactive), with the heat dots overlaid on top. */}
+        <iframe ref={iframeRef} src={src} onLoad={onFrameLoad} title="heatmap-page" scrolling="no"
+          sandbox="allow-same-origin" className="absolute inset-0 w-full h-full border-0 pointer-events-none" style={{ background: "#fff" }} />
+        <div className="absolute inset-0 pointer-events-none">
+          {data.points.map((pt, i) => (
+            <span key={i} className="absolute rounded-full" style={{
+              left: `${pt.x / 10}%`, top: `${pt.y / 10}%`, width: 30, height: 30, transform: "translate(-50%,-50%)",
+              background: "radial-gradient(circle, rgba(244,63,94,.5) 0%, rgba(244,63,94,0) 72%)", mixBlendMode: "multiply",
+            }} />
+          ))}
+        </div>
+        {data.points.length === 0 && <div className="absolute inset-x-0 top-3 flex justify-center"><span className="text-xs bg-foreground/80 text-background rounded-full px-3 py-1">{t("Nog geen klikken op deze pagina", "No clicks on this page yet")}</span></div>}
       </div>
-      <p className="text-[11px] text-muted-foreground/70 mt-2 text-center">{t("Relatieve klikposities (rood = veel klikken). Meer klikken = feller.", "Relative click positions (red = many clicks). More clicks = brighter.")}</p>
+      <p className="text-[11px] text-muted-foreground/70 mt-2 text-center">{t("Klikposities over je echte pagina (rood = geklikt). Ververst automatisch.", "Click positions over your real page (red = clicked). Refreshes automatically.")}</p>
     </div>
   );
 }

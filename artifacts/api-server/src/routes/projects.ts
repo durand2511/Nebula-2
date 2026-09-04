@@ -19,6 +19,7 @@ import { resolvePublishedDomain } from "../lib/seo.js";
 import { runAudit, compareCompetitor, type AuditKind } from "../lib/seo-audit.js";
 import { track as trackVisit, summary as analyticsSummary, liveVisitors } from "../lib/analytics.js";
 import { getSearchPositions } from "../lib/gsc.js";
+import { makeZip } from "../lib/zip.js";
 import { createBackup, backupStatus, restoreBackup, restoreAsNewProject, deleteBackup } from "../lib/project-backups.js";
 import { projectBackups } from "@workspace/db";
 import { clickEvents, newsletterSubscribers } from "@workspace/db";
@@ -3807,6 +3808,28 @@ router.delete("/backups/:backupId", async (req, res) => {
   if (!u) { res.status(401).json({ error: "Niet ingelogd." }); return; }
   try { res.json({ ok: await deleteBackup(backupId, u.id) }); }
   catch (err) { req.log.error({ err }, "[backups] delete failed"); res.status(500).json({ error: "Verwijderen mislukt." }); }
+});
+
+// Download the whole project (all files + uploaded assets) as a ZIP (owner-only).
+router.get("/projects/:projectId/download", async (req, res) => {
+  const projectId = Number(req.params.projectId);
+  if (isNaN(projectId)) { res.status(400).json({ error: "Invalid project ID" }); return; }
+  if (!(await requireOwner(req, res, projectId))) return;
+  try {
+    const [proj] = await db.select({ name: projects.name }).from(projects).where(eq(projects.id, projectId));
+    const files = await db.select({ path: projectFiles.path, content: projectFiles.content }).from(projectFiles).where(eq(projectFiles.projectId, projectId));
+    const assets = await db.select({ path: importAssets.path, data: importAssets.data }).from(importAssets).where(eq(importAssets.projectId, projectId));
+    const entries = [
+      ...files.map((f) => ({ name: f.path, data: Buffer.from(f.content ?? "", "utf8") })),
+      ...assets.map((a) => ({ name: a.path.replace(/^\/+/, ""), data: Buffer.from(a.data ?? "", "base64") })),
+    ];
+    if (!entries.length) { res.status(404).json({ error: "Geen bestanden om te downloaden." }); return; }
+    const zip = makeZip(entries);
+    const safe = String(proj?.name || "website").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "website";
+    res.setHeader("Content-Type", "application/zip");
+    res.setHeader("Content-Disposition", `attachment; filename="${safe}-${projectId}.zip"`);
+    res.send(zip);
+  } catch (err) { req.log.error({ err }, "[download] failed"); res.status(500).json({ error: "Downloaden mislukt." }); }
 });
 
 // Native site-health audit (kind = seo | a11y | speed) of the project's own pages (owner-only).

@@ -2693,6 +2693,24 @@ export function ProjectWorkspace() {
     else window.alert(t("Koppel eerst Claude Code — log in de terminal links in.", "Connect Claude Code first — log in in the terminal on the left."));
   };
 
+  // Download the whole project (files + assets) as a ZIP. Uses an authed fetch (the token rides along
+  // via the global fetch wrapper) → blob → save, because a plain <a download> wouldn't carry the token.
+  const [downloading, setDownloading] = useState(false);
+  const downloadSite = async () => {
+    setDownloading(true);
+    try {
+      const r = await fetch(`/api/projects/${projectId}/download`);
+      if (!r.ok) throw new Error();
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      const cd = r.headers.get("Content-Disposition") || "";
+      const name = /filename="([^"]+)"/.exec(cd)?.[1] || `website-${projectId}.zip`;
+      const a = document.createElement("a"); a.href = url; a.download = name; a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 3000);
+    } catch { window.alert(t("Downloaden mislukt. Probeer het opnieuw.", "Download failed. Please try again.")); }
+    finally { setDownloading(false); }
+  };
+
   // SEO panel → send a fix instruction into the Claude terminal (returns whether it was delivered).
   const sendSeoFix = (prompt: string): boolean => {
     const sent = termHandleRef.current?.send(prompt.trim() + "\r");
@@ -3021,6 +3039,20 @@ export function ProjectWorkspace() {
               </TabsList>
 
               <div className="ml-auto flex items-center gap-1 min-w-0 overflow-x-auto [&>button]:text-xs [&>button]:px-2 [&>button]:shrink-0 [&>button]:whitespace-nowrap [&>*]:shrink-0">
+                {activeTab === "code" && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 text-muted-foreground hover:text-foreground"
+                    onClick={downloadSite}
+                    disabled={downloading}
+                    title={t("Download je hele website (alle code + afbeeldingen) als ZIP naar je computer", "Download your whole website (all code + images) as a ZIP to your computer")}
+                    data-testid="button-download-site"
+                  >
+                    {downloading ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Download className="h-3.5 w-3.5 mr-1.5" />}
+                    {t("Download website", "Download website")}
+                  </Button>
+                )}
                 {!isStreaming && activeTab === "preview" && previewHtml && (
                   <Button
                     variant={selectMode ? "default" : "ghost"}
