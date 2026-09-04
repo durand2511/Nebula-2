@@ -168,9 +168,11 @@ export const ClaudeTerminal = forwardRef<ClaudeTerminalHandle, Props>(function C
 
     const sub = term.onData((d) => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ t: "i", d })); });
 
-    // Client-side keepalive too: some proxies idle-close based on CLIENT inactivity. A harmless resize
-    // every 12s keeps traffic flowing in both directions so the tunnel stays open while Claude works.
-    const clientPing = setInterval(() => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ t: "r", cols: term.cols, rows: term.rows })); }, 12000);
+    // Client-side keepalive: a harmless no-op message ({t:"ka"}, ignored by the server) every 12s keeps
+    // traffic flowing so a proxy doesn't idle-close the tunnel. Deliberately NOT a resize — a resize
+    // carrying a stale/zero size (during a reflow or reconnect) could reach the PTY at a bad size and
+    // crash Claude Code, which then respawned at the bypass-permissions startup screen.
+    const clientPing = setInterval(() => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ t: "ka" })); }, 12000);
 
     return () => { closedByUs = true; clearInterval(clientPing); if (retryTimer) clearTimeout(retryTimer); sub.dispose(); try { ws.close(); } catch { /* ignore */ } if (wsRef.current === ws) wsRef.current = null; };
   }, [projectId, gen, setStat]);

@@ -781,10 +781,11 @@ async function onConnection(ws: WebSocket, userId: number, projectId: number, pr
   // SIGWINCH twice and makes Claude Code repaint its whole UI cleanly at the client's real size.
   if (!isNew && dims && dims.cols > 0 && dims.rows > 0 && s.proc && !s.exited) {
     const { cols, rows } = dims;
+    const C = Math.min(500, Math.max(20, cols)); // clamp so a bad/tiny size never reaches the PTY (crash)
     // Jiggle (two different sizes → SIGWINCH → clean repaint), ENDING one row short of xterm so Claude
     // Code's bottom status bar ("auto mode" / "bypass permissions") isn't clipped by the container edge.
-    try { s.proc.resize(Math.min(500, cols), Math.min(200, Math.max(10, rows))); } catch { /* ignore */ }
-    setTimeout(() => { try { if (s.proc && !s.exited) s.proc.resize(Math.min(500, cols), Math.min(200, Math.max(10, rows - 1))); } catch { /* ignore */ } }, 60);
+    try { s.proc.resize(C, Math.min(200, Math.max(10, rows))); } catch { /* ignore */ }
+    setTimeout(() => { try { if (s.proc && !s.exited) s.proc.resize(C, Math.min(200, Math.max(10, rows - 1))); } catch { /* ignore */ } }, 60);
   }
 
   // Keepalive: Render's proxy closes WebSockets that go quiet, which showed up as "opnieuw starten"
