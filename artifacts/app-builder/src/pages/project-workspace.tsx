@@ -2968,8 +2968,10 @@ export function ProjectWorkspace() {
             </div>
           </div>
         )}
-        {/* Left Panel: Claude Code terminal (the editor) */}
-        <div className="w-[600px] max-w-[46vw] min-w-[440px] border-r border-border bg-[#0f0e14] flex flex-col shrink-0">
+        {/* Left Panel: Claude Code terminal (the editor). min-h-0 + overflow-hidden so the column stays
+            exactly viewport height and scrolls INSIDE — without it (Chrome/Edge on Windows) the panel
+            grows to match the tall SEO list next to it. */}
+        <div className="w-[600px] max-w-[46vw] min-w-[440px] border-r border-border bg-[#0f0e14] flex flex-col shrink-0 min-h-0 overflow-hidden">
           <div className="flex items-center gap-2 px-3 py-2 border-b border-white/10 text-xs text-white/70">
             <TerminalIcon className="h-3.5 w-3.5 text-primary" />
             <span className="font-semibold text-white/90">Claude Code</span>

@@ -42,8 +42,11 @@ function unpack(blob: string): Payload {
 export function unpackBackup(blob: string): FileRec[] { return unpack(blob).files; }
 
 async function projectFileRecs(projectId: number): Promise<FileRec[]> {
+  // ORDER BY path so the file list is DETERMINISTIC — without it Postgres may return rows in a
+  // different order each call, which changes the pack hash and triggers a spurious "changed" back-up
+  // even when nothing actually changed.
   const rows = await db.select({ path: projectFiles.path, content: projectFiles.content, language: projectFiles.language })
-    .from(projectFiles).where(eq(projectFiles.projectId, projectId));
+    .from(projectFiles).where(eq(projectFiles.projectId, projectId)).orderBy(projectFiles.path);
   return rows.map((r) => ({ path: r.path, content: r.content ?? "", language: r.language ?? "plaintext" }));
 }
 
@@ -52,7 +55,7 @@ async function projectFileRecs(projectId: number): Promise<FileRec[]> {
 // site share one copy of each asset.
 async function snapshotAssets(projectId: number): Promise<AssetRef[]> {
   const rows = await db.select({ path: importAssets.path, contentType: importAssets.contentType, data: importAssets.data })
-    .from(importAssets).where(eq(importAssets.projectId, projectId));
+    .from(importAssets).where(eq(importAssets.projectId, projectId)).orderBy(importAssets.path); // deterministic order → stable hash
   const refs: AssetRef[] = [];
   for (const r of rows) {
     const data = r.data ?? "";
