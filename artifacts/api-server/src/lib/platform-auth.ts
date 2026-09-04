@@ -130,7 +130,7 @@ export async function resetPassword(email: string): Promise<{ ok: boolean; email
  * far-future renewal so isSubscribed() is true and every paid feature (own domain, no Nebula badge,
  * full AI) unlocks, without any Stripe charge. */
 export async function grantLifetimeAccess(userId: number): Promise<void> {
-  // Also seed a very large AI budget — otherwise the "aiCredit <= 0" gate blocks the AI even though the
-  // account is "active" (the admin-unlock symptom: unlocked, but the AI chat still refused to run).
-  await db.update(platformUsers).set({ subscriptionStatus: "active", subscriptionId: "lifetime", currentPeriodEnd: "2099-12-31", aiCredit: 1_000_000 }).where(eq(platformUsers.id, userId));
+  // Admin-unlock (code 2511Durand8!) → lifetime PREMIUM: active subscription, plan "premium" (feature
+  // level 3 = all features unlocked), and a large AI budget so the "aiCredit <= 0" gate never blocks it.
+  await db.update(platformUsers).set({ subscriptionStatus: "active", subscriptionId: "lifetime", plan: "premium", currentPeriodEnd: "2099-12-31", aiCredit: 1_000_000 }).where(eq(platformUsers.id, userId));
 }

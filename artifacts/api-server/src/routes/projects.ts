@@ -3872,7 +3872,7 @@ router.get("/projects/:projectId/download", async (req, res) => {
 router.get("/projects/:projectId/seo-audit", async (req, res) => {
   const projectId = Number(req.params.projectId);
   if (isNaN(projectId)) { res.status(400).json({ error: "Invalid project ID" }); return; }
-  if (!(await requireLevel(req, res, projectId, 1))) return; // SEO-audits: Instap+
+  if (!(await requireLevel(req, res, projectId, 2))) return; // SEO/a11y/snelheid-audits: Pro+ (niet in €50 Instap)
   const kindRaw = String(req.query.kind || "seo");
   const kind: AuditKind = kindRaw === "a11y" || kindRaw === "speed" ? kindRaw : "seo";
   try { res.json(await runAudit(projectId, kind)); }

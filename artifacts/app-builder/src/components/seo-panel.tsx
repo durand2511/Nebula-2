@@ -55,8 +55,9 @@ function ScoreRing({ score, grade, size = 128 }: { score: number; grade?: string
   );
 }
 
-// Minimum plan level per sub-tab: 1 = Instap, 2 = Pro. (A/B inside Bezoekers is gated separately at 3.)
-const TAB_MIN: Record<string, 1 | 2> = { seo: 1, a11y: 1, speed: 1, google: 2, competitor: 2, visitors: 2 };
+// Minimum plan level per sub-tab. The whole SEO & Statistieken-tab is a Pro-feature (level 2) — the
+// €50 Instap plan is website + booking only. (A/B inside Bezoekers is gated separately at Premium/3.)
+const TAB_MIN: Record<string, 1 | 2> = { seo: 2, a11y: 2, speed: 2, google: 2, competitor: 2, visitors: 2 };
 
 export function SeoPanel({ projectId, onFix, changeSignal = 0 }: { projectId: number; onFix: (prompt: string) => boolean; changeSignal?: number }) {
   const { t } = useLang();
@@ -107,7 +108,7 @@ function LockedFeature({ min }: { min: number }) {
       <h3 className="mt-4 text-lg font-semibold text-foreground">{t(`Beschikbaar vanaf ${tier}`, `Available from ${tier}`)}</h3>
       <p className="mt-2 text-sm text-muted-foreground max-w-sm">
         {min >= 2
-          ? t("Deze functie zit in het Pro-abonnement (€80/mnd): statistieken, heatmap, conversies, Google-posities en concurrent-vergelijking.", "This feature is in the Pro plan (€80/mo): analytics, heatmap, conversions, Google positions and competitor comparison.")
+          ? t("De SEO & Statistieken-tab zit in het Pro-abonnement (€80/mnd): SEO-, toegankelijkheids- en snelheidsanalyse, bezoekersstatistieken, heatmap, conversies, Google-posities en concurrent-vergelijking.", "The SEO & Stats tab is in the Pro plan (€80/mo): SEO, accessibility and speed analysis, visitor stats, heatmap, conversions, Google positions and competitor comparison.")
           : t("Neem een abonnement om deze functie te gebruiken.", "Subscribe to use this feature.")}
       </p>
       <p className="mt-4 text-xs text-muted-foreground/70">{t("Upgraden kan bij je account → Abonnement.", "Upgrade under your account → Subscription.")}</p>
