@@ -3,8 +3,8 @@
  * sites, and aggregates them for the editor dashboard. Privacy-friendly: no cookies, no PII; the
  * visitor id is a random token stored in the visitor's own browser. Deleting is easy (drop rows).
  */
-import { db, analyticsEvents } from "@workspace/db";
-import { and, eq, gte, sql } from "drizzle-orm";
+import { db, analyticsEvents, analyticsOnline } from "@workspace/db";
+import { and, eq, gte, lt, sql } from "drizzle-orm";
 
 export type TrackInput = {
   projectId: number; eventId: string; visitorId?: string; path?: string; referrer?: string;
@@ -12,25 +12,25 @@ export type TrackInput = {
   goal?: string; ping?: boolean;
 };
 
-// In-memory "who is online now" — projectId → (visitorId → last-seen ms). Reset on restart (fine for
-// a live counter). Updated on every beacon hit (view/leave/ping/goal); no DB write for pings.
-const presence = new Map<number, Map<string, number>>();
 const ONLINE_MS = 90 * 1000;
-function touchPresence(projectId: number, visitorId: string) {
+// DB-backed presence: bump the visitor's seen_at on every beacon hit (view/ping/leave). One row per
+// visitor per project → works across server instances and survives restarts (unlike an in-memory map).
+async function touchPresence(projectId: number, visitorId: string): Promise<void> {
   if (!visitorId) return;
-  let m = presence.get(projectId);
-  if (!m) { m = new Map(); presence.set(projectId, m); }
-  m.set(visitorId, Date.now());
-  if (m.size > 5000) for (const [v, ts] of m) if (Date.now() - ts > ONLINE_MS) m.delete(v);
+  try {
+    await db.insert(analyticsOnline).values({ projectId, visitorId, seenAt: new Date() })
+      .onConflictDoUpdate({ target: [analyticsOnline.projectId, analyticsOnline.visitorId], set: { seenAt: new Date() } });
+    // Opportunistic cleanup of stale rows so the table stays small.
+    if (Math.random() < 0.02) await db.delete(analyticsOnline).where(lt(analyticsOnline.seenAt, new Date(Date.now() - 6 * 60 * 60 * 1000)));
+  } catch { /* best-effort */ }
 }
-/** Visitors seen in the last ~90s. */
-export function liveVisitors(projectId: number): number {
-  const m = presence.get(projectId);
-  if (!m) return 0;
-  const cut = Date.now() - ONLINE_MS;
-  let n = 0;
-  for (const ts of m.values()) if (ts >= cut) n++;
-  return n;
+/** Distinct visitors seen in the last ~90s (from the DB, so it's the same across all instances). */
+export async function liveVisitors(projectId: number): Promise<number> {
+  try {
+    const [r] = await db.select({ n: sql<number>`count(distinct ${analyticsOnline.visitorId})::int` })
+      .from(analyticsOnline).where(and(eq(analyticsOnline.projectId, projectId), gte(analyticsOnline.seenAt, new Date(Date.now() - ONLINE_MS))));
+    return r?.n ?? 0;
+  } catch { return 0; }
 }
 
 const clampStr = (s: unknown, n: number) => String(s ?? "").slice(0, n);
@@ -51,8 +51,8 @@ function deviceOf(v: unknown, screenW: number): string {
 /** Insert a pageview / conversion, or (on page-leave) update its duration. Pings only mark presence. */
 export async function track(input: TrackInput, selfHost: string): Promise<void> {
   if (!Number.isInteger(input.projectId)) return;
-  touchPresence(input.projectId, clampStr(input.visitorId, 64));
-  if (input.ping) return; // heartbeat: presence only, no DB row
+  await touchPresence(input.projectId, clampStr(input.visitorId, 64));
+  if (input.ping) return; // heartbeat: presence only, no pageview row
   const eventId = clampStr(input.eventId, 64);
   if (!eventId) return;
   const goal = clampStr(input.goal, 40);
@@ -154,7 +154,7 @@ export async function summary(projectId: number, days = 30): Promise<AnalyticsSu
     totals: { views: tot?.views ?? 0, visitors, avgSeconds: Math.round((tot?.avgMs ?? 0) / 1000) },
     byDay: d <= 90 ? byDay : byDay.slice(-90),
     topPages, devices, referrers, screens,
-    online: liveVisitors(projectId),
+    online: await liveVisitors(projectId),
     conversions: { total: convTotal, rate: visitors ? Math.round((convTotal / visitors) * 1000) / 10 : 0, goals: goalRows },
     hasData: (tot?.views ?? 0) > 0 || convTotal > 0,
   };

@@ -470,6 +470,15 @@ export const analyticsEvents = pgTable("analytics_events", {
   byEvent: uniqueIndex("analytics_event_id").on(t.eventId),
 }));
 
+// "Who is online right now" — one row per visitor per project, its seen_at bumped by every beacon hit
+// (view/ping/leave). DB-backed so it works across server instances and survives restarts. Bounded to
+// one row per unique visitor; old rows are pruned opportunistically.
+export const analyticsOnline = pgTable("analytics_online", {
+  projectId: integer("project_id").notNull(),
+  visitorId: text("visitor_id").notNull(),
+  seenAt: timestamp("seen_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => ({ pk: uniqueIndex("analytics_online_pk").on(t.projectId, t.visitorId) }));
+
 // Newsletter sign-ups collected by the injected subscribe widget (privacy-friendly, opt-in).
 export const newsletterSubscribers = pgTable("newsletter_subscribers", {
   id: serial("id").primaryKey(),
@@ -771,3 +780,4 @@ export type PlatformAiUsage = typeof platformAiUsage.$inferSelect;
 export type AnalyticsEvent = typeof analyticsEvents.$inferSelect;
 export type NewsletterSubscriber = typeof newsletterSubscribers.$inferSelect;
 export type ClickEvent = typeof clickEvents.$inferSelect;
+export type AnalyticsOnline = typeof analyticsOnline.$inferSelect;

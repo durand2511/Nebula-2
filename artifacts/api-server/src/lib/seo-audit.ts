@@ -169,6 +169,16 @@ export async function runSeoAudit(projectId: number): Promise<SeoReport> {
   for (const [t, ps] of titles) if (ps.length > 1) add({ id: `dup-title-${t.slice(0, 20)}`, page: "", severity: "warn", category: "meta", title: "Dubbele paginatitels", detail: `De titel "${t.slice(0, 60)}" komt op ${ps.length} pagina's voor (${ps.join(", ")}). Elke pagina hoort een unieke titel te hebben.`, fix: "Geef elke pagina een unieke titel.", fixPrompt: `Geef deze pagina's elk een UNIEKE <title> (nu allemaal "${t.slice(0, 60)}"): ${ps.join(", ")}.` });
   for (const [d, ps] of descs) if (ps.length > 1) add({ id: `dup-desc-${d.slice(0, 16)}`, page: "", severity: "warn", category: "meta", title: "Dubbele meta-omschrijvingen", detail: `Dezelfde meta description staat op ${ps.length} pagina's (${ps.join(", ")}).`, fix: "Maak elke omschrijving uniek.", fixPrompt: `Geef deze pagina's elk een UNIEKE meta description: ${ps.join(", ")}.` });
   if (pages.length && !anyStructuredBusiness) add({ id: "no-localbusiness", page: "", severity: "info", category: "structured", title: "Geen bedrijfsgegevens (LocalBusiness)", detail: "Voor lokaal gevonden worden ('… in [plaats]') helpt LocalBusiness-structured data met naam, adres, telefoon en openingstijden enorm.", fix: "Voeg LocalBusiness JSON-LD toe op de homepage.", fixPrompt: "Voeg op de homepage LocalBusiness JSON-LD toe met de echte bedrijfsnaam, adres, telefoonnummer, openingstijden en (indien bekend) geo-coördinaten, zodat we lokaal beter gevonden worden." });
+  // Multilingual reach — an opportunity, fixable with Claude. Only suggested when the site isn't
+  // already multilingual (no hreflang alternates present).
+  const home = pages.find((p) => /(^|\/)index\.html$/i.test(p.path)) || pages[0];
+  const hasHreflang = /<link[^>]+hreflang=/i.test(home?.content || "");
+  if (pages.length && !hasHreflang) {
+    const lm = (home?.content || "").match(/<html[^>]*\blang=["']?([a-z]{2})/i);
+    const code = (lm?.[1] || "").toLowerCase();
+    const langName = code === "en" ? "Engels" : code === "de" ? "Duits" : code === "es" ? "Spaans" : code === "fr" ? "Frans" : code === "nl" ? "Nederlands" : "één taal";
+    add({ id: "multilang", page: "", severity: "info", category: "content", title: "Alleen in één taal", detail: `Je site is nu in ${langName}. Een meertalige site (bijvoorbeeld Engels, en eventueel Spaans, Duits of Frans) vergroot je bereik en laat je in meer landen in Google verschijnen.`, fix: "Voeg vertaalde versies toe met een taalwisselaar en hreflang-tags.", fixPrompt: "Maak de website meertalig: voeg een Engelse versie toe (en indien passend Spaans, Duits en Frans), met een taalwisselaar in het menu en correcte hreflang-tags en lang-attributen per taal, met behoud van de vormgeving en inhoud." });
+  }
   add({ id: "sitemap", page: "", severity: "good", category: "techniek", title: "Sitemap aanwezig", detail: "Je site levert automatisch een sitemap.xml — Google vindt zo al je pagina's." });
   add({ id: "https", page: "", severity: "good", category: "techniek", title: "Beveiligd met HTTPS", detail: "Je site draait op https met een geldig SSL-certificaat — een ranking-factor bij Google." });
 
@@ -239,12 +249,27 @@ export async function runSpeedAudit(projectId: number): Promise<SeoReport> {
   const findings: Finding[] = [];
   const add = (f: Finding) => findings.push(f);
 
-  // Byte sizes of the project's own uploaded assets (base64 → ~0.75×). Keyed by "/assets/xxxx".
+  // Byte sizes of the project's own uploaded assets (base64 → ~0.75×). Indexed by full path AND by
+  // bare filename, so we still match whether the <img src> is absolute (/assets/x.png), relative
+  // (assets/x.png, ../wp-content/…/x.png) or just differs in leading slash.
   const assetRows = await db.select({ path: importAssets.path, data: importAssets.data })
     .from(importAssets).where(eq(importAssets.projectId, projectId));
-  const assetBytes = new Map<string, number>();
-  for (const a of assetRows) assetBytes.set("/" + a.path.replace(/^\//, ""), Math.round((a.data?.length || 0) * 0.75));
+  const byPath = new Map<string, number>();
+  const byName = new Map<string, number>();
+  for (const a of assetRows) {
+    const bytes = Math.round((a.data?.length || 0) * 0.75);
+    const clean = a.path.replace(/^\//, "");
+    byPath.set(clean, bytes); byPath.set("/" + clean, bytes);
+    byName.set((clean.split("/").pop() || "").toLowerCase(), bytes);
+  }
   const kb = (b: number) => Math.round(b / 1024);
+  // Resolve an <img src> to its byte size: data-URI (measured inline), or an uploaded asset by path/name.
+  const imgBytes = (src: string): number => {
+    const s = src.split("?")[0].split("#")[0];
+    if (/^data:/i.test(s)) { const c = s.indexOf(","); return c >= 0 ? Math.round((s.length - c - 1) * 0.75) : 0; }
+    const bare = s.replace(/^\//, "");
+    return byPath.get(s) ?? byPath.get(bare) ?? byName.get((s.split("/").pop() || "").toLowerCase()) ?? 0;
+  };
 
   for (const pg of pages) {
     const $ = cheerioLoad(pg.content);
@@ -256,17 +281,24 @@ export async function runSpeedAudit(projectId: number): Promise<SeoReport> {
     if (headScripts > 0) add({ id: `spd-headjs-${P}`, page: P, severity: "warn", category: "scripts", title: `${headScripts} blokkerend script in <head>`, detail: "Scripts in de <head> zonder async/defer houden het tekenen van de pagina tegen — de bezoeker staart naar wit.", fix: "Geef ze defer/async of verplaats naar het einde van <body>.", fixPrompt: `Geef de <script src>-tags in de <head> van ${P} een defer- (of async-)attribuut, of verplaats ze naar vlak vóór </body>, zodat ze het laden niet blokkeren.` });
     if (cssLinks > 4) add({ id: `spd-css-${P}`, page: P, severity: "info", category: "stijlen", title: `${cssLinks} losse stylesheets`, detail: "Veel losse CSS-bestanden betekenen veel aparte downloads die het eerste tekenen vertragen.", fix: "Voeg stylesheets samen.", fixPrompt: `Voeg de losse stylesheets op ${P} samen tot minder bestanden om het aantal downloads te beperken.` });
 
-    // Large / unoptimised images.
+    // Image sizes: measure every <img>, list the biggest, and flag the heavy ones.
     const imgs = $("img").toArray();
-    let pageImgBytes = 0; const bigImgs: string[] = [];
+    let pageImgBytes = 0; let measured = 0;
+    const sized: { name: string; bytes: number }[] = [];
     for (const im of imgs) {
       const src = String($(im).attr("src") || "");
-      const b = assetBytes.get(src.split("?")[0]) || 0;
-      pageImgBytes += b;
-      if (b > 300 * 1024) bigImgs.push(`${src.split("/").pop()} (${kb(b)} KB)`);
-      if (/\.(png|jpe?g)$/i.test(src) && b > 150 * 1024) { /* counted below via bigImgs/pageImgBytes */ }
+      if (!src) continue;
+      const b = imgBytes(src);
+      if (b > 0) { pageImgBytes += b; measured++; sized.push({ name: (/^data:/i.test(src) ? "(inline afbeelding)" : src.split("/").pop() || src), bytes: b }); }
     }
-    if (bigImgs.length) add({ id: `spd-bigimg-${P}`, page: P, severity: "error", category: "gewicht", title: `${bigImgs.length} zware afbeelding${bigImgs.length > 1 ? "en" : ""}`, detail: `Grote afbeeldingen vertragen het laden fors, vooral op mobiel: ${bigImgs.slice(0, 4).join(", ")}.`, fix: "Comprimeer/verklein deze afbeeldingen of gebruik WebP.", fixPrompt: `Comprimeer en verklein de zware afbeeldingen op ${P} (${bigImgs.slice(0, 6).join(", ")}) en sla ze op als WebP; behoud de zichtbare kwaliteit.` });
+    sized.sort((a, b) => b.bytes - a.bytes);
+    const bigImgs = sized.filter((s) => s.bytes > 300 * 1024);
+    const heavyish = sized.filter((s) => s.bytes > 150 * 1024 && s.bytes <= 300 * 1024);
+    const fmtList = (arr: { name: string; bytes: number }[]) => arr.map((s) => `${s.name} (${kb(s.bytes)} KB)`);
+    if (bigImgs.length) add({ id: `spd-bigimg-${P}`, page: P, severity: "error", category: "gewicht", title: `${bigImgs.length} zware afbeelding${bigImgs.length > 1 ? "en" : ""} (>300 KB)`, detail: `Grote afbeeldingen vertragen het laden fors, vooral op mobiel: ${fmtList(bigImgs).slice(0, 5).join(", ")}.`, fix: "Comprimeer/verklein deze afbeeldingen of gebruik WebP.", fixPrompt: `Comprimeer en verklein de zware afbeeldingen op ${P} (${fmtList(bigImgs).slice(0, 8).join(", ")}) en sla ze op als WebP; behoud de zichtbare kwaliteit.` });
+    else if (heavyish.length) add({ id: `spd-heavyimg-${P}`, page: P, severity: "warn", category: "gewicht", title: `${heavyish.length} vrij grote afbeelding${heavyish.length > 1 ? "en" : ""} (>150 KB)`, detail: `Deze kunnen lichter: ${fmtList(heavyish).slice(0, 5).join(", ")}. Mik op < ~150 KB per afbeelding.`, fix: "Verklein/comprimeer of gebruik WebP.", fixPrompt: `Comprimeer de afbeeldingen op ${P} (${fmtList(heavyish).slice(0, 8).join(", ")}) naar < ~150 KB per stuk (WebP), zonder zichtbaar kwaliteitsverlies.` });
+    // Always show the image-weight breakdown so you can see exactly how big your images are.
+    if (measured > 0) add({ id: `spd-imgsize-${P}`, page: P, severity: bigImgs.length ? "warn" : "info", category: "gewicht", title: `Afbeeldingen: ±${kb(pageImgBytes)} KB (${measured} stuks)`, detail: `Grootste op deze pagina: ${fmtList(sized).slice(0, 6).join(", ")}${sized.length > 6 ? ", …" : ""}. Gemiddeld ${kb(Math.round(pageImgBytes / measured))} KB per afbeelding.`, fix: "Verklein/comprimeer de zwaarste afbeeldingen (WebP).", fixPrompt: `Verklein en comprimeer de zwaarste afbeeldingen op ${P} (${fmtList(sized).slice(0, 6).join(", ")}) naar WebP onder ~150 KB per stuk, met behoud van de zichtbare kwaliteit.` });
     const lazyable = imgs.filter((im, idx) => idx > 1 && !$(im).attr("loading")).length;
     if (lazyable > 2) add({ id: `spd-lazy-${P}`, page: P, severity: "info", category: "laden", title: `${lazyable} afbeeldingen zonder lazy-loading`, detail: "Afbeeldingen onder de vouw kun je pas laden wanneer de bezoeker er bijna is (loading=\"lazy\"). Dat versnelt het eerste beeld.", fix: 'Zet loading="lazy" op afbeeldingen onder de vouw.', fixPrompt: `Voeg loading="lazy" toe aan de afbeeldingen onder de vouw op ${P} (laat de eerste 1–2 hero-afbeeldingen zonder lazy).` });
 

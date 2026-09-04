@@ -4,8 +4,7 @@ import {
   Gauge, BarChart3, RefreshCw, Loader2, Sparkles, Wand2, AlertTriangle, AlertCircle,
   CheckCircle2, Info, Users, Eye, Clock, Monitor, Smartphone, Tablet, ArrowUpRight, Globe,
   Accessibility, Zap, Trophy, Link2, Target, X, Search, Gift, ChevronDown, ChevronRight,
-  TrendingUp, Palette, Languages, Image as ImageIcon, Mail, Wrench, Flame, Download, Upload, MousePointerClick,
-  Maximize2,
+  TrendingUp, Flame, MousePointerClick, Maximize2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useLang } from "@/lib/i18n";
@@ -58,7 +57,7 @@ function ScoreRing({ score, grade, size = 128 }: { score: number; grade?: string
 
 export function SeoPanel({ projectId, onFix }: { projectId: number; onFix: (prompt: string) => boolean }) {
   const { t } = useLang();
-  const [view, setView] = useState<"seo" | "a11y" | "speed" | "google" | "competitor" | "visitors" | "tools">("seo");
+  const [view, setView] = useState<"seo" | "a11y" | "speed" | "google" | "competitor" | "visitors">("seo");
   const tabs: { key: typeof view; label: string; Icon: typeof Gauge }[] = [
     { key: "seo", label: t("SEO", "SEO"), Icon: Gauge },
     { key: "a11y", label: t("Toegankelijkheid", "Accessibility"), Icon: Accessibility },
@@ -66,7 +65,6 @@ export function SeoPanel({ projectId, onFix }: { projectId: number; onFix: (prom
     { key: "google", label: t("Google-posities", "Google positions"), Icon: TrendingUp },
     { key: "competitor", label: t("Concurrent", "Competitor"), Icon: Trophy },
     { key: "visitors", label: t("Bezoekers", "Visitors"), Icon: BarChart3 },
-    { key: "tools", label: t("Tools", "Tools"), Icon: Wrench },
   ];
   return (
     <div className="flex-1 flex flex-col min-h-0 bg-background">
@@ -82,7 +80,6 @@ export function SeoPanel({ projectId, onFix }: { projectId: number; onFix: (prom
         {view === "visitors" ? <VisitorsView projectId={projectId} />
           : view === "competitor" ? <CompetitorView projectId={projectId} onFix={onFix} />
           : view === "google" ? <GoogleView projectId={projectId} />
-          : view === "tools" ? <ToolsView projectId={projectId} onFix={onFix} />
           : <AuditView projectId={projectId} kind={view} onFix={onFix} />}
       </div>
     </div>
@@ -446,8 +443,6 @@ function VisitorsView({ projectId }: { projectId: number }) {
 
       <div className="mt-6 mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">{t("Groei-instellingen", "Growth settings")}</div>
       <ExitPopupCard projectId={projectId} />
-      <NewsletterCard projectId={projectId} />
-      <WelcomeBackCard projectId={projectId} />
       <ABTestCard projectId={projectId} />
       </>)}
     </div>
@@ -615,47 +610,6 @@ function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (v: 
   );
 }
 
-function NewsletterCard({ projectId }: { projectId: number }) {
-  const { t } = useLang();
-  const { val, patch, save, saved, busy } = useSiteSection(projectId, "newsletter", { enabled: false, title: "", text: "" });
-  const [count, setCount] = useState<number | null>(null);
-  useEffect(() => { fetch(`/api/projects/${projectId}/subscribers`).then((r) => r.json()).then((d) => setCount(d.count ?? 0)).catch(() => {}); }, [projectId]);
-  // Export via authed fetch (the <a> tag wouldn't carry the Bearer token) → download the blob.
-  const exportCsv = async () => {
-    try {
-      const r = await fetch(`/api/projects/${projectId}/subscribers?format=csv`);
-      const blob = await r.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a"); a.href = url; a.download = `nieuwsbrief-${projectId}.csv`; a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 2000);
-    } catch { /* ignore */ }
-  };
-  return (
-    <GrowthCard icon={Mail} title={t("Nieuwsbrief-inschrijving", "Newsletter sign-up")} subtitle={t("Verzamel e-mailadressen met een aanmeldblok op je site.", "Collect emails with a sign-up block on your site.")} on={!!val.enabled}>
-      <Toggle checked={!!val.enabled} onChange={(v) => { patch({ enabled: v }); save({ ...val, enabled: v }); }} label={t("Aanmeldblok tonen op mijn site", "Show a sign-up block on my site")} />
-      <Field label={t("Titel", "Title")} value={val.title} onChange={(v) => patch({ title: v })} placeholder={t("Blijf op de hoogte", "Stay in the loop")} />
-      <Field label={t("Tekst", "Text")} value={val.text} onChange={(v) => patch({ text: v })} placeholder={t("Meld je aan voor nieuws en aanbiedingen.", "Sign up for news and offers.")} />
-      <div className="flex items-center justify-between gap-2 rounded-lg bg-muted/40 px-3 py-2">
-        <span className="text-sm text-foreground">{count === null ? "…" : count} {t("aanmeldingen", "sign-ups")}</span>
-        <button onClick={exportCsv} className="text-xs font-medium text-primary inline-flex items-center gap-1 hover:underline"><Download className="h-3.5 w-3.5" />{t("Exporteer CSV", "Export CSV")}</button>
-      </div>
-      <SaveRow onSave={() => save()} saved={saved} busy={busy} />
-    </GrowthCard>
-  );
-}
-
-function WelcomeBackCard({ projectId }: { projectId: number }) {
-  const { t } = useLang();
-  const { val, patch, save, saved, busy } = useSiteSection(projectId, "welcomeBack", { enabled: false, message: "" });
-  return (
-    <GrowthCard icon={Users} title={t("“Welkom terug” voor terugkerende bezoekers", "“Welcome back” for returning visitors")} subtitle={t("Toon een vriendelijke banner aan wie al eerder langskwam.", "Show a friendly banner to people who visited before.")} on={!!val.enabled}>
-      <Toggle checked={!!val.enabled} onChange={(v) => { patch({ enabled: v }); save({ ...val, enabled: v }); }} label={t("Welkom-terug-banner inschakelen", "Enable welcome-back banner")} />
-      <Field label={t("Bericht", "Message")} value={val.message} onChange={(v) => patch({ message: v })} placeholder={t("Welkom terug! Leuk dat je er weer bent 👋", "Welcome back! Great to see you again 👋")} />
-      <SaveRow onSave={() => save()} saved={saved} busy={busy} />
-    </GrowthCard>
-  );
-}
-
 function ABTestCard({ projectId }: { projectId: number }) {
   const { t } = useLang();
   const { val, patch, save, saved, busy } = useSiteSection(projectId, "abTest", { enabled: false, label: "", selector: "", variant: "" });
@@ -748,8 +702,8 @@ function HeatStage({ src, points, maxWidth, showDots }: { src: string; points: {
   };
   return (
     <div className="relative mx-auto rounded-xl border border-border overflow-hidden bg-white" style={{ maxWidth, height: h }}>
-      <iframe ref={ref} src={src} onLoad={() => { measure(); setTimeout(measure, 600); }} title="heatmap-page" scrolling="no"
-        sandbox="allow-same-origin" className="absolute inset-0 w-full h-full border-0 pointer-events-none" style={{ background: "#fff" }} />
+      <iframe ref={ref} src={src} onLoad={() => { measure(); setTimeout(measure, 600); setTimeout(measure, 1500); }} title="heatmap-page" scrolling="no"
+        sandbox="allow-same-origin allow-scripts" className="absolute inset-0 w-full h-full border-0 pointer-events-none" style={{ background: "#fff" }} />
       {/* Dots only in the full-screen view — the small inline render can't align them well. */}
       {showDots && (
         <div className="absolute inset-0 pointer-events-none">
@@ -799,27 +753,33 @@ function HeatmapPanel({ projectId }: { projectId: number }) {
   const src = `/api/projects/${projectId}/preview-page?page=${encodeURIComponent(file)}&token=${encodeURIComponent(getToken() || "")}`;
   return (
     <div>
-      <div className="flex items-center gap-2 mb-3 flex-wrap">
+      <p className="text-sm text-muted-foreground mb-3">{t("Klik op een pagina om de klik-heatmap over je echte pagina te bekijken.", "Click a page to view the click heatmap over your real page.")}</p>
+      {/* Each page is clickable → opens that page's heatmap full-screen. */}
+      <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2 mb-4">
         {data.pages.map((p) => (
-          <button key={p.path} onClick={() => setPage(p.path)} className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${page === p.path ? "border-primary bg-primary/10 text-foreground" : "border-border text-muted-foreground hover:text-foreground"}`}>
-            {p.path} <span className="opacity-60">({p.clicks})</span>
+          <button key={p.path} onClick={() => { setPage(p.path); setFull(true); }}
+            className={`group flex items-center gap-3 rounded-xl border p-3 text-left transition-colors ${page === p.path ? "border-primary bg-primary/[0.04]" : "border-border hover:border-primary/50 hover:bg-muted/30"}`}
+            title={t(`Bekijk heatmap van ${p.path}`, `View heatmap of ${p.path}`)}>
+            <span className="h-9 w-9 rounded-lg bg-rose-500/10 flex items-center justify-center shrink-0"><Flame className="h-4.5 w-4.5 text-rose-500" style={{ width: 18, height: 18 }} /></span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-sm font-medium text-foreground truncate">{p.path}</span>
+              <span className="block text-xs text-muted-foreground">{p.clicks} {t("klikken", "clicks")}</span>
+            </span>
+            <Maximize2 className="h-4 w-4 text-muted-foreground shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
           </button>
         ))}
-        <Button size="sm" variant="outline" className="ml-auto h-7 gap-1.5" onClick={() => setFull(true)}>
-          <Maximize2 className="h-3.5 w-3.5" /> {t("Volledig scherm", "Full screen")}
-        </Button>
       </div>
 
-      {/* Inline: just a preview of the page (no dots — they only align well full-screen). Click to open. */}
-      <div className="cursor-zoom-in group relative" onClick={() => setFull(true)} title={t("Klik om de heatmap te openen", "Click to open the heatmap")}>
+      {/* Preview of the selected page — click to open it full-screen. */}
+      <div className="cursor-zoom-in group relative" onClick={() => setFull(true)} title={t("Klik om te vergroten", "Click to enlarge")}>
         <HeatStage src={src} points={data.points} maxWidth={900} showDots={false} />
         <div className="absolute inset-0 bg-black/0 group-hover:bg-black/[0.03] transition-colors flex items-center justify-center">
           <span className="inline-flex items-center gap-1.5 text-sm font-medium bg-foreground/85 text-background rounded-full px-4 py-2 shadow-lg opacity-90 group-hover:opacity-100">
-            <Flame className="h-4 w-4 text-rose-400" />{t("Bekijk heatmap op volledig scherm", "View heatmap full screen")}
+            <Maximize2 className="h-4 w-4" />{t("Bekijk heatmap op volledig scherm", "View heatmap full screen")}
           </span>
         </div>
       </div>
-      <p className="text-[11px] text-muted-foreground/70 mt-2 text-center">{t("Klik om de klik-heatmap over je echte pagina te zien. Ververst automatisch.", "Click to see the click heatmap over your real page. Refreshes automatically.")}</p>
+      <p className="text-[11px] text-muted-foreground/70 mt-2 text-center">{t("De rode gloed verschijnt in volledig scherm, over je echte pagina. Ververst automatisch.", "The red glow appears full-screen, over your real page. Refreshes automatically.")}</p>
 
       {full && typeof document !== "undefined" && createPortal(
         <div className="fixed inset-0 bg-black/85 flex flex-col" style={{ zIndex: 2147483000 }} onClick={() => setFull(false)}>
@@ -843,163 +803,6 @@ function HeatmapPanel({ projectId }: { projectId: number }) {
   );
 }
 
-// ── Tools: merk-kit, meertalig, AI-fotobewerking ────────────────────────────────────────────────
-function ToolsView({ projectId, onFix }: { projectId: number; onFix: (prompt: string) => boolean }) {
-  return (
-    <div className="max-w-3xl mx-auto p-5 md:p-7 space-y-4">
-      <BrandKitTool projectId={projectId} onFix={onFix} />
-      <TranslateTool onFix={onFix} />
-      <ImageTool />
-    </div>
-  );
-}
-
-function BrandKitTool({ projectId, onFix }: { projectId: number; onFix: (prompt: string) => boolean }) {
-  const { t } = useLang();
-  const { val, patch, save, saved, busy } = useSiteSection(projectId, "brandKit", { primary: "#1f2937", accent: "#7a00df", font: "", logoUrl: "" });
-  const [applied, setApplied] = useState(false);
-  const apply = () => {
-    const msg = t(
-      `Pas de huisstijl van de hele website consequent aan: primaire kleur ${val.primary}, accentkleur ${val.accent}${val.font ? `, lettertype "${val.font}"` : ""}${val.logoUrl ? `, logo ${val.logoUrl}` : ""}. Werk knoppen, links, koppen en accenten bij zodat alles bij deze huisstijl past, en houd het toegankelijk (genoeg contrast).`,
-      `Apply the brand identity consistently across the whole website: primary color ${val.primary}, accent color ${val.accent}${val.font ? `, font "${val.font}"` : ""}${val.logoUrl ? `, logo ${val.logoUrl}` : ""}. Update buttons, links, headings and accents to match, keeping it accessible (enough contrast).`,
-    );
-    if (onFix(msg)) { setApplied(true); setTimeout(() => setApplied(false), 3000); }
-  };
-  return (
-    <div className="rounded-2xl border border-border bg-card/40 p-5">
-      <div className="flex items-center gap-2.5 mb-1"><Palette className="h-5 w-5 text-primary" /><h3 className="text-base font-semibold text-foreground">{t("Merk-kit", "Brand kit")}</h3></div>
-      <p className="text-sm text-muted-foreground mb-4">{t("Leg je kleuren, lettertype en logo vast en pas ze in één klik toe op je hele site.", "Set your colors, font and logo and apply them across your whole site in one click.")}</p>
-      <div className="grid sm:grid-cols-2 gap-3">
-        <ColorField label={t("Primaire kleur", "Primary color")} value={val.primary} onChange={(v) => patch({ primary: v })} />
-        <ColorField label={t("Accentkleur", "Accent color")} value={val.accent} onChange={(v) => patch({ accent: v })} />
-        <Field label={t("Lettertype", "Font")} value={val.font} onChange={(v) => patch({ font: v })} placeholder="Poppins, Inter, …" />
-        <Field label={t("Logo-URL", "Logo URL")} value={val.logoUrl} onChange={(v) => patch({ logoUrl: v })} placeholder="https://…" />
-      </div>
-      <div className="flex items-center gap-2 mt-4">
-        <Button size="sm" variant="outline" onClick={() => save()} disabled={busy}>{saved ? t("Opgeslagen", "Saved") : t("Bewaar merk-kit", "Save brand kit")}</Button>
-        <Button size="sm" className="gap-1.5" onClick={apply} disabled={applied}>
-          {applied ? <CheckCircle2 className="h-3.5 w-3.5" /> : <Wand2 className="h-3.5 w-3.5" />}{t("Toepassen met Claude", "Apply with Claude")}
-        </Button>
-      </div>
-    </div>
-  );
-}
-
-function TranslateTool({ onFix }: { onFix: (prompt: string) => boolean }) {
-  const { t } = useLang();
-  const langs = [{ c: "en", n: "Engels" }, { c: "de", n: "Duits" }, { c: "fr", n: "Frans" }, { c: "es", n: "Spaans" }];
-  const [sel, setSel] = useState<string[]>([]);
-  const [done, setDone] = useState(false);
-  const toggle = (c: string) => setSel((s) => s.includes(c) ? s.filter((x) => x !== c) : [...s, c]);
-  const run = () => {
-    if (!sel.length) return;
-    const names = langs.filter((l) => sel.includes(l.c)).map((l) => l.n).join(", ");
-    const msg = t(
-      `Maak de website meertalig: voeg vertalingen toe voor ${names}. Maak per taal een nette versie van de pagina's, met een taalwissel-knop in het menu en correcte hreflang-tags en lang-attributen voor SEO. Behoud de vormgeving.`,
-      `Make the website multilingual: add translations for ${names}. Create clean per-language versions of the pages, with a language switcher in the menu and correct hreflang tags and lang attributes for SEO. Keep the design.`,
-    );
-    if (onFix(msg)) { setDone(true); setTimeout(() => setDone(false), 3000); }
-  };
-  return (
-    <div className="rounded-2xl border border-border bg-card/40 p-5">
-      <div className="flex items-center gap-2.5 mb-1"><Languages className="h-5 w-5 text-primary" /><h3 className="text-base font-semibold text-foreground">{t("Meertalige site (1 klik)", "Multilingual site (1 click)")}</h3></div>
-      <p className="text-sm text-muted-foreground mb-4">{t("Laat Claude je hele site vertalen, met taalwisselaar en correcte SEO-tags.", "Let Claude translate your whole site, with a language switcher and correct SEO tags.")}</p>
-      <div className="flex flex-wrap gap-2 mb-4">
-        {langs.map((l) => (
-          <button key={l.c} onClick={() => toggle(l.c)} className={`text-sm px-3 py-1.5 rounded-full border transition-colors ${sel.includes(l.c) ? "border-primary bg-primary/10 text-foreground" : "border-border text-muted-foreground hover:text-foreground"}`}>
-            {t(l.n, l.n)}
-          </button>
-        ))}
-      </div>
-      <Button size="sm" className="gap-1.5" onClick={run} disabled={!sel.length || done}>
-        {done ? <CheckCircle2 className="h-3.5 w-3.5" /> : <Languages className="h-3.5 w-3.5" />}{t("Vertaal met Claude", "Translate with Claude")}
-      </Button>
-    </div>
-  );
-}
-
-// Client-side image optimiser (crop-free): resize + re-compress to a lighter file. 100% in the browser.
-function ImageTool() {
-  const { t } = useLang();
-  const [maxW, setMaxW] = useState(1600);
-  const [quality, setQuality] = useState(80);
-  const [orig, setOrig] = useState<{ name: string; kb: number; w: number; h: number } | null>(null);
-  const [out, setOut] = useState<{ url: string; kb: number; name: string } | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  const onFile = (file: File) => {
-    setBusy(true); setOut(null);
-    const img = new Image();
-    const url = URL.createObjectURL(file);
-    img.onload = () => {
-      setOrig({ name: file.name, kb: Math.round(file.size / 1024), w: img.width, h: img.height });
-      const scale = Math.min(1, maxW / img.width);
-      const w = Math.round(img.width * scale), h = Math.round(img.height * scale);
-      const canvas = document.createElement("canvas");
-      canvas.width = w; canvas.height = h;
-      const ctx = canvas.getContext("2d");
-      if (ctx) { ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, w, h); ctx.drawImage(img, 0, 0, w, h); }
-      const encode = (mime: string) => new Promise<Blob | null>((res) => canvas.toBlob((b) => res(b), mime, quality / 100));
-      (async () => {
-        // Try WebP, but some browsers (e.g. Safari) silently fall back to PNG — which is HUGE for photos.
-        // So verify the type; otherwise use JPEG. Then keep whichever of {webp, jpeg} is smallest.
-        let best = await encode("image/webp");
-        let ext = "webp";
-        if (!best || best.type !== "image/webp") { best = await encode("image/jpeg"); ext = "jpg"; }
-        if (best && ext !== "jpg") {
-          const jpg = await encode("image/jpeg");
-          if (jpg && jpg.size < best.size) { best = jpg; ext = "jpg"; }
-        }
-        if (best) {
-          const base = file.name.replace(/\.[^.]+$/, "");
-          setOut({ url: URL.createObjectURL(best), kb: Math.round(best.size / 1024), name: `${base}-geoptimaliseerd.${ext}` });
-        }
-        URL.revokeObjectURL(url);
-        setBusy(false);
-      })();
-    };
-    img.onerror = () => { setBusy(false); URL.revokeObjectURL(url); };
-    img.src = url;
-  };
-
-  return (
-    <div className="rounded-2xl border border-border bg-card/40 p-5">
-      <div className="flex items-center gap-2.5 mb-1"><ImageIcon className="h-5 w-5 text-primary" /><h3 className="text-base font-semibold text-foreground">{t("Foto-optimalisatie", "Image optimiser")}</h3></div>
-      <p className="text-sm text-muted-foreground mb-4">{t("Maak zware afbeeldingen lichter (verkleinen + WebP) — direct in je browser, gratis. Snellere site = betere SEO.", "Make heavy images lighter (resize + WebP) — right in your browser, free. A faster site means better SEO.")}</p>
-      <div className="grid sm:grid-cols-2 gap-4 mb-4">
-        <label className="block"><span className="block text-[11px] font-medium text-muted-foreground mb-1">{t("Max. breedte", "Max width")}: {maxW}px</span>
-          <input type="range" min={400} max={2400} step={100} value={maxW} onChange={(e) => setMaxW(Number(e.target.value))} className="w-full accent-primary" /></label>
-        <label className="block"><span className="block text-[11px] font-medium text-muted-foreground mb-1">{t("Kwaliteit", "Quality")}: {quality}%</span>
-          <input type="range" min={40} max={95} step={5} value={quality} onChange={(e) => setQuality(Number(e.target.value))} className="w-full accent-primary" /></label>
-      </div>
-      <label className="flex items-center justify-center gap-2 rounded-xl border-2 border-dashed border-border py-6 cursor-pointer hover:border-primary/50 transition-colors text-sm text-muted-foreground">
-        <Upload className="h-4 w-4" />{busy ? t("Bezig…", "Working…") : t("Kies een afbeelding", "Choose an image")}
-        <input type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) onFile(f); }} />
-      </label>
-      {orig && out && (
-        <div className="mt-4 flex items-center justify-between gap-3 rounded-lg bg-muted/40 px-4 py-3">
-          <div className="text-sm">
-            <div className="text-foreground">{orig.kb} KB → <span className="font-semibold text-emerald-500">{out.kb} KB</span> <span className="text-xs text-muted-foreground">({Math.max(0, Math.round((1 - out.kb / Math.max(1, orig.kb)) * 100))}% {t("lichter", "lighter")})</span></div>
-            <div className="text-xs text-muted-foreground">{orig.w}px → {Math.min(orig.w, maxW)}px</div>
-          </div>
-          <a href={out.url} download={out.name} className="shrink-0 inline-flex items-center gap-1.5 rounded-lg bg-primary text-primary-foreground px-3 py-2 text-sm font-medium hover:opacity-90"><Download className="h-4 w-4" />{t("Download", "Download")}</a>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ColorField({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
-  return (
-    <label className="block">
-      <span className="block text-[11px] font-medium text-muted-foreground mb-1">{label}</span>
-      <div className="flex items-center gap-2 rounded-lg border border-border bg-background px-2 py-1.5">
-        <input type="color" value={/^#[0-9a-f]{6}$/i.test(value) ? value : "#000000"} onChange={(e) => onChange(e.target.value)} className="h-7 w-9 rounded cursor-pointer border-0 bg-transparent p-0" />
-        <input value={value} onChange={(e) => onChange(e.target.value)} className="flex-1 bg-transparent text-sm outline-none text-foreground" />
-      </div>
-    </label>
-  );
-}
 
 function Centered({ children }: { children: React.ReactNode }) {
   return <div className="flex-1 flex flex-col items-center justify-center py-20">{children}</div>;

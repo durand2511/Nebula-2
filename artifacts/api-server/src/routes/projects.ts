@@ -3908,7 +3908,7 @@ router.get("/projects/:projectId/analytics/live", async (req, res) => {
   const projectId = Number(req.params.projectId);
   if (isNaN(projectId)) { res.status(400).json({ error: "Invalid project ID" }); return; }
   if (!(await requireOwner(req, res, projectId))) return;
-  res.json({ online: liveVisitors(projectId) });
+  res.json({ online: await liveVisitors(projectId) });
 });
 
 // Real Google positions from Search Console (owner-only). Uses the existing GSC OAuth coupling.
