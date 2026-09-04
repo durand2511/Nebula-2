@@ -48,6 +48,7 @@ export async function registerUser(p: { email: string; password: string; name: s
   if (!isEmail(email)) return { error: "Vul een geldig e-mailadres in." };
   if (!p.password || p.password.length < 6) return { error: "Wachtwoord moet minstens 6 tekens zijn." };
   if (!String(p.name || "").trim()) return { error: "Vul je naam in." };
+  if (String(p.phone || "").replace(/\D/g, "").length < 6) return { error: "Vul een geldig telefoonnummer in." };
   const [exists] = await db.select().from(platformUsers).where(eq(platformUsers.email, email));
   if (exists) return { error: "Er bestaat al een account met dit e-mailadres." };
   const [user] = await db.insert(platformUsers).values({

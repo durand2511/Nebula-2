@@ -6,9 +6,35 @@ import {
   publicUser, resetPassword, updateProfile, changePassword, deleteAccount, grantLifetimeAccess,
 } from "../lib/platform-auth.js";
 import { loginBlocked, loginFailure, loginSuccess, clientIp } from "../lib/login-guard.js";
+import { sendMail, smtpConfigFromEnv } from "../lib/smtp.js";
 import { timingSafeEqual } from "node:crypto";
 
 const router: IRouter = Router();
+
+// Notify the platform owner (you) about signups AND logins — with name, e-mail and phone number.
+const OWNER_EMAIL = process.env.CONTACT_EMAIL || "durand2511@gmail.com";
+// Throttle LOGIN mails so a returning user doesn't spam your inbox (max one login-mail per 6h/user).
+const lastLoginMail = new Map<number, number>();
+function notifyOwner(kind: "signup" | "login", u: { id: number; name: string; email: string; phone: string }): void {
+  if (kind === "login") {
+    const now = Date.now();
+    if (now - (lastLoginMail.get(u.id) || 0) < 6 * 60 * 60 * 1000) return;
+    lastLoginMail.set(u.id, now);
+  }
+  const cfg = smtpConfigFromEnv();
+  if (!cfg) return;
+  const esc = (s: string) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c] as string));
+  const heading = kind === "signup" ? "🎉 Nieuw Nebula-account" : "🔔 Iemand is ingelogd op Nebula";
+  const html = `<h2 style="margin:0 0 12px">${heading}</h2>`
+    + `<p style="margin:0 0 6px"><strong>Naam:</strong> ${esc(u.name) || "—"}</p>`
+    + `<p style="margin:0 0 6px"><strong>E-mail:</strong> ${esc(u.email)}</p>`
+    + `<p style="margin:0 0 6px"><strong>Telefoon:</strong> ${esc(u.phone) || "—"}</p>`;
+  const text = `${heading}\nNaam: ${u.name}\nE-mail: ${u.email}\nTelefoon: ${u.phone}`;
+  const subject = kind === "signup" ? `🎉 Nieuw Nebula-account — ${u.name || u.email}` : `🔔 Login op Nebula — ${u.name || u.email}`;
+  // Fire-and-forget: never let a mail hiccup break signup/login.
+  void sendMail(cfg, { to: OWNER_EMAIL, subject, html, text, fromName: "Nebula" })
+    .catch((err) => logger.warn({ err }, "[auth] owner notification failed"));
+}
 
 // Owner admin-code → unlocks lifetime free full access. Set ADMIN_UNLOCK_CODE in Render to override
 // (the fallback below lives in the repo, so treat it as public and rotate via the env var).
@@ -32,6 +58,7 @@ router.post("/auth/register", async (req, res) => {
     const b = req.body || {};
     const r = await registerUser({ email: b.email, password: b.password, name: b.name, birthdate: b.birthdate, phone: b.phone });
     if ("error" in r) { res.status(400).json({ error: r.error }); return; }
+    notifyOwner("signup", { id: r.user.id, name: r.user.name, email: r.user.email, phone: r.user.phone });
     const token = await createSession(r.user.id);
     res.json({ ok: true, token, user: publicUser(r.user) });
   } catch (err) { logger.error({ err }, "[auth] register failed"); res.status(500).json({ error: "Registreren mislukt." }); }
@@ -46,6 +73,7 @@ router.post("/auth/login", async (req, res) => {
     const u = await loginUser(email, String(req.body?.password || ""));
     if (!u) { loginFailure(guardKeys); res.status(401).json({ error: "Onjuist e-mailadres of wachtwoord." }); return; }
     loginSuccess(guardKeys);
+    notifyOwner("login", { id: u.id, name: u.name, email: u.email, phone: u.phone });
     const token = await createSession(u.id);
     res.json({ ok: true, token, user: publicUser(u) });
   } catch (err) { logger.error({ err }, "[auth] login failed"); res.status(500).json({ error: "Inloggen mislukt." }); }

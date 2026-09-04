@@ -62,10 +62,10 @@ export function Home() {
     <div className="flex-1 w-full flex flex-col items-center">
       {/* Hero — clean: logo, tagline, one CTA, a divider, and a scroll cue. Nothing else. */}
       <section className="relative min-h-[calc(100vh-5rem)] w-full flex flex-col items-center justify-center px-4 py-12">
-        <img src={logoUrl} alt="Nebula" className="h-56 md:h-80 w-auto" />
-        <p className="mt-7 text-sm md:text-base uppercase tracking-[0.25em] text-muted-foreground text-center">
-          {t("Web design bureau", "Web design bureau")}
-        </p>
+        <img src={logoUrl} alt="Nebula — webdesign bureau in Capelle aan den IJssel" className="h-56 md:h-80 w-auto" />
+        <h1 className="mt-7 text-sm md:text-base font-normal uppercase tracking-[0.25em] text-muted-foreground text-center">
+          {t("Webdesign bureau in Capelle aan den IJssel", "Web design agency in Capelle aan den IJssel")}
+        </h1>
         <button
           onClick={() => setLocation("/ai-editor")}
           className="mt-8 inline-flex items-center gap-2 rounded-full bg-foreground px-7 py-3.5 text-sm font-semibold text-background shadow-lg shadow-black/10 hover:-translate-y-0.5 transition-transform"

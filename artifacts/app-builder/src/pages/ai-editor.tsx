@@ -146,6 +146,7 @@ export function AiEditor() {
     if (r.ok && r.d.token) onAuthSuccess(r.d.token, r.d.user); else setAuthErr(r.d.error || "Inloggen mislukt.");
   };
   const doRegister = async () => {
+    if (f.phone.replace(/\D/g, "").length < 6) { setAuthErr(t("Vul een geldig telefoonnummer in.", "Please enter a valid phone number.")); return; }
     setAuthBusy(true); setAuthErr(null);
     const r = await authApi("register", { email: f.email, password: f.password, name: f.name, birthdate: f.birthdate, phone: f.phone });
     setAuthBusy(false);
@@ -227,8 +228,8 @@ export function AiEditor() {
             <Input className="mb-3" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder={t("Voor- en achternaam", "First and last name")} data-testid="input-name" />
             <label className="block text-xs font-medium text-muted-foreground mb-1">{t("Geboortedatum", "Date of birth")}</label>
             <Input className="mb-3" type="date" value={f.birthdate} onChange={(e) => setF({ ...f, birthdate: e.target.value })} data-testid="input-birthdate" />
-            <label className="block text-xs font-medium text-muted-foreground mb-1">{t("Telefoonnummer (optioneel)", "Phone number (optional)")}</label>
-            <Input className="mb-3" type="tel" value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} placeholder="06 12345678" data-testid="input-phone" />
+            <label className="block text-xs font-medium text-muted-foreground mb-1">{t("Telefoonnummer", "Phone number")}</label>
+            <Input className="mb-3" type="tel" required value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} placeholder="06 12345678" data-testid="input-phone" />
           </>)}
 
           <label className="block text-xs font-medium text-muted-foreground mb-1">{t("E-mailadres", "E-mail address")}</label>
