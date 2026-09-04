@@ -786,8 +786,13 @@ async function onConnection(ws: WebSocket, userId: number, projectId: number, pr
   }
 
   // Keepalive: Render's proxy closes WebSockets that go quiet, which showed up as "opnieuw starten"
-  // mid-task. Browsers answer pings automatically, so this keeps the tunnel open while Claude works.
-  const keepalive = setInterval(() => { try { ws.ping(); } catch { /* closing */ } }, 30_000);
+  // mid-task. A protocol-level ping alone wasn't enough — some proxies only reset their idle timer on
+  // real DATA frames. So every 15s we send BOTH a ws.ping() AND a tiny data message ({t:"ping"}, which
+  // the client ignores) so the tunnel counts as active and stays open the whole time Claude works.
+  const keepalive = setInterval(() => {
+    try { ws.ping(); } catch { /* closing */ }
+    try { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ t: "ping" })); } catch { /* closing */ }
+  }, 15_000);
 
   ws.on("message", (raw) => {
     let m: ClientMsg;

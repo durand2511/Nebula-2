@@ -134,6 +134,7 @@ export const ClaudeTerminal = forwardRef<ClaudeTerminalHandle, Props>(function C
       try { m = JSON.parse(String(ev.data)); } catch { return; }
       switch (m.t) {
         case "o": attemptsRef.current = 0; term.write(m.d); break;
+        case "ping": attemptsRef.current = 0; break; // keepalive heartbeat — proves the tunnel is alive
         case "hello": cb.current.onConnected?.(!!m.connected); break;
         case "status": cb.current.onConnected?.(!!m.connected); break;
         case "files": cb.current.onFilesChanged?.({ changed: m.changed || [], created: m.created || [], deleted: m.deleted || [] }); break;

@@ -55,7 +55,7 @@ function ScoreRing({ score, grade, size = 128 }: { score: number; grade?: string
   );
 }
 
-export function SeoPanel({ projectId, onFix }: { projectId: number; onFix: (prompt: string) => boolean }) {
+export function SeoPanel({ projectId, onFix, changeSignal = 0 }: { projectId: number; onFix: (prompt: string) => boolean; changeSignal?: number }) {
   const { t } = useLang();
   const [view, setView] = useState<"seo" | "a11y" | "speed" | "google" | "competitor" | "visitors">("seo");
   const tabs: { key: typeof view; label: string; Icon: typeof Gauge }[] = [
@@ -80,7 +80,7 @@ export function SeoPanel({ projectId, onFix }: { projectId: number; onFix: (prom
         {view === "visitors" ? <VisitorsView projectId={projectId} />
           : view === "competitor" ? <CompetitorView projectId={projectId} onFix={onFix} />
           : view === "google" ? <GoogleView projectId={projectId} />
-          : <AuditView projectId={projectId} kind={view} onFix={onFix} />}
+          : <AuditView projectId={projectId} kind={view} onFix={onFix} changeSignal={changeSignal} />}
       </div>
     </div>
   );
@@ -92,19 +92,43 @@ const AUDIT_META: Record<AuditKind, { title: string; blurb: string }> = {
   speed: { title: "Snelheid", blurb: "Hoe snel je pagina's laden (Core Web Vitals)." },
 };
 
-function AuditView({ projectId, kind, onFix }: { projectId: number; kind: AuditKind; onFix: (prompt: string) => boolean }) {
+function AuditView({ projectId, kind, onFix, changeSignal = 0 }: { projectId: number; kind: AuditKind; onFix: (prompt: string) => boolean; changeSignal?: number }) {
   const { t } = useLang();
   const [data, setData] = useState<Report | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState(false);
-  const [fixing, setFixing] = useState<string | null>(null);
+  // Findings sent to Claude and awaiting resolution (id → {title, since}); and the ones already ticked off.
+  const [working, setWorking] = useState<Map<string, { title: string; at: number }>>(new Map());
+  const [resolved, setResolved] = useState<{ id: string; title: string }[]>([]);
+  const workingRef = useRef(working); workingRef.current = working;
 
+  const fetchReport = () => fetch(`/api/projects/${projectId}/seo-audit?kind=${kind}`).then((r) => { if (!r.ok) throw new Error(); return r.json() as Promise<Report>; });
   const load = () => {
-    setLoading(true); setErr(false); setData(null);
-    fetch(`/api/projects/${projectId}/seo-audit?kind=${kind}`).then((r) => { if (!r.ok) throw new Error(); return r.json(); })
-      .then(setData).catch(() => setErr(true)).finally(() => setLoading(false));
+    setLoading(true); setErr(false); setData(null); setWorking(new Map()); setResolved([]);
+    fetchReport().then(setData).catch(() => setErr(true)).finally(() => setLoading(false));
   };
   useEffect(load, [projectId, kind]);
+
+  // After Claude Code changes files (changeSignal bumps), re-scan and tick off findings that are now
+  // resolved (gone from the report) → green "opgelost". Debounced so multiple edits settle first.
+  useEffect(() => {
+    if (changeSignal === 0 || workingRef.current.size === 0) return;
+    const timer = setTimeout(() => {
+      fetchReport().then((rep) => {
+        const present = new Set(rep.findings.map((f) => f.id));
+        const newlyResolved: { id: string; title: string }[] = [];
+        const stillWorking = new Map<string, { title: string; at: number }>();
+        for (const [id, info] of workingRef.current) {
+          if (!present.has(id)) newlyResolved.push({ id, title: info.title });
+          else if (Date.now() - info.at < 120000) stillWorking.set(id, info); // keep waiting (<2 min)
+        }
+        setData(rep);
+        setWorking(stillWorking);
+        if (newlyResolved.length) setResolved((prev) => [...prev, ...newlyResolved.filter((r) => !prev.some((p) => p.id === r.id))]);
+      }).catch(() => {});
+    }, 2500);
+    return () => clearTimeout(timer);
+  }, [changeSignal]);
 
   const fixable = useMemo(() => (data?.findings || []).filter((f) => f.fixPrompt), [data]);
   const grouped = useMemo(() => {
@@ -113,10 +137,14 @@ function AuditView({ projectId, kind, onFix }: { projectId: number; kind: AuditK
     return g;
   }, [data]);
 
+  const markWorking = (items: { id: string; title: string }[]) =>
+    setWorking((prev) => { const n = new Map(prev); for (const it of items) n.set(it.id, { title: it.title, at: Date.now() }); return n; });
+
   const doFix = (f: Finding) => {
     if (!f.fixPrompt) return;
-    if (onFix(f.fixPrompt)) { setFixing(f.id); setTimeout(() => setFixing(null), 2500); }
+    if (onFix(f.fixPrompt)) markWorking([{ id: f.id, title: f.title }]);
   };
+  const [fixing, setFixing] = useState<string | null>(null);
   const fixAll = () => {
     if (!fixable.length) return;
     const list = fixable.map((f, i) => `${i + 1}. ${f.fixPrompt}`).join("\n");
@@ -124,7 +152,7 @@ function AuditView({ projectId, kind, onFix }: { projectId: number; kind: AuditK
       : kind === "speed" ? t(`Maak deze website sneller. Los deze ${fixable.length} punten op`, `Make this website faster. Fix these ${fixable.length} issues`)
       : t(`Verbeter de SEO van deze website. Los deze ${fixable.length} punten op`, `Improve this website's SEO. Fix these ${fixable.length} issues`);
     const msg = `${head}, ${t("behoud de bestaande vormgeving en tekst zoveel mogelijk", "keep the existing design and copy as much as possible")}:\n${list}`;
-    if (onFix(msg)) { setFixing("__all__"); setTimeout(() => setFixing(null), 3000); }
+    if (onFix(msg)) markWorking(fixable.map((f) => ({ id: f.id, title: f.title })));
   };
   const improveLinks = () => {
     const msg = t(
@@ -161,9 +189,9 @@ function AuditView({ projectId, kind, onFix }: { projectId: number; kind: AuditK
         </div>
         <div className="flex md:flex-col gap-2 shrink-0">
           {fixable.length > 0 && (
-            <Button size="sm" className="gap-1.5" onClick={fixAll} disabled={fixing === "__all__"}>
-              {fixing === "__all__" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-              {t(`Alles fixen (${fixable.length})`, `Fix all (${fixable.length})`)}
+            <Button size="sm" className="gap-1.5" onClick={fixAll} disabled={working.size > 0}>
+              {working.size > 0 ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+              {working.size > 0 ? t(`Bezig… (${working.size})`, `Working… (${working.size})`) : t(`Alles fixen (${fixable.length})`, `Fix all (${fixable.length})`)}
             </Button>
           )}
           {kind === "seo" && (
@@ -178,9 +206,22 @@ function AuditView({ projectId, kind, onFix }: { projectId: number; kind: AuditK
         </div>
       </div>
 
-      {fixable.length > 0 && (
+      {resolved.length > 0 && (
+        <div className="mt-3 rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3">
+          <div className="flex items-center gap-2 text-sm font-medium text-emerald-600 dark:text-emerald-400"><CheckCircle2 className="h-4 w-4" /> {t(`${resolved.length} opgelost door Claude`, `${resolved.length} fixed by Claude`)}</div>
+          <ul className="mt-1.5 space-y-0.5">
+            {resolved.map((r) => (<li key={r.id} className="text-xs text-muted-foreground flex items-center gap-1.5"><CheckCircle2 className="h-3 w-3 text-emerald-500 shrink-0" /><span className="line-through">{r.title}</span></li>))}
+          </ul>
+        </div>
+      )}
+      {working.size > 0 && (
+        <p className="text-xs text-amber-600 dark:text-amber-400 mt-3 flex items-center gap-1.5">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" /> {t(`Claude is bezig met ${working.size} ${working.size === 1 ? "punt" : "punten"}… zodra het klaar is wordt het hier groen afgevinkt.`, `Claude is working on ${working.size} ${working.size === 1 ? "item" : "items"}… they'll turn green here when done.`)}
+        </p>
+      )}
+      {fixable.length > 0 && working.size === 0 && (
         <p className="text-xs text-muted-foreground mt-3 flex items-center gap-1.5">
-          <Wand2 className="h-3.5 w-3.5" /> {t("Klik op “Fix met Claude” bij een punt — Claude past het meteen in je site aan.", "Click “Fix with Claude” on an item — Claude edits your site right away.")}
+          <Wand2 className="h-3.5 w-3.5" /> {t("Klik op “Fix met Claude” bij een punt — Claude past het meteen in je site aan en vinkt het hier af.", "Click “Fix with Claude” on an item — Claude edits your site and ticks it off here.")}
         </p>
       )}
 
@@ -205,8 +246,8 @@ function AuditView({ projectId, kind, onFix }: { projectId: number; kind: AuditK
                       </div>
                       {f.fixPrompt && (
                         <Button size="sm" variant="outline" className="shrink-0 self-center gap-1.5 h-8"
-                          onClick={() => doFix(f)} disabled={fixing === f.id}>
-                          {fixing === f.id ? <><CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />{t("Verstuurd", "Sent")}</> : <><Wand2 className="h-3.5 w-3.5" />{t("Fix met Claude", "Fix with Claude")}</>}
+                          onClick={() => doFix(f)} disabled={working.has(f.id)}>
+                          {working.has(f.id) ? <><Loader2 className="h-3.5 w-3.5 animate-spin text-amber-500" />{t("Bezig…", "Working…")}</> : <><Wand2 className="h-3.5 w-3.5" />{t("Fix met Claude", "Fix with Claude")}</>}
                         </Button>
                       )}
                     </div>

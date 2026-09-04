@@ -1188,6 +1188,9 @@ export function ProjectWorkspace() {
   const [previewKey, setPreviewKey] = useState(0);
   // Claude Code terminal (the editor) state
   const [termGen, setTermGen] = useState(0);
+  // Bumped whenever Claude Code (terminal) changes files — the SEO panel uses it to re-scan after a
+  // "Fix met Claude" and tick off the resolved findings.
+  const [filesChangedTick, setFilesChangedTick] = useState(0);
   const [termStatus, setTermStatus] = useState<TerminalStatus>("connecting");
   const [claudeConnected, setClaudeConnected] = useState(false);
   const claudeConnectedRef = useRef(false);
@@ -2993,6 +2996,7 @@ export function ProjectWorkspace() {
               onConnected={setClaudeConnected}
               onFilesChanged={() => {
                 queryClient.invalidateQueries({ queryKey: getListFilesQueryKey(projectId) });
+                setFilesChangedTick((n) => n + 1);
                 setPreviewKey((k) => k + 1);
               }}
             />
@@ -3735,7 +3739,7 @@ export function ProjectWorkspace() {
 
             {/* SEO & Statistieken Tab — full-screen audit + visitor analytics */}
             <TabsContent value="seo" className="flex-1 flex flex-col min-h-0 overflow-hidden m-0 border-none p-0 outline-none">
-              {activeTab === "seo" && <SeoPanel projectId={projectId} onFix={sendSeoFix} />}
+              {activeTab === "seo" && <SeoPanel projectId={projectId} onFix={sendSeoFix} changeSignal={filesChangedTick} />}
             </TabsContent>
           </Tabs>
         </div>
