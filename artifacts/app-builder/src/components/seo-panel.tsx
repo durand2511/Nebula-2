@@ -4,6 +4,7 @@ import {
   CheckCircle2, Info, Users, Eye, Clock, Monitor, Smartphone, Tablet, ArrowUpRight, Globe,
   Accessibility, Zap, Trophy, Link2, Target, X, Search, Gift, ChevronDown, ChevronRight,
   TrendingUp, Palette, Languages, Image as ImageIcon, Mail, Wrench, Flame, Download, Upload, MousePointerClick,
+  Maximize2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useLang } from "@/lib/i18n";
@@ -732,13 +733,40 @@ function heatmapPageFile(path: string): string {
   return p;
 }
 
+// The heat-map "stage": the real page rendered same-origin (so we can read its height and line the
+// dots up), with the click dots overlaid. Non-interactive itself — the parent handles clicks.
+function HeatStage({ src, points, maxWidth }: { src: string; points: { x: number; y: number }[]; maxWidth: number }) {
+  const [h, setH] = useState(900);
+  const ref = useRef<HTMLIFrameElement | null>(null);
+  const measure = () => {
+    try {
+      const doc = ref.current?.contentWindow?.document;
+      const hh = doc ? Math.max(doc.documentElement.scrollHeight, doc.body?.scrollHeight || 0) : 0;
+      if (hh > 100) setH(Math.min(hh, 8000));
+    } catch { /* keep fallback height */ }
+  };
+  return (
+    <div className="relative mx-auto rounded-xl border border-border overflow-hidden bg-white" style={{ maxWidth, height: h }}>
+      <iframe ref={ref} src={src} onLoad={() => { measure(); setTimeout(measure, 600); }} title="heatmap-page" scrolling="no"
+        sandbox="allow-same-origin" className="absolute inset-0 w-full h-full border-0 pointer-events-none" style={{ background: "#fff" }} />
+      <div className="absolute inset-0 pointer-events-none">
+        {points.map((pt, i) => (
+          <span key={i} className="absolute rounded-full" style={{
+            left: `${pt.x / 10}%`, top: `${pt.y / 10}%`, width: 30, height: 30, transform: "translate(-50%,-50%)",
+            background: "radial-gradient(circle, rgba(244,63,94,.5) 0%, rgba(244,63,94,0) 72%)", mixBlendMode: "multiply",
+          }} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function HeatmapPanel({ projectId }: { projectId: number }) {
   const { t } = useLang();
   const [data, setData] = useState<null | { page: string; pages: { path: string; clicks: number }[]; points: { x: number; y: number }[] }>(null);
   const [page, setPage] = useState<string>("");
   const [loading, setLoading] = useState(true);
-  const [frameH, setFrameH] = useState(900);
-  const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  const [full, setFull] = useState(false);
 
   const load = () => {
     const q = page ? `?page=${encodeURIComponent(page)}` : "";
@@ -747,16 +775,13 @@ function HeatmapPanel({ projectId }: { projectId: number }) {
   useEffect(() => { setLoading(true); load(); }, [projectId, page]);
   // Keep the heat-map fresh (new clicks come in live).
   useEffect(() => { const id = setInterval(load, 10000); return () => clearInterval(id); }, [projectId, page]);
-
-  // The rendered page is served same-origin (/api/...preview-page), so we can read its real height and
-  // size the overlay to it → the dots line up with the actual page.
-  const onFrameLoad = () => {
-    try {
-      const doc = iframeRef.current?.contentWindow?.document;
-      const h = doc ? Math.max(doc.documentElement.scrollHeight, doc.body?.scrollHeight || 0) : 0;
-      if (h > 100) setFrameH(Math.min(h, 8000));
-    } catch { /* cross-origin or blocked — keep the fallback height */ }
-  };
+  // Esc closes full-screen.
+  useEffect(() => {
+    if (!full) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setFull(false); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [full]);
 
   if (loading && !data) return <Centered><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></Centered>;
   if (!data || !data.pages.length) return (
@@ -776,22 +801,36 @@ function HeatmapPanel({ projectId }: { projectId: number }) {
             {p.path} <span className="opacity-60">({p.clicks})</span>
           </button>
         ))}
+        <Button size="sm" variant="outline" className="ml-auto h-7 gap-1.5" onClick={() => setFull(true)}>
+          <Maximize2 className="h-3.5 w-3.5" /> {t("Volledig scherm", "Full screen")}
+        </Button>
       </div>
-      <div className="relative mx-auto rounded-xl border border-border overflow-hidden bg-white" style={{ maxWidth: 900, height: frameH }}>
-        {/* The real page as background (non-interactive), with the heat dots overlaid on top. */}
-        <iframe ref={iframeRef} src={src} onLoad={onFrameLoad} title="heatmap-page" scrolling="no"
-          sandbox="allow-same-origin" className="absolute inset-0 w-full h-full border-0 pointer-events-none" style={{ background: "#fff" }} />
-        <div className="absolute inset-0 pointer-events-none">
-          {data.points.map((pt, i) => (
-            <span key={i} className="absolute rounded-full" style={{
-              left: `${pt.x / 10}%`, top: `${pt.y / 10}%`, width: 30, height: 30, transform: "translate(-50%,-50%)",
-              background: "radial-gradient(circle, rgba(244,63,94,.5) 0%, rgba(244,63,94,0) 72%)", mixBlendMode: "multiply",
-            }} />
-          ))}
+
+      {/* Click the map to open it larger. */}
+      <div className="cursor-zoom-in group relative" onClick={() => setFull(true)} title={t("Klik om te vergroten", "Click to enlarge")}>
+        <HeatStage src={src} points={data.points} maxWidth={900} />
+        {data.points.length === 0 && <div className="absolute inset-x-0 top-3 flex justify-center pointer-events-none"><span className="text-xs bg-foreground/80 text-background rounded-full px-3 py-1">{t("Nog geen klikken op deze pagina", "No clicks on this page yet")}</span></div>}
+        <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity"><span className="inline-flex items-center gap-1 text-[11px] bg-foreground/80 text-background rounded-full px-2 py-1"><Maximize2 className="h-3 w-3" />{t("Vergroten", "Enlarge")}</span></div>
+      </div>
+      <p className="text-[11px] text-muted-foreground/70 mt-2 text-center">{t("Klikposities over je echte pagina (rood = geklikt). Klik om te vergroten · ververst automatisch.", "Click positions over your real page (red = clicked). Click to enlarge · refreshes automatically.")}</p>
+
+      {full && (
+        <div className="fixed inset-0 z-[95] bg-black/80 flex flex-col" onClick={() => setFull(false)}>
+          <div className="flex items-center justify-between px-4 py-3 text-white shrink-0" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-2 flex-wrap">
+              <Flame className="h-4 w-4 text-rose-400" />
+              <span className="text-sm font-medium">{t("Heatmap", "Heatmap")} · {file}</span>
+              {data.pages.map((p) => (
+                <button key={p.path} onClick={() => setPage(p.path)} className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${page === p.path ? "border-white bg-white/15" : "border-white/30 text-white/70 hover:text-white"}`}>{p.path} <span className="opacity-60">({p.clicks})</span></button>
+              ))}
+            </div>
+            <button onClick={() => setFull(false)} className="h-9 w-9 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white shrink-0" title={t("Sluiten (Esc)", "Close (Esc)")}><X className="h-4 w-4" /></button>
+          </div>
+          <div className="flex-1 min-h-0 overflow-y-auto p-4" onClick={(e) => e.stopPropagation()}>
+            <HeatStage src={src} points={data.points} maxWidth={1200} />
+          </div>
         </div>
-        {data.points.length === 0 && <div className="absolute inset-x-0 top-3 flex justify-center"><span className="text-xs bg-foreground/80 text-background rounded-full px-3 py-1">{t("Nog geen klikken op deze pagina", "No clicks on this page yet")}</span></div>}
-      </div>
-      <p className="text-[11px] text-muted-foreground/70 mt-2 text-center">{t("Klikposities over je echte pagina (rood = geklikt). Ververst automatisch.", "Click positions over your real page (red = clicked). Refreshes automatically.")}</p>
+      )}
     </div>
   );
 }
