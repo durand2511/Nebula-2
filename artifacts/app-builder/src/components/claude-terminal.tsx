@@ -116,7 +116,10 @@ export const ClaudeTerminal = forwardRef<ClaudeTerminalHandle, Props>(function C
     setErrMsg("");
     setStat("connecting");
     term.reset();
-    term.writeln(`\x1b[2m» ${t("Verbinden met Claude Code…", "Connecting to Claude Code…")}\x1b[0m`);
+    // Only announce the connect on the FIRST attempt. Reconnects (gen>0) happen silently — the server
+    // reattaches to the still-running Claude session and replays the scrollback, so the user shouldn't
+    // see "opnieuw koppelen"-churn during a task.
+    if (gen === 0) term.writeln(`\x1b[2m» ${t("Verbinden met Claude Code…", "Connecting to Claude Code…")}\x1b[0m`);
 
     // Fit first so the connect URL carries the real terminal size (the panel is laid out by now).
     try { fitRef.current?.fit(); } catch { /* ignore */ }
@@ -156,7 +159,7 @@ export const ClaudeTerminal = forwardRef<ClaudeTerminalHandle, Props>(function C
         attemptsRef.current += 1;
         const delay = Math.min(8000, 500 * 2 ** attemptsRef.current);
         setStat("connecting");
-        term.writeln(`\r\n\x1b[2m» ${t("Verbinding verbroken — opnieuw verbinden…", "Connection lost — reconnecting…")}\x1b[0m`);
+        // Silent reconnect — no "opnieuw koppelen" message; the session keeps running server-side.
         retryTimer = setTimeout(() => setGen((g) => g + 1), delay);
         return;
       }
@@ -165,7 +168,11 @@ export const ClaudeTerminal = forwardRef<ClaudeTerminalHandle, Props>(function C
 
     const sub = term.onData((d) => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ t: "i", d })); });
 
-    return () => { closedByUs = true; if (retryTimer) clearTimeout(retryTimer); sub.dispose(); try { ws.close(); } catch { /* ignore */ } if (wsRef.current === ws) wsRef.current = null; };
+    // Client-side keepalive too: some proxies idle-close based on CLIENT inactivity. A harmless resize
+    // every 12s keeps traffic flowing in both directions so the tunnel stays open while Claude works.
+    const clientPing = setInterval(() => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ t: "r", cols: term.cols, rows: term.rows })); }, 12000);
+
+    return () => { closedByUs = true; clearInterval(clientPing); if (retryTimer) clearTimeout(retryTimer); sub.dispose(); try { ws.close(); } catch { /* ignore */ } if (wsRef.current === ws) wsRef.current = null; };
   }, [projectId, gen, setStat]);
 
   return (

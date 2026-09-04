@@ -92,8 +92,13 @@ const AUDIT_META: Record<AuditKind, { title: string; blurb: string }> = {
   speed: { title: "Snelheid", blurb: "Hoe snel je pagina's laden (Core Web Vitals)." },
 };
 
+// Session cache of audit reports so switching sub-tabs doesn't re-run the whole analysis each time.
+// Refreshed on "Opnieuw", and updated after a Claude fix re-scan. Keyed by project + audit kind.
+const auditCache = new Map<string, Report>();
+
 function AuditView({ projectId, kind, onFix, changeSignal = 0 }: { projectId: number; kind: AuditKind; onFix: (prompt: string) => boolean; changeSignal?: number }) {
   const { t } = useLang();
+  const cacheKey = `${projectId}:${kind}`;
   const [data, setData] = useState<Report | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState(false);
@@ -103,11 +108,17 @@ function AuditView({ projectId, kind, onFix, changeSignal = 0 }: { projectId: nu
   const workingRef = useRef(working); workingRef.current = working;
 
   const fetchReport = () => fetch(`/api/projects/${projectId}/seo-audit?kind=${kind}`).then((r) => { if (!r.ok) throw new Error(); return r.json() as Promise<Report>; });
-  const load = () => {
+  // Force a fresh analysis (the "Opnieuw" button).
+  const refresh = () => {
     setLoading(true); setErr(false); setData(null); setWorking(new Map()); setResolved([]);
-    fetchReport().then(setData).catch(() => setErr(true)).finally(() => setLoading(false));
+    fetchReport().then((rep) => { setData(rep); auditCache.set(cacheKey, rep); }).catch(() => setErr(true)).finally(() => setLoading(false));
   };
-  useEffect(load, [projectId, kind]);
+  // On mount / sub-tab switch: use the cached report if we already analysed this kind — no re-run.
+  useEffect(() => {
+    const cached = auditCache.get(cacheKey);
+    if (cached) { setData(cached); setLoading(false); setErr(false); }
+    else refresh();
+  }, [projectId, kind]);
 
   // After Claude Code changes files (changeSignal bumps), re-scan and tick off findings that are now
   // resolved (gone from the report) → green "opgelost". Debounced so multiple edits settle first.
@@ -122,7 +133,7 @@ function AuditView({ projectId, kind, onFix, changeSignal = 0 }: { projectId: nu
           if (!present.has(id)) newlyResolved.push({ id, title: info.title });
           else if (Date.now() - info.at < 120000) stillWorking.set(id, info); // keep waiting (<2 min)
         }
-        setData(rep);
+        setData(rep); auditCache.set(cacheKey, rep);
         setWorking(stillWorking);
         if (newlyResolved.length) setResolved((prev) => [...prev, ...newlyResolved.filter((r) => !prev.some((p) => p.id === r.id))]);
       }).catch(() => {});
@@ -130,7 +141,9 @@ function AuditView({ projectId, kind, onFix, changeSignal = 0 }: { projectId: nu
     return () => clearTimeout(timer);
   }, [changeSignal]);
 
-  const fixable = useMemo(() => (data?.findings || []).filter((f) => f.fixPrompt), [data]);
+  // "Alles fixen" only counts the findings that matter (errors + warnings). The blue info items are
+  // optional nice-to-haves, so they don't inflate the count or the bulk-fix.
+  const fixable = useMemo(() => (data?.findings || []).filter((f) => f.fixPrompt && (f.severity === "error" || f.severity === "warn")), [data]);
   const grouped = useMemo(() => {
     const g = new Map<string, Finding[]>();
     for (const f of data?.findings || []) (g.get(f.category) || g.set(f.category, []).get(f.category)!).push(f);
@@ -163,7 +176,7 @@ function AuditView({ projectId, kind, onFix, changeSignal = 0 }: { projectId: nu
   };
 
   if (loading) return <Centered><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /><p className="mt-3 text-sm text-muted-foreground">{t("Website analyseren…", "Analysing website…")}</p></Centered>;
-  if (err || !data) return <Centered><AlertCircle className="h-6 w-6 text-rose-500" /><p className="mt-3 text-sm text-muted-foreground">{t("Analyse mislukt.", "Analysis failed.")}</p><Button variant="outline" size="sm" className="mt-3" onClick={load}><RefreshCw className="h-3.5 w-3.5 mr-1.5" />{t("Opnieuw", "Retry")}</Button></Centered>;
+  if (err || !data) return <Centered><AlertCircle className="h-6 w-6 text-rose-500" /><p className="mt-3 text-sm text-muted-foreground">{t("Analyse mislukt.", "Analysis failed.")}</p><Button variant="outline" size="sm" className="mt-3" onClick={refresh}><RefreshCw className="h-3.5 w-3.5 mr-1.5" />{t("Opnieuw", "Retry")}</Button></Centered>;
   if (!data.pages.length) return <Centered><Gauge className="h-8 w-8 text-muted-foreground/50" /><p className="mt-3 text-sm text-muted-foreground max-w-xs text-center">{t("Nog geen pagina's om te analyseren. Bouw eerst je website.", "No pages to analyse yet. Build your website first.")}</p></Centered>;
 
   const meta = AUDIT_META[kind];
@@ -200,7 +213,7 @@ function AuditView({ projectId, kind, onFix, changeSignal = 0 }: { projectId: nu
               {t("Interne links", "Internal links")}
             </Button>
           )}
-          <Button size="sm" variant="ghost" className="gap-1.5 text-muted-foreground" onClick={load}>
+          <Button size="sm" variant="ghost" className="gap-1.5 text-muted-foreground" onClick={refresh}>
             <RefreshCw className="h-3.5 w-3.5" /> {t("Opnieuw", "Rescan")}
           </Button>
         </div>
@@ -240,6 +253,7 @@ function AuditView({ projectId, kind, onFix, changeSignal = 0 }: { projectId: nu
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="text-sm font-medium text-foreground">{f.title}</span>
+                          {f.severity === "info" && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground/70">{t("optioneel", "optional")}</span>}
                           {f.page && <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-mono">{f.page}</span>}
                         </div>
                         <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{f.detail}</p>
