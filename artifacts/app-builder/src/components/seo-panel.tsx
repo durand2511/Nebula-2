@@ -938,15 +938,25 @@ function ImageTool() {
       const canvas = document.createElement("canvas");
       canvas.width = w; canvas.height = h;
       const ctx = canvas.getContext("2d");
-      if (ctx) ctx.drawImage(img, 0, 0, w, h);
-      canvas.toBlob((blob) => {
-        if (blob) {
+      if (ctx) { ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, w, h); ctx.drawImage(img, 0, 0, w, h); }
+      const encode = (mime: string) => new Promise<Blob | null>((res) => canvas.toBlob((b) => res(b), mime, quality / 100));
+      (async () => {
+        // Try WebP, but some browsers (e.g. Safari) silently fall back to PNG — which is HUGE for photos.
+        // So verify the type; otherwise use JPEG. Then keep whichever of {webp, jpeg} is smallest.
+        let best = await encode("image/webp");
+        let ext = "webp";
+        if (!best || best.type !== "image/webp") { best = await encode("image/jpeg"); ext = "jpg"; }
+        if (best && ext !== "jpg") {
+          const jpg = await encode("image/jpeg");
+          if (jpg && jpg.size < best.size) { best = jpg; ext = "jpg"; }
+        }
+        if (best) {
           const base = file.name.replace(/\.[^.]+$/, "");
-          setOut({ url: URL.createObjectURL(blob), kb: Math.round(blob.size / 1024), name: `${base}-geoptimaliseerd.webp` });
+          setOut({ url: URL.createObjectURL(best), kb: Math.round(best.size / 1024), name: `${base}-geoptimaliseerd.${ext}` });
         }
         URL.revokeObjectURL(url);
         setBusy(false);
-      }, "image/webp", quality / 100);
+      })();
     };
     img.onerror = () => { setBusy(false); URL.revokeObjectURL(url); };
     img.src = url;
