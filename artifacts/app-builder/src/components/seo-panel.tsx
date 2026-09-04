@@ -205,7 +205,10 @@ function AuditView({ projectId, kind, onFix, changeSignal = 0 }: { projectId: nu
     const head = kind === "a11y" ? t("Verbeter de toegankelijkheid van de hele site", "Improve the whole site's accessibility")
       : kind === "speed" ? t("Maak de hele site sneller", "Make the whole site faster")
       : t("Verbeter de SEO van de hele site", "Improve the whole site's SEO");
-    const msg = `${head}: ${t("los deze punten op alle pagina's waar ze spelen op, behoud de vormgeving en tekst", "fix these points on every page where they occur, keeping the design and copy")} — ${types.join("; ")}.`;
+    const msg = `${head}: ${t(
+      `los ALLE onderstaande punten op, op ELKE pagina waar ze voorkomen — werk ze één voor één volledig af en stop pas als er geen enkele meer over is (niet een paar per keer). Behoud de vormgeving en tekst. De punten zijn`,
+      `fix ALL of the points below, on EVERY page where they occur — work through them one by one and don't stop until none remain (not just a few at a time). Keep the design and copy. The points are`,
+    )}: ${types.join("; ")}.`;
     if (onFix(msg)) markWorking(fixable.map((f) => ({ id: f.id, title: f.title })));
   };
   const improveLinks = () => {
