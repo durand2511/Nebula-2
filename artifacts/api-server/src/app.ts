@@ -186,16 +186,16 @@ if (fs.existsSync(path.join(FRONTEND_DIR, "index.html"))) {
   // title/description/OG to English on the fly, so the snippet under the Google result reads in the
   // visitor's language. Cached; only the meta tags change, the SPA is identical.
   const indexNl = fs.readFileSync(path.join(FRONTEND_DIR, "index.html"), "utf8");
-  const EN_TITLE = "Nebula · the web-app builder that makes anything";
-  const EN_DESC = "Nebula builds your professional website — then you manage everything yourself by typing what should change. Websites, web shops, booking systems and web apps, with your own domain and automatic SEO. €50 per month, cancel monthly.";
-  const EN_OG = "Your professional website, then you manage everything yourself by typing what should change. Booking system, own domain and automatic SEO included. €50 per month.";
+  const EN_TITLE = "Web design agency in Capelle aan den IJssel · Nebula";
+  const EN_DESC = "Nebula is your web design agency in Capelle aan den IJssel. We build professional websites, web shops and booking systems — then you manage everything yourself. Request a free quote.";
+  const EN_OG = "Professional websites, web shops and booking systems, built by web design agency Nebula in Capelle aan den IJssel. Then you manage everything yourself.";
   const indexEn = indexNl
     .replace(/<html lang="nl">/, '<html lang="en">')
     .replace(/<title>[^<]*<\/title>/, `<title>${EN_TITLE}</title>`)
     .replace(/(<meta name="description" content=")[^"]*(")/, `$1${EN_DESC}$2`)
-    .replace(/(<meta property="og:title" content=")[^"]*(")/, `$1Nebula · the web-app builder that makes anything$2`)
+    .replace(/(<meta property="og:title" content=")[^"]*(")/, `$1${EN_TITLE}$2`)
     .replace(/(<meta property="og:description" content=")[^"]*(")/, `$1${EN_OG}$2`)
-    .replace(/(<meta name="twitter:title" content=")[^"]*(")/, `$1Nebula · the web-app builder that makes anything$2`)
+    .replace(/(<meta name="twitter:title" content=")[^"]*(")/, `$1${EN_TITLE}$2`)
     .replace(/(<meta name="twitter:description" content=")[^"]*(")/, `$1${EN_OG}$2`);
   const prefersEnglish = (h: string) => {
     // First language tag wins; treat "en" (and en-US etc.) as English, anything else → Dutch default.

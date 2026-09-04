@@ -210,6 +210,15 @@ export function Home() {
           {state === "error" && <p className="mt-2 text-[12px] text-destructive/80">{t("Vul een geldig telefoonnummer in.", "Please enter a valid phone number.")}</p>}
         </div>
       </section>
+
+      {/* Local SEO — target "webdesign bureau Capelle aan den IJssel" with real, useful copy. */}
+      <section className="w-full max-w-3xl px-4 pb-20 text-center">
+        <h2 className="text-xl font-bold tracking-tight text-foreground">{t("Webdesign bureau in Capelle aan den IJssel", "Web design agency in Capelle aan den IJssel")}</h2>
+        <p className="mt-3 text-sm text-muted-foreground leading-relaxed">
+          {t("Nebula is het webdesign bureau in Capelle aan den IJssel voor ondernemers die een professionele website, webshop of boekingssysteem willen — zonder gedoe. Wij bouwen je site en daarna beheer je 'm zelf door simpelweg te typen wat er anders moet. We werken voor bedrijven in Capelle aan den IJssel en de omliggende regio: Rotterdam, Nieuwerkerk aan den IJssel en Krimpen aan den IJssel. Van eerste ontwerp tot online staan met een eigen domein, automatische SEO en een boekings- of betaalsysteem waar nodig.",
+             "Nebula is the web design agency in Capelle aan den IJssel for entrepreneurs who want a professional website, web shop or booking system — hassle-free. We build your site and you manage it afterwards by simply typing what should change. We serve businesses in Capelle aan den IJssel and the surrounding region: Rotterdam, Nieuwerkerk aan den IJssel and Krimpen aan den IJssel.")}
+        </p>
+      </section>
     </div>
   );
 }

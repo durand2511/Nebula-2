@@ -145,9 +145,61 @@ async function publishedToday(): Promise<boolean> {
   return latest.createdAt.toISOString().slice(0, 10) === new Date().toISOString().slice(0, 10);
 }
 
+// Cornerstone articles: hand-written, SEO-optimised pieces we always want live (idempotent — inserted
+// once by slug). Used to target key local terms like "webdesign bureau Capelle aan den IJssel".
+const CORNERSTONE: { slug: string; title: string; metaTitle: string; metaDescription: string; topic: string; html: string }[] = [
+  {
+    slug: "webdesign-bureau-capelle-aan-den-ijssel",
+    title: "Webdesign bureau in Capelle aan den IJssel: zo kies je de juiste partner",
+    metaTitle: "Webdesign bureau Capelle aan den IJssel | Nebula",
+    metaDescription: "Op zoek naar een webdesign bureau in Capelle aan den IJssel? Ontdek waar je op let, wat een professionele website kost en hoe je 'm daarna zelf beheert.",
+    topic: "webdesign capelle aan den ijssel",
+    html: `<p>Zoek je een <strong>webdesign bureau in Capelle aan den IJssel</strong>? Een goede website is voor veel ondernemers in Capelle en de regio Rotterdam dé plek waar nieuwe klanten je voor het eerst tegenkomen. In dit artikel lees je waar je op let bij het kiezen van een webdesign bureau, wat een professionele website ongeveer kost, en waarom het slim is om een site te kiezen die je daarna zélf kunt beheren.</p>
+<p>Nebula is het webdesign bureau uit Capelle aan den IJssel dat websites, webshops en boekingssystemen bouwt — en je daarna de controle teruggeeft. Geen dure meerwerk-facturen voor elke kleine wijziging: je past je site zelf aan door simpelweg te typen wat er anders moet.</p>
+<h2>Waarom kiezen voor een lokaal webdesign bureau in Capelle?</h2>
+<p>Een lokaal webdesign bureau kent de regio en denkt mee met ondernemers uit Capelle aan den IJssel, Rotterdam, Nieuwerkerk aan den IJssel en Krimpen aan den IJssel. Korte lijnen, persoonlijk contact en iemand die snapt wie jouw klanten zijn. Bovendien helpt lokale aanwezigheid je vindbaarheid: mensen zoeken vaak op "webdesign + plaatsnaam", en met de juiste opzet verschijn je daar bovenaan.</p>
+<h2>Waar let je op bij het kiezen van een webdesign bureau?</h2>
+<ul>
+<li><strong>Mobielvriendelijk ontwerp</strong> — meer dan de helft van je bezoekers komt via de telefoon.</li>
+<li><strong>Snelheid en SEO</strong> — een snelle, goed opgebouwde site scoort beter in Google.</li>
+<li><strong>Eigen domein en e-mail</strong> — professioneel en van jou.</li>
+<li><strong>Zelf kunnen aanpassen</strong> — zodat je niet voor elke tekstwijziging hoeft te betalen.</li>
+<li><strong>Uitbreidbaar</strong> — een webshop of online boekingssysteem toevoegen wanneer je dat wilt.</li>
+</ul>
+<h2>Wat kost een professionele website in Capelle aan den IJssel?</h2>
+<p>Bij traditionele bureaus betaal je al snel honderden tot duizenden euro's voor het bouwen, plus een uurtarief voor elke aanpassing daarna. Nebula werkt anders: je krijgt een complete, professionele website én je beheert 'm daarna zelf voor een vast bedrag per maand, zonder verrassingen. Zo houd je grip op je kosten én op je site.</p>
+<h2>Zelf je website beheren, zonder technische kennis</h2>
+<p>Het grootste voordeel: na oplevering ben je niet afhankelijk. Je typt gewoon wat je wilt veranderen — een nieuwe tekst, een extra pagina, andere foto's — en het wordt voor je aangepast. Ideaal voor ondernemers die snel willen schakelen zonder telkens een factuur voor meerwerk.</p>
+<h2>Beter gevonden worden in Google</h2>
+<p>Een mooie website is niets waard als niemand 'm vindt. Daarom zit goede <a href="https://nebulabookings.com/kennisbank">SEO</a> ingebouwd: nette titels en meta-teksten, snelle pagina's, structured data en automatische sitemaps. Wil je specifiek lokaal gevonden worden, dan richten we je site in op zoektermen als "webdesign bureau Capelle aan den IJssel" en jouw diensten in de regio.</p>
+<h2>Veelgestelde vragen</h2>
+<h3>Bouwen jullie ook webshops?</h3>
+<p>Ja. Naast websites bouwen we webshops met winkelwagen en veilige betaling, en boekingssystemen voor bedrijven die afspraken of lessen online willen laten reserveren.</p>
+<h3>Kan ik mijn bestaande website laten overzetten?</h3>
+<p>Vaak wel. We kunnen een bestaande site importeren als basis en die vervolgens verbeteren en overzetten naar je eigen beheer.</p>
+<h3>Werken jullie alleen in Capelle aan den IJssel?</h3>
+<p>Nee, we werken voor ondernemers in heel de regio: Capelle aan den IJssel, Rotterdam, Nieuwerkerk aan den IJssel, Krimpen aan den IJssel en daarbuiten.</p>
+<h2>Conclusie</h2>
+<p>Een goed webdesign bureau in Capelle aan den IJssel levert niet alleen een mooie website, maar ook eentje die snel is, goed vindbaar en die je daarna zélf kunt beheren. Wil je weten wat we voor jouw bedrijf kunnen betekenen? <a href="https://nebulabookings.com/">Bekijk hier hoe Nebula werkt</a> of vraag vrijblijvend een gesprek aan.</p>`,
+  },
+];
+
+async function seedCornerstoneArticles(): Promise<void> {
+  for (const c of CORNERSTONE) {
+    try {
+      const [existing] = await db.select({ id: platformBlog.id }).from(platformBlog).where(eq(platformBlog.slug, c.slug));
+      if (existing) continue;
+      await db.insert(platformBlog).values({ slug: c.slug, title: c.title, metaTitle: c.metaTitle, metaDescription: c.metaDescription, topic: c.topic, html: c.html });
+      void submitToIndexNow(CANON_HOST, [`https://${CANON_HOST}/kennisbank/${c.slug}`, `https://${CANON_HOST}/kennisbank`]);
+      logger.info({ slug: c.slug }, "[kennisbank] cornerstone article seeded");
+    } catch (err) { logger.warn({ err, slug: c.slug }, "[kennisbank] cornerstone seed failed"); }
+  }
+}
+
 export function startKennisbankScheduler(): void {
   if (started) return;
   started = true;
+  void seedCornerstoneArticles(); // idempotent — ensures the cornerstone articles are always live
   if (!process.env.ANTHROPIC_API_KEY) { logger.warn("[kennisbank] ANTHROPIC_API_KEY not set — daily article generation disabled"); return; }
   const tick = async () => {
     try { await translatePending(); } catch { /* backfill EN for older articles, best-effort */ }
