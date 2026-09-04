@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   Gauge, BarChart3, RefreshCw, Loader2, Sparkles, Wand2, AlertTriangle, AlertCircle,
   CheckCircle2, Info, Users, Eye, Clock, Monitor, Smartphone, Tablet, ArrowUpRight, Globe,
@@ -735,7 +736,7 @@ function heatmapPageFile(path: string): string {
 
 // The heat-map "stage": the real page rendered same-origin (so we can read its height and line the
 // dots up), with the click dots overlaid. Non-interactive itself — the parent handles clicks.
-function HeatStage({ src, points, maxWidth }: { src: string; points: { x: number; y: number }[]; maxWidth: number }) {
+function HeatStage({ src, points, maxWidth, showDots }: { src: string; points: { x: number; y: number }[]; maxWidth: number; showDots: boolean }) {
   const [h, setH] = useState(900);
   const ref = useRef<HTMLIFrameElement | null>(null);
   const measure = () => {
@@ -749,14 +750,17 @@ function HeatStage({ src, points, maxWidth }: { src: string; points: { x: number
     <div className="relative mx-auto rounded-xl border border-border overflow-hidden bg-white" style={{ maxWidth, height: h }}>
       <iframe ref={ref} src={src} onLoad={() => { measure(); setTimeout(measure, 600); }} title="heatmap-page" scrolling="no"
         sandbox="allow-same-origin" className="absolute inset-0 w-full h-full border-0 pointer-events-none" style={{ background: "#fff" }} />
-      <div className="absolute inset-0 pointer-events-none">
-        {points.map((pt, i) => (
-          <span key={i} className="absolute rounded-full" style={{
-            left: `${pt.x / 10}%`, top: `${pt.y / 10}%`, width: 30, height: 30, transform: "translate(-50%,-50%)",
-            background: "radial-gradient(circle, rgba(244,63,94,.5) 0%, rgba(244,63,94,0) 72%)", mixBlendMode: "multiply",
-          }} />
-        ))}
-      </div>
+      {/* Dots only in the full-screen view — the small inline render can't align them well. */}
+      {showDots && (
+        <div className="absolute inset-0 pointer-events-none">
+          {points.map((pt, i) => (
+            <span key={i} className="absolute rounded-full" style={{
+              left: `${pt.x / 10}%`, top: `${pt.y / 10}%`, width: 30, height: 30, transform: "translate(-50%,-50%)",
+              background: "radial-gradient(circle, rgba(244,63,94,.5) 0%, rgba(244,63,94,0) 72%)", mixBlendMode: "multiply",
+            }} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -806,30 +810,34 @@ function HeatmapPanel({ projectId }: { projectId: number }) {
         </Button>
       </div>
 
-      {/* Click the map to open it larger. */}
-      <div className="cursor-zoom-in group relative" onClick={() => setFull(true)} title={t("Klik om te vergroten", "Click to enlarge")}>
-        <HeatStage src={src} points={data.points} maxWidth={900} />
-        {data.points.length === 0 && <div className="absolute inset-x-0 top-3 flex justify-center pointer-events-none"><span className="text-xs bg-foreground/80 text-background rounded-full px-3 py-1">{t("Nog geen klikken op deze pagina", "No clicks on this page yet")}</span></div>}
-        <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity"><span className="inline-flex items-center gap-1 text-[11px] bg-foreground/80 text-background rounded-full px-2 py-1"><Maximize2 className="h-3 w-3" />{t("Vergroten", "Enlarge")}</span></div>
+      {/* Inline: just a preview of the page (no dots — they only align well full-screen). Click to open. */}
+      <div className="cursor-zoom-in group relative" onClick={() => setFull(true)} title={t("Klik om de heatmap te openen", "Click to open the heatmap")}>
+        <HeatStage src={src} points={data.points} maxWidth={900} showDots={false} />
+        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/[0.03] transition-colors flex items-center justify-center">
+          <span className="inline-flex items-center gap-1.5 text-sm font-medium bg-foreground/85 text-background rounded-full px-4 py-2 shadow-lg opacity-90 group-hover:opacity-100">
+            <Flame className="h-4 w-4 text-rose-400" />{t("Bekijk heatmap op volledig scherm", "View heatmap full screen")}
+          </span>
+        </div>
       </div>
-      <p className="text-[11px] text-muted-foreground/70 mt-2 text-center">{t("Klikposities over je echte pagina (rood = geklikt). Klik om te vergroten · ververst automatisch.", "Click positions over your real page (red = clicked). Click to enlarge · refreshes automatically.")}</p>
+      <p className="text-[11px] text-muted-foreground/70 mt-2 text-center">{t("Klik om de klik-heatmap over je echte pagina te zien. Ververst automatisch.", "Click to see the click heatmap over your real page. Refreshes automatically.")}</p>
 
-      {full && (
-        <div className="fixed inset-0 z-[95] bg-black/80 flex flex-col" onClick={() => setFull(false)}>
-          <div className="flex items-center justify-between px-4 py-3 text-white shrink-0" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center gap-2 flex-wrap">
-              <Flame className="h-4 w-4 text-rose-400" />
-              <span className="text-sm font-medium">{t("Heatmap", "Heatmap")} · {file}</span>
+      {full && typeof document !== "undefined" && createPortal(
+        <div className="fixed inset-0 bg-black/85 flex flex-col" style={{ zIndex: 2147483000 }} onClick={() => setFull(false)}>
+          <div className="flex items-center justify-between gap-3 px-4 py-3 text-white shrink-0" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-2 flex-wrap min-w-0">
+              <Flame className="h-4 w-4 text-rose-400 shrink-0" />
+              <span className="text-sm font-medium shrink-0">{t("Heatmap", "Heatmap")} · {file}</span>
               {data.pages.map((p) => (
                 <button key={p.path} onClick={() => setPage(p.path)} className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${page === p.path ? "border-white bg-white/15" : "border-white/30 text-white/70 hover:text-white"}`}>{p.path} <span className="opacity-60">({p.clicks})</span></button>
               ))}
             </div>
-            <button onClick={() => setFull(false)} className="h-9 w-9 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white shrink-0" title={t("Sluiten (Esc)", "Close (Esc)")}><X className="h-4 w-4" /></button>
+            <button onClick={() => setFull(false)} className="h-9 px-3 rounded-full bg-white/15 hover:bg-white/25 flex items-center gap-1.5 text-white text-sm shrink-0" title={t("Sluiten (Esc)", "Close (Esc)")}><X className="h-4 w-4" />{t("Sluiten", "Close")}</button>
           </div>
-          <div className="flex-1 min-h-0 overflow-y-auto p-4" onClick={(e) => e.stopPropagation()}>
-            <HeatStage src={src} points={data.points} maxWidth={1200} />
+          <div className="flex-1 min-h-0 overflow-y-auto px-4 pb-8" onClick={(e) => e.stopPropagation()}>
+            <HeatStage src={src} points={data.points} maxWidth={1200} showDots />
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );
