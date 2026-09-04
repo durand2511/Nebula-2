@@ -188,25 +188,14 @@ function AuditView({ projectId, kind, onFix, changeSignal = 0 }: { projectId: nu
   const [fixing, setFixing] = useState<string | null>(null);
   const fixAll = () => {
     if (!fixable.length) return;
-    // Group by finding TITLE and list the affected pages compactly — a per-page enumeration on a big
-    // (100-page) site would paste hundreds of lines into the terminal (huge scroll / freeze). Grouped,
-    // it's a handful of lines. One representative fix-instruction per group + the pages.
-    const groups = new Map<string, { fix: string; pages: string[] }>();
-    for (const f of fixable) {
-      const g = groups.get(f.title) ?? { fix: (f.fix || f.title), pages: [] };
-      if (f.page) g.pages.push(f.page);
-      groups.set(f.title, g);
-    }
-    const list = [...groups.entries()].map(([title, g], i) => {
-      const pageStr = g.pages.length
-        ? ` (op ${g.pages.slice(0, 12).join(", ")}${g.pages.length > 12 ? ` en nog ${g.pages.length - 12}` : ""})`
-        : "";
-      return `${i + 1}. ${title}: ${g.fix}${pageStr}`;
-    }).join("\n");
-    const head = kind === "a11y" ? t("Verbeter de toegankelijkheid van deze website. Los deze punten op", "Improve this website's accessibility. Fix these points")
-      : kind === "speed" ? t("Maak deze website sneller. Los deze punten op", "Make this website faster. Fix these points")
-      : t("Verbeter de SEO van deze website. Los deze punten op", "Improve this website's SEO. Fix these points");
-    const msg = `${head}, ${t("behoud de bestaande vormgeving en tekst zoveel mogelijk", "keep the existing design and copy as much as possible")}:\n${list}`;
+    // ULTRA-short instruction: just the DISTINCT issue types (no per-page lists), so it's one short line
+    // in the terminal — a full enumeration on a big site pasted a wall of text (huge scroll / unreadable).
+    // Claude finds the affected pages itself when fixing.
+    const types = [...new Set(fixable.map((f) => f.title.replace(/\s*\(.*?\)\s*$/, "").replace(/^\d+\s+/, "")))];
+    const head = kind === "a11y" ? t("Verbeter de toegankelijkheid van de hele site", "Improve the whole site's accessibility")
+      : kind === "speed" ? t("Maak de hele site sneller", "Make the whole site faster")
+      : t("Verbeter de SEO van de hele site", "Improve the whole site's SEO");
+    const msg = `${head}: ${t("los deze punten op alle pagina's waar ze spelen op, behoud de vormgeving en tekst", "fix these points on every page where they occur, keeping the design and copy")} — ${types.join("; ")}.`;
     if (onFix(msg)) markWorking(fixable.map((f) => ({ id: f.id, title: f.title })));
   };
   const improveLinks = () => {

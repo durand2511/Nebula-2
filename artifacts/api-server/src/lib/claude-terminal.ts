@@ -781,8 +781,10 @@ async function onConnection(ws: WebSocket, userId: number, projectId: number, pr
   // SIGWINCH twice and makes Claude Code repaint its whole UI cleanly at the client's real size.
   if (!isNew && dims && dims.cols > 0 && dims.rows > 0 && s.proc && !s.exited) {
     const { cols, rows } = dims;
-    try { s.proc.resize(Math.min(500, cols), Math.min(200, Math.max(10, rows - 1))); } catch { /* ignore */ }
-    setTimeout(() => { try { if (s.proc && !s.exited) s.proc.resize(Math.min(500, cols), Math.min(200, rows)); } catch { /* ignore */ } }, 60);
+    // Jiggle (two different sizes → SIGWINCH → clean repaint), ENDING one row short of xterm so Claude
+    // Code's bottom status bar ("auto mode" / "bypass permissions") isn't clipped by the container edge.
+    try { s.proc.resize(Math.min(500, cols), Math.min(200, Math.max(10, rows))); } catch { /* ignore */ }
+    setTimeout(() => { try { if (s.proc && !s.exited) s.proc.resize(Math.min(500, cols), Math.min(200, Math.max(10, rows - 1))); } catch { /* ignore */ } }, 60);
   }
 
   // Keepalive: Render's proxy closes WebSockets that go quiet, which showed up as "opnieuw starten"
@@ -799,7 +801,7 @@ async function onConnection(ws: WebSocket, userId: number, projectId: number, pr
     try { m = JSON.parse(String(raw)); } catch { return; }
     if (!s.proc || s.exited) return;
     if (m.t === "i" && typeof m.d === "string") s.proc.write(m.d);
-    else if (m.t === "r" && m.cols > 0 && m.rows > 0) { try { s.proc.resize(Math.min(500, m.cols | 0), Math.min(200, m.rows | 0)); } catch { /* ignore */ } }
+    else if (m.t === "r" && m.cols > 0 && m.rows > 0) { try { s.proc.resize(Math.min(500, m.cols | 0), Math.min(200, Math.max(10, (m.rows | 0) - 1))); } catch { /* ignore */ } } // rows-1: one line of clearance so the bottom status bar isn't clipped
   });
   ws.on("close", () => { clearInterval(keepalive); s.clients.delete(ws); touchIdle(s); });
   ws.on("error", () => { clearInterval(keepalive); s.clients.delete(ws); touchIdle(s); });
