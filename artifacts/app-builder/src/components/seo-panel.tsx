@@ -709,10 +709,11 @@ function HeatStage({ src, points, maxWidth, showDots }: { src: string; points: {
         <div className="absolute inset-0 pointer-events-none">
           {points.map((pt, i) => (
             <span key={i} className="absolute rounded-full" style={{
-              left: `${pt.x / 10}%`, top: `${pt.y / 10}%`, width: 30, height: 30, transform: "translate(-50%,-50%)",
-              background: "radial-gradient(circle, rgba(244,63,94,.5) 0%, rgba(244,63,94,0) 72%)", mixBlendMode: "multiply",
+              left: `${pt.x / 10}%`, top: `${pt.y / 10}%`, width: 44, height: 44, transform: "translate(-50%,-50%)",
+              background: "radial-gradient(circle, rgba(244,42,74,.85) 0%, rgba(244,63,94,.45) 45%, rgba(244,63,94,0) 75%)",
             }} />
           ))}
+          {points.length === 0 && <div className="absolute inset-x-0 top-4 flex justify-center"><span className="text-sm bg-foreground/80 text-background rounded-full px-3 py-1.5">{"Nog geen klikken op deze pagina"}</span></div>}
         </div>
       )}
     </div>

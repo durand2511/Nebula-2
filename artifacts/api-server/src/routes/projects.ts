@@ -274,11 +274,23 @@ const importProxy = process.env.IMPORT_PROXY_URL ? new ProxyAgent(process.env.IM
 
 // Fetch HTML while following redirects manually, re-validating every hop so a
 // redirect can't bounce us to an internal address.
-async function fetchWebsiteHtml(rawUrl: string): Promise<{ html: string; finalUrl: string }> {
+// Capture Set-Cookie from a response into a simple name→value jar (undici exposes getSetCookie()).
+function captureCookies(res: { headers: Headers }, jar: Map<string, string>): void {
+  const list = typeof (res.headers as { getSetCookie?: () => string[] }).getSetCookie === "function"
+    ? (res.headers as { getSetCookie: () => string[] }).getSetCookie()
+    : (res.headers.get("set-cookie") ? [res.headers.get("set-cookie") as string] : []);
+  for (const sc of list) {
+    const pair = sc.split(";")[0] ?? "";
+    const eq = pair.indexOf("=");
+    if (eq > 0) { const name = pair.slice(0, eq).trim(); const val = pair.slice(eq + 1).trim(); if (name) jar.set(name, val); }
+  }
+}
+
+async function fetchWebsiteHtml(rawUrl: string, jar: Map<string, string> = new Map()): Promise<{ html: string; finalUrl: string }> {
   let current = rawUrl;
   for (let hop = 0; hop <= IMPORT_MAX_REDIRECTS; hop++) {
     const safe = await assertSafeUrl(current);
-    const headers = {
+    const headers: Record<string, string> = {
       // Present as a real browser — many sites return 403 to non-browser
       // User-Agents / missing browser headers (e.g. Cloudflare bot checks).
       "User-Agent":
@@ -288,6 +300,9 @@ async function fetchWebsiteHtml(rawUrl: string): Promise<{ html: string; finalUr
       "Accept-Language": "en-US,en;q=0.9,nl;q=0.8",
       "Upgrade-Insecure-Requests": "1",
     };
+    // Send back any cookies the site set earlier this crawl (consent/session) so pages behind a
+    // cookie wall load instead of bouncing back to the homepage/consent page.
+    if (jar.size) headers["Cookie"] = [...jar.entries()].map(([k, v]) => `${k}=${v}`).join("; ");
     // Each attempt gets its OWN timeout controller — otherwise a hanging direct fetch would use up the
     // shared timer and the proxy retry could never run.
     const attempt = async (dispatcher: Agent | ProxyAgent, timeoutMs: number) => {
@@ -312,6 +327,7 @@ async function fetchWebsiteHtml(rawUrl: string): Promise<{ html: string; finalUr
       res = await attempt(importDispatcher, IMPORT_FETCH_TIMEOUT_MS);
     }
     if (!res) throw new Error("Kon de website niet ophalen.");
+    captureCookies(res, jar); // remember consent/session cookies (also on redirect hops)
 
     if (res.status >= 300 && res.status < 400) {
       const location = res.headers.get("location");
@@ -687,7 +703,10 @@ function discoverInternalLinks(html: string, pageUrl: string, host: string): str
 async function crawlSite(
   startUrl: string,
 ): Promise<{ pages: { key: string; url: string; html: string }[]; finalUrl: string }> {
-  const home = await fetchWebsiteHtml(startUrl);
+  // One cookie jar for the whole crawl → consent/session cookies set on the homepage travel to every
+  // subpage, so sites behind a cookie wall are crawled in full instead of returning only the homepage.
+  const jar = new Map<string, string>();
+  const home = await fetchWebsiteHtml(startUrl, jar);
 
   // Fail immediately if the homepage is a bot-protection challenge or a JS-only SPA.
   // Without this check the crawler would spend up to (IMPORT_MAX_PAGES / CONCURRENCY)
@@ -733,7 +752,7 @@ async function crawlSite(
     }
     if (batch.length === 0) break;
 
-    const results = await Promise.allSettled(batch.map((l) => fetchWebsiteHtml(l)));
+    const results = await Promise.allSettled(batch.map((l) => fetchWebsiteHtml(l, jar)));
     for (const r of results) {
       if (r.status !== "fulfilled") continue;
       let key: string;
