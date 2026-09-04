@@ -4,7 +4,7 @@ import {
   Gauge, BarChart3, RefreshCw, Loader2, Sparkles, Wand2, AlertTriangle, AlertCircle,
   CheckCircle2, Info, Users, Eye, Clock, Monitor, Smartphone, Tablet, ArrowUpRight, Globe,
   Accessibility, Zap, Trophy, Link2, Target, X, Search, Gift, ChevronDown, ChevronRight,
-  TrendingUp, Flame, MousePointerClick, Maximize2,
+  TrendingUp, Flame, MousePointerClick, Maximize2, Lock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useLang } from "@/lib/i18n";
@@ -55,9 +55,14 @@ function ScoreRing({ score, grade, size = 128 }: { score: number; grade?: string
   );
 }
 
+// Minimum plan level per sub-tab: 1 = Instap, 2 = Pro. (A/B inside Bezoekers is gated separately at 3.)
+const TAB_MIN: Record<string, 1 | 2> = { seo: 1, a11y: 1, speed: 1, google: 2, competitor: 2, visitors: 2 };
+
 export function SeoPanel({ projectId, onFix, changeSignal = 0 }: { projectId: number; onFix: (prompt: string) => boolean; changeSignal?: number }) {
   const { t } = useLang();
   const [view, setView] = useState<"seo" | "a11y" | "speed" | "google" | "competitor" | "visitors">("seo");
+  const [level, setLevel] = useState<number | null>(null);
+  useEffect(() => { fetch("/api/billing").then((r) => r.json()).then((d) => setLevel(typeof d.level === "number" ? d.level : 0)).catch(() => setLevel(0)); }, []);
   const tabs: { key: typeof view; label: string; Icon: typeof Gauge }[] = [
     { key: "seo", label: t("SEO", "SEO"), Icon: Gauge },
     { key: "a11y", label: t("Toegankelijkheid", "Accessibility"), Icon: Accessibility },
@@ -66,22 +71,46 @@ export function SeoPanel({ projectId, onFix, changeSignal = 0 }: { projectId: nu
     { key: "competitor", label: t("Concurrent", "Competitor"), Icon: Trophy },
     { key: "visitors", label: t("Bezoekers", "Visitors"), Icon: BarChart3 },
   ];
+  const min = TAB_MIN[view];
+  const locked = level !== null && level < min;
   return (
     <div className="flex-1 flex flex-col min-h-0 bg-background">
       <div className="shrink-0 border-b border-border px-4 pt-2 flex items-center gap-1 overflow-x-auto">
-        {tabs.map(({ key, label, Icon }) => (
-          <button key={key} onClick={() => setView(key)}
-            className={`flex items-center gap-2 px-3 py-2.5 text-sm font-medium border-b-2 -mb-px whitespace-nowrap transition-colors ${view === key ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}>
-            <Icon className="h-4 w-4" /> {label}
-          </button>
-        ))}
+        {tabs.map(({ key, label, Icon }) => {
+          const isLocked = level !== null && level < TAB_MIN[key];
+          return (
+            <button key={key} onClick={() => setView(key)}
+              className={`flex items-center gap-2 px-3 py-2.5 text-sm font-medium border-b-2 -mb-px whitespace-nowrap transition-colors ${view === key ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}>
+              <Icon className="h-4 w-4" /> {label}{isLocked && <Lock className="h-3 w-3 opacity-60" />}
+            </button>
+          );
+        })}
       </div>
       <div className="flex-1 min-h-0 overflow-y-auto">
-        {view === "visitors" ? <VisitorsView projectId={projectId} />
+        {locked ? <LockedFeature min={min} />
+          : view === "visitors" ? <VisitorsView projectId={projectId} level={level ?? 0} />
           : view === "competitor" ? <CompetitorView projectId={projectId} onFix={onFix} />
           : view === "google" ? <GoogleView projectId={projectId} />
-          : <AuditView projectId={projectId} kind={view} onFix={onFix} changeSignal={changeSignal} />}
+          : <AuditView key={view} projectId={projectId} kind={view} onFix={onFix} changeSignal={changeSignal} />}
       </div>
+    </div>
+  );
+}
+
+// Locked-feature panel shown when the user's plan is below the required tier.
+function LockedFeature({ min }: { min: number }) {
+  const { t } = useLang();
+  const tier = min >= 3 ? "Premium" : min >= 2 ? "Pro" : "Instap";
+  return (
+    <div className="flex-1 flex flex-col items-center justify-center py-20 px-6 text-center">
+      <div className="h-14 w-14 rounded-2xl bg-primary/10 flex items-center justify-center"><Lock className="h-7 w-7 text-primary" /></div>
+      <h3 className="mt-4 text-lg font-semibold text-foreground">{t(`Beschikbaar vanaf ${tier}`, `Available from ${tier}`)}</h3>
+      <p className="mt-2 text-sm text-muted-foreground max-w-sm">
+        {min >= 2
+          ? t("Deze functie zit in het Pro-abonnement (€80/mnd): statistieken, heatmap, conversies, Google-posities en concurrent-vergelijking.", "This feature is in the Pro plan (€80/mo): analytics, heatmap, conversions, Google positions and competitor comparison.")
+          : t("Neem een abonnement om deze functie te gebruiken.", "Subscribe to use this feature.")}
+      </p>
+      <p className="mt-4 text-xs text-muted-foreground/70">{t("Upgraden kan bij je account → Abonnement.", "Upgrade under your account → Subscription.")}</p>
     </div>
   );
 }
@@ -92,38 +121,36 @@ const AUDIT_META: Record<AuditKind, { title: string; blurb: string }> = {
   speed: { title: "Snelheid", blurb: "Hoe snel je pagina's laden (Core Web Vitals)." },
 };
 
-// Session cache of audit reports so switching sub-tabs doesn't re-run the whole analysis each time.
-// Refreshed on "Opnieuw", and updated after a Claude fix re-scan. Keyed by project + audit kind.
+// Session caches (keyed by project + audit kind) so the analysis runs ONCE and the resolved/working
+// state survives switching sub-tabs. The report auto-updates after Claude changes files.
 const auditCache = new Map<string, Report>();
+const resolvedCache = new Map<string, { id: string; title: string }[]>();
+const workingCache = new Map<string, Map<string, { title: string; at: number }>>();
 
 function AuditView({ projectId, kind, onFix, changeSignal = 0 }: { projectId: number; kind: AuditKind; onFix: (prompt: string) => boolean; changeSignal?: number }) {
   const { t } = useLang();
   const cacheKey = `${projectId}:${kind}`;
-  const [data, setData] = useState<Report | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState<Report | null>(() => auditCache.get(cacheKey) ?? null);
+  const [loading, setLoading] = useState(() => !auditCache.get(cacheKey));
   const [err, setErr] = useState(false);
-  // Findings sent to Claude and awaiting resolution (id → {title, since}); and the ones already ticked off.
-  const [working, setWorking] = useState<Map<string, { title: string; at: number }>>(new Map());
-  const [resolved, setResolved] = useState<{ id: string; title: string }[]>([]);
+  // Findings sent to Claude and awaiting resolution (id → {title, since}); and the ones ticked off green.
+  // Restored from the caches so they persist when you leave and come back.
+  const [working, setWorking] = useState<Map<string, { title: string; at: number }>>(() => new Map(workingCache.get(cacheKey) ?? new Map()));
+  const [resolved, setResolved] = useState<{ id: string; title: string }[]>(() => resolvedCache.get(cacheKey) ?? []);
   const workingRef = useRef(working); workingRef.current = working;
+  useEffect(() => { resolvedCache.set(cacheKey, resolved); }, [resolved]);
+  useEffect(() => { workingCache.set(cacheKey, working); }, [working]);
 
   const fetchReport = () => fetch(`/api/projects/${projectId}/seo-audit?kind=${kind}`).then((r) => { if (!r.ok) throw new Error(); return r.json() as Promise<Report>; });
-  // Force a fresh analysis (the "Opnieuw" button).
-  const refresh = () => {
-    setLoading(true); setErr(false); setData(null); setWorking(new Map()); setResolved([]);
-    fetchReport().then((rep) => { setData(rep); auditCache.set(cacheKey, rep); }).catch(() => setErr(true)).finally(() => setLoading(false));
-  };
-  // On mount / sub-tab switch: use the cached report if we already analysed this kind — no re-run.
-  useEffect(() => {
-    const cached = auditCache.get(cacheKey);
-    if (cached) { setData(cached); setLoading(false); setErr(false); }
-    else refresh();
-  }, [projectId, kind]);
+  const retry = () => { setLoading(true); setErr(false); fetchReport().then((rep) => { setData(rep); auditCache.set(cacheKey, rep); }).catch(() => setErr(true)).finally(() => setLoading(false)); };
+  // Analyse ONCE — only the first time we open this kind. After that it's cached; no re-analysis on
+  // tab switches, and it updates itself when Claude changes files (below).
+  useEffect(() => { if (!auditCache.get(cacheKey)) retry(); }, []);
 
-  // After Claude Code changes files (changeSignal bumps), re-scan and tick off findings that are now
-  // resolved (gone from the report) → green "opgelost". Debounced so multiple edits settle first.
+  // Auto re-scan (silent) shortly after Claude Code changes files → keeps it fresh AND ticks off the
+  // findings that are now resolved (gone from the report) → green "opgelost". Debounced so edits settle.
   useEffect(() => {
-    if (changeSignal === 0 || workingRef.current.size === 0) return;
+    if (changeSignal === 0) return;
     const timer = setTimeout(() => {
       fetchReport().then((rep) => {
         const present = new Set(rep.findings.map((f) => f.id));
@@ -176,7 +203,7 @@ function AuditView({ projectId, kind, onFix, changeSignal = 0 }: { projectId: nu
   };
 
   if (loading) return <Centered><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /><p className="mt-3 text-sm text-muted-foreground">{t("Website analyseren…", "Analysing website…")}</p></Centered>;
-  if (err || !data) return <Centered><AlertCircle className="h-6 w-6 text-rose-500" /><p className="mt-3 text-sm text-muted-foreground">{t("Analyse mislukt.", "Analysis failed.")}</p><Button variant="outline" size="sm" className="mt-3" onClick={refresh}><RefreshCw className="h-3.5 w-3.5 mr-1.5" />{t("Opnieuw", "Retry")}</Button></Centered>;
+  if (err || !data) return <Centered><AlertCircle className="h-6 w-6 text-rose-500" /><p className="mt-3 text-sm text-muted-foreground">{t("Analyse mislukt.", "Analysis failed.")}</p><Button variant="outline" size="sm" className="mt-3" onClick={retry}><RefreshCw className="h-3.5 w-3.5 mr-1.5" />{t("Opnieuw proberen", "Retry")}</Button></Centered>;
   if (!data.pages.length) return <Centered><Gauge className="h-8 w-8 text-muted-foreground/50" /><p className="mt-3 text-sm text-muted-foreground max-w-xs text-center">{t("Nog geen pagina's om te analyseren. Bouw eerst je website.", "No pages to analyse yet. Build your website first.")}</p></Centered>;
 
   const meta = AUDIT_META[kind];
@@ -213,9 +240,6 @@ function AuditView({ projectId, kind, onFix, changeSignal = 0 }: { projectId: nu
               {t("Interne links", "Internal links")}
             </Button>
           )}
-          <Button size="sm" variant="ghost" className="gap-1.5 text-muted-foreground" onClick={refresh}>
-            <RefreshCw className="h-3.5 w-3.5" /> {t("Opnieuw", "Rescan")}
-          </Button>
         </div>
       </div>
 
@@ -366,7 +390,7 @@ function CompetitorView({ projectId, onFix }: { projectId: number; onFix: (promp
   );
 }
 
-function VisitorsView({ projectId }: { projectId: number }) {
+function VisitorsView({ projectId, level = 0 }: { projectId: number; level?: number }) {
   const { t } = useLang();
   const [days, setDays] = useState(30);
   const [mode, setMode] = useState<"overview" | "heatmap">("overview");
@@ -498,7 +522,7 @@ function VisitorsView({ projectId }: { projectId: number }) {
 
       <div className="mt-6 mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">{t("Groei-instellingen", "Growth settings")}</div>
       <ExitPopupCard projectId={projectId} />
-      <ABTestCard projectId={projectId} />
+      <ABTestCard projectId={projectId} locked={level < 3} />
       </>)}
     </div>
   );
@@ -665,9 +689,18 @@ function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (v: 
   );
 }
 
-function ABTestCard({ projectId }: { projectId: number }) {
+function ABTestCard({ projectId, locked = false }: { projectId: number; locked?: boolean }) {
   const { t } = useLang();
   const { val, patch, save, saved, busy } = useSiteSection(projectId, "abTest", { enabled: false, label: "", selector: "", variant: "" });
+  if (locked) return (
+    <div className="mt-3 rounded-2xl border border-border bg-card/40 px-4 py-3.5 flex items-center gap-3">
+      <Lock className="h-4.5 w-4.5 text-muted-foreground shrink-0" style={{ width: 18, height: 18 }} />
+      <div className="flex-1 min-w-0">
+        <div className="text-sm font-medium text-foreground">{t("A/B-test", "A/B test")} <span className="ml-1 text-[10px] px-1.5 py-0.5 rounded-full bg-primary/10 text-primary align-middle">Premium</span></div>
+        <div className="text-xs text-muted-foreground">{t("Beschikbaar in het Premium-abonnement. Upgraden via je account → Abonnement.", "Available in the Premium plan. Upgrade under your account → Subscription.")}</div>
+      </div>
+    </div>
+  );
   return (
     <GrowthCard icon={Target} title={t("A/B-test", "A/B test")} subtitle={t("Test twee versies van een tekst en zie welke beter converteert.", "Test two versions of a text and see which converts better.")} on={!!val.enabled}>
       <Toggle checked={!!val.enabled} onChange={(v) => { patch({ enabled: v }); save({ ...val, enabled: v }); }} label={t("A/B-test inschakelen", "Enable A/B test")} />

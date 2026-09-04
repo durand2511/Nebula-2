@@ -71,6 +71,27 @@ export async function projectOwnerSubscribed(projectId: number): Promise<boolean
   return u.subscriptionStatus === "active";
 }
 
+// Feature-access levels per subscription tier: 0 = geen abonnement (alles op slot), 1 = Instap,
+// 2 = Pro, 3 = Premium. The platform owner is always level 3.
+export type FeatureLevel = 0 | 1 | 2 | 3;
+export function planToLevel(planId?: string | null): FeatureLevel {
+  const p = String(planId || "");
+  return p === "premium" ? 3 : p === "pro" ? 2 : p === "instap" ? 1 : 1; // any known/unknown active plan ≥ Instap
+}
+export function userFeatureLevel(u: Pick<PlatformUser, "email" | "subscriptionStatus" | "plan"> | null | undefined): FeatureLevel {
+  if (!u) return 0;
+  if (u.email && PLATFORM_OWNER_EMAILS.has(u.email.toLowerCase())) return 3; // platform owner → everything
+  if (u.subscriptionStatus !== "active") return 0;                          // no active subscription → locked
+  return planToLevel(u.plan);
+}
+/** The feature level of a project's OWNER (used to gate per-tier features on that project). */
+export async function projectOwnerLevel(projectId: number): Promise<FeatureLevel> {
+  const [p] = await db.select().from(projects).where(eq(projects.id, projectId));
+  if (!p?.ownerId) return 0;
+  const [u] = await db.select().from(platformUsers).where(eq(platformUsers.id, p.ownerId));
+  return userFeatureLevel(u);
+}
+
 /** Deduct an AI change's cost from the wallet (floored at 0) + log it. Returns {cost, remaining}. */
 export async function chargeAiUsage(userId: number, projectId: number | null, summary: string, model: string, usage: { input_tokens?: number; output_tokens?: number } | null | undefined): Promise<{ cost: number; remaining: number }> {
   const cost = aiCostEur(model, usage?.input_tokens || 0, usage?.output_tokens || 0);

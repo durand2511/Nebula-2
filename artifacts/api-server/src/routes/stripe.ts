@@ -16,7 +16,7 @@ import { logger } from "../lib/logger";
 import { sendBookingEmail } from "../lib/email.js";
 import { getSessionUser, tokenFrom } from "../lib/platform-auth.js";
 import { getSessionUser as getStudioUser } from "../lib/studio-auth.js";
-import { addCredit, recentUsage, isSubscribed, MONTHLY_AI_CREDIT_EUR, SUBSCRIPTION_PRICE_EUR, PLANS, planById } from "../lib/billing.js";
+import { addCredit, recentUsage, isSubscribed, MONTHLY_AI_CREDIT_EUR, SUBSCRIPTION_PRICE_EUR, PLANS, planById, userFeatureLevel } from "../lib/billing.js";
 import { reqBaseUrl } from "../lib/req-url.js";
 import { resolveSmtpConfig } from "../lib/email-config.js";
 import { sendMail } from "../lib/smtp.js";
@@ -972,6 +972,7 @@ router.get("/billing", async (req, res) => {
   const cur = planById((u as { plan?: string }).plan);
   res.json({
     subscribed: isSubscribed(u), status: u.subscriptionStatus, currentPeriodEnd: u.currentPeriodEnd,
+    level: userFeatureLevel(u), // 0 = geen abo, 1 = Instap, 2 = Pro, 3 = Premium (owner = 3)
     aiCredit: Math.round((u.aiCredit || 0) * 100) / 100, monthlyCredit: MONTHLY_AI_CREDIT_EUR, priceEur: cur.price,
     plan: cur.id, plans: PLANS,
     usage: await recentUsage(u.id),

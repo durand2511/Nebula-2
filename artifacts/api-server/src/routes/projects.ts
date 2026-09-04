@@ -10,7 +10,7 @@ import { getSessionUser as getStudioSessionUser } from "../lib/studio-auth.js";
 import { findByHost } from "../lib/domains.js";
 import { makePreviewTicket, checkPreviewTicket } from "../lib/preview-ticket.js";
 import { peekActivationToken } from "../lib/activation.js";
-import { isSubscribed, isBookingRequest, chargeTrackedUsage } from "../lib/billing.js";
+import { isSubscribed, isBookingRequest, chargeTrackedUsage, userFeatureLevel } from "../lib/billing.js";
 import { runWithUsage, recordUsage } from "../lib/ai-usage.js";
 import { runAgentEdit } from "../lib/agent-editor.js";
 import { unlazyImages, RENDER_FIX_STYLE, NEBULA_RESTYLE_PATH, BOOK_FLOAT_BUTTON, showBookButtonOn, TICKER_SCRIPT } from "../lib/host-site.js";
@@ -3233,6 +3233,15 @@ async function requireOwner(req: unknown, res: { status: (n: number) => { json: 
   return u;
 }
 
+// Owner-check + per-tier gate. min: 1 = Instap, 2 = Pro, 3 = Premium. 402 when the plan is too low.
+async function requireLevel(req: unknown, res: { status: (n: number) => { json: (o: unknown) => void } }, projectId: number, min: 1 | 2 | 3): Promise<boolean> {
+  const u = await requireOwner(req, res, projectId);
+  if (!u) return false;
+  const level = userFeatureLevel(u);
+  if (level < min) { res.status(402).json({ error: "Hiervoor is een hoger abonnement nodig.", level, required: min }); return false; }
+  return true;
+}
+
 router.get("/projects", async (req, res) => {
   try {
     const u = await currentUser(req);
@@ -3863,7 +3872,7 @@ router.get("/projects/:projectId/download", async (req, res) => {
 router.get("/projects/:projectId/seo-audit", async (req, res) => {
   const projectId = Number(req.params.projectId);
   if (isNaN(projectId)) { res.status(400).json({ error: "Invalid project ID" }); return; }
-  if (!(await requireOwner(req, res, projectId))) return;
+  if (!(await requireLevel(req, res, projectId, 1))) return; // SEO-audits: Instap+
   const kindRaw = String(req.query.kind || "seo");
   const kind: AuditKind = kindRaw === "a11y" || kindRaw === "speed" ? kindRaw : "seo";
   try { res.json(await runAudit(projectId, kind)); }
@@ -3874,7 +3883,7 @@ router.get("/projects/:projectId/seo-audit", async (req, res) => {
 router.get("/projects/:projectId/competitor", async (req, res) => {
   const projectId = Number(req.params.projectId);
   if (isNaN(projectId)) { res.status(400).json({ error: "Invalid project ID" }); return; }
-  if (!(await requireOwner(req, res, projectId))) return;
+  if (!(await requireLevel(req, res, projectId, 2))) return; // Concurrent-vergelijking: Pro+
   const url = String(req.query.url || "").trim();
   if (!url) { res.status(400).json({ ok: false, error: "Geef een URL op." }); return; }
   try { res.json(await compareCompetitor(projectId, url)); }
@@ -3925,7 +3934,7 @@ router.post("/subscribe", async (req, res) => {
 router.get("/projects/:projectId/analytics", async (req, res) => {
   const projectId = Number(req.params.projectId);
   if (isNaN(projectId)) { res.status(400).json({ error: "Invalid project ID" }); return; }
-  if (!(await requireOwner(req, res, projectId))) return;
+  if (!(await requireLevel(req, res, projectId, 2))) return; // Bezoekers-analytics: Pro+
   try { res.json(await analyticsSummary(projectId, Number(req.query.days) || 30)); }
   catch (err) { req.log.error({ err }, "[analytics] failed"); res.status(500).json({ error: "Statistieken mislukt." }); }
 });
@@ -3934,7 +3943,7 @@ router.get("/projects/:projectId/analytics", async (req, res) => {
 router.get("/projects/:projectId/analytics/live", async (req, res) => {
   const projectId = Number(req.params.projectId);
   if (isNaN(projectId)) { res.status(400).json({ error: "Invalid project ID" }); return; }
-  if (!(await requireOwner(req, res, projectId))) return;
+  if (!(await requireLevel(req, res, projectId, 2))) return; // live "nu online": Pro+
   res.json({ online: await liveVisitors(projectId) });
 });
 
@@ -3942,7 +3951,7 @@ router.get("/projects/:projectId/analytics/live", async (req, res) => {
 router.get("/projects/:projectId/gsc/positions", async (req, res) => {
   const projectId = Number(req.params.projectId);
   if (isNaN(projectId)) { res.status(400).json({ error: "Invalid project ID" }); return; }
-  if (!(await requireOwner(req, res, projectId))) return;
+  if (!(await requireLevel(req, res, projectId, 2))) return; // Google-posities: Pro+
   try { res.json(await getSearchPositions(projectId, Number(req.query.days) || 28)); }
   catch (err) { req.log.error({ err }, "[gsc-positions] failed"); res.status(500).json({ ok: false, detail: "Ophalen mislukt.", rows: [], totals: { clicks: 0, impressions: 0, position: 0 } }); }
 });
@@ -4018,7 +4027,7 @@ router.get("/projects/:projectId/subscribers", async (req, res) => {
 router.get("/projects/:projectId/heatmap", async (req, res) => {
   const projectId = Number(req.params.projectId);
   if (isNaN(projectId)) { res.status(400).json({ error: "Invalid project ID" }); return; }
-  if (!(await requireOwner(req, res, projectId))) return;
+  if (!(await requireLevel(req, res, projectId, 2))) return; // klik-heatmap: Pro+
   const pages = await db.select({ path: clickEvents.path, clicks: sql<number>`count(*)::int` })
     .from(clickEvents).where(eq(clickEvents.projectId, projectId)).groupBy(clickEvents.path).orderBy(sql`2 desc`).limit(30);
   const page = String(req.query.page || pages[0]?.path || "/");
