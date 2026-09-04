@@ -147,6 +147,26 @@ function AuditView({ projectId, kind, onFix, changeSignal = 0 }: { projectId: nu
   const saveResolved = (list: { id: string; title: string }[]) => { void fetch(`/api/projects/${projectId}/audit-resolved`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind, resolved: list }) }).catch(() => {}); };
   const retry = () => { setLoading(true); setErr(false); getReport().then((rep) => { setData(rep); auditCache.set(cacheKey, rep); }).catch(() => setErr(true)).finally(() => setLoading(false)); };
 
+  // Apply a fresh report: update the data + tick off the findings that are now resolved (gone) → green,
+  // remembered on the server. Shared by the auto-rescan, the "Controleer" button and the auto-driver.
+  const applyFreshReportRef = useRef<(rep: Report) => void>(() => {});
+  applyFreshReportRef.current = (rep: Report) => {
+    const present = new Set(rep.findings.map((f) => f.id));
+    const newlyResolved: { id: string; title: string }[] = [];
+    const stillWorking = new Map<string, { title: string; at: number }>();
+    for (const [id, info] of workingRef.current) {
+      if (!present.has(id)) newlyResolved.push({ id, title: info.title });
+      else if (Date.now() - info.at < 300000) stillWorking.set(id, info); // keep waiting (<5 min)
+    }
+    setData(rep); auditCache.set(cacheKey, rep);
+    setWorking(stillWorking);
+    if (newlyResolved.length) setResolved((prev) => {
+      const merged = [...prev, ...newlyResolved.filter((r) => !prev.some((p) => p.id === r.id))];
+      saveResolved(merged);
+      return merged;
+    });
+  };
+
   // On open: load the REMEMBERED report + resolved state from the server (analyse once). No re-analysis
   // on tab switches (session cache) and none on reload (the server has it).
   useEffect(() => {
@@ -154,30 +174,43 @@ function AuditView({ projectId, kind, onFix, changeSignal = 0 }: { projectId: nu
     if (!auditCache.get(cacheKey)) retry();
   }, []);
 
-  // After Claude Code changes files: re-analyse (fresh) → tick off findings that are now resolved →
-  // remember them on the server. Debounced so multiple edits settle first.
+  // After Claude Code changes files: re-analyse (fresh) → tick off what's resolved. Debounced.
   useEffect(() => {
     if (changeSignal === 0) return;
-    const timer = setTimeout(() => {
-      getReport(true).then((rep) => {
-        const present = new Set(rep.findings.map((f) => f.id));
-        const newlyResolved: { id: string; title: string }[] = [];
-        const stillWorking = new Map<string, { title: string; at: number }>();
-        for (const [id, info] of workingRef.current) {
-          if (!present.has(id)) newlyResolved.push({ id, title: info.title });
-          else if (Date.now() - info.at < 120000) stillWorking.set(id, info); // keep waiting (<2 min)
-        }
-        setData(rep); auditCache.set(cacheKey, rep);
-        setWorking(stillWorking);
-        if (newlyResolved.length) setResolved((prev) => {
-          const merged = [...prev, ...newlyResolved.filter((r) => !prev.some((p) => p.id === r.id))];
-          saveResolved(merged);
-          return merged;
-        });
-      }).catch(() => {});
-    }, 2500);
+    const timer = setTimeout(() => { getReport(true).then((rep) => applyFreshReportRef.current(rep)).catch(() => {}); }, 2500);
     return () => clearTimeout(timer);
   }, [changeSignal]);
+
+  // Auto-driver: after "Alles fixen", keep re-analysing every 25s to tick off resolved points, and if
+  // Claude stalls with points still open, nudge it to continue — until EVERYTHING is done (or a cap).
+  const [autoDrive, setAutoDrive] = useState(false);
+  const autoRef = useRef({ nudges: 0, last: -1 });
+  const onFixRef = useRef(onFix); onFixRef.current = onFix;
+  useEffect(() => {
+    if (!autoDrive) return;
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const rep = await getReport(true);
+        if (cancelled) return;
+        applyFreshReportRef.current(rep);
+        const remaining = rep.findings.filter((f) => f.fixPrompt && (f.severity === "error" || f.severity === "warn"));
+        if (remaining.length === 0) { setAutoDrive(false); return; }   // done — everything fixed
+        const a = autoRef.current;
+        const stalled = a.last !== -1 && remaining.length >= a.last;   // no progress since last check
+        a.last = remaining.length;
+        if (a.nudges >= 12) { setAutoDrive(false); return; }           // safety cap
+        if (stalled) {
+          a.nudges++;
+          const types = [...new Set(remaining.map((f) => f.title.replace(/\s*\(.*?\)\s*$/, "").replace(/^\d+\s+/, "")))];
+          onFixRef.current(`Ga verder en werk de OVERGEBLEVEN SEO-punten allemaal af, op elke pagina, tot er geen enkele meer over is: ${types.join("; ")}.`);
+          setWorking((prev) => { const n = new Map(prev); for (const f of remaining) n.set(f.id, { title: f.title, at: Date.now() }); return n; });
+        }
+      } catch { /* ignore */ }
+    };
+    const id = setInterval(tick, 25000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [autoDrive]);
 
   // "Alles fixen" only counts the findings that matter (errors + warnings). The blue info items are
   // optional nice-to-haves, so they don't inflate the count or the bulk-fix.
@@ -209,7 +242,11 @@ function AuditView({ projectId, kind, onFix, changeSignal = 0 }: { projectId: nu
       `los ALLE onderstaande punten op, op ELKE pagina waar ze voorkomen — werk ze één voor één volledig af en stop pas als er geen enkele meer over is (niet een paar per keer). Behoud de vormgeving en tekst. De punten zijn`,
       `fix ALL of the points below, on EVERY page where they occur — work through them one by one and don't stop until none remain (not just a few at a time). Keep the design and copy. The points are`,
     )}: ${types.join("; ")}.`;
-    if (onFix(msg)) markWorking(fixable.map((f) => ({ id: f.id, title: f.title })));
+    if (onFix(msg)) {
+      markWorking(fixable.map((f) => ({ id: f.id, title: f.title })));
+      autoRef.current = { nudges: 0, last: fixable.length };
+      setAutoDrive(true); // keep re-checking + nudging Claude until EVERYTHING is fixed
+    }
   };
   const improveLinks = () => {
     const msg = t(
@@ -223,17 +260,7 @@ function AuditView({ projectId, kind, onFix, changeSignal = 0 }: { projectId: nu
   const [checking, setChecking] = useState(false);
   const recheck = () => {
     setChecking(true);
-    getReport(true).then((rep) => {
-      const present = new Set(rep.findings.map((f) => f.id));
-      const newlyResolved: { id: string; title: string }[] = [];
-      const stillWorking = new Map<string, { title: string; at: number }>();
-      for (const [id, info] of workingRef.current) {
-        if (!present.has(id)) newlyResolved.push({ id, title: info.title });
-        else stillWorking.set(id, info);
-      }
-      setData(rep); auditCache.set(cacheKey, rep); setWorking(stillWorking);
-      if (newlyResolved.length) setResolved((prev) => { const m = [...prev, ...newlyResolved.filter((r) => !prev.some((p) => p.id === r.id))]; saveResolved(m); return m; });
-    }).catch(() => {}).finally(() => setChecking(false));
+    getReport(true).then((rep) => applyFreshReportRef.current(rep)).catch(() => {}).finally(() => setChecking(false));
   };
 
   if (loading) return <Centered><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /><p className="mt-3 text-sm text-muted-foreground">{t("Website analyseren…", "Analysing website…")}</p></Centered>;
@@ -262,11 +289,16 @@ function AuditView({ projectId, kind, onFix, changeSignal = 0 }: { projectId: nu
           </div>
         </div>
         <div className="flex md:flex-col gap-2 shrink-0">
-          {fixable.length > 0 && (
-            <Button size="sm" className="gap-1.5" onClick={fixAll} disabled={working.size > 0}>
-              {working.size > 0 ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-              {working.size > 0 ? t(`Bezig… (${working.size})`, `Working… (${working.size})`) : t(`Alles fixen (${fixable.length})`, `Fix all (${fixable.length})`)}
-            </Button>
+          {(fixable.length > 0 || autoDrive) && (
+            autoDrive ? (
+              <Button size="sm" variant="outline" className="gap-1.5" onClick={() => setAutoDrive(false)} title={t("Stoppen met automatisch fixen", "Stop auto-fixing")}>
+                <Loader2 className="h-3.5 w-3.5 animate-spin" /> {t(`Bezig — alles fixen… (${fixable.length})`, `Working — fixing all… (${fixable.length})`)}
+              </Button>
+            ) : (
+              <Button size="sm" className="gap-1.5" onClick={fixAll}>
+                <Sparkles className="h-3.5 w-3.5" /> {t(`Alles fixen (${fixable.length})`, `Fix all (${fixable.length})`)}
+              </Button>
+            )
           )}
           {kind === "seo" && (
             <Button size="sm" variant="outline" className="gap-1.5" onClick={improveLinks} disabled={fixing === "__links__"}>
