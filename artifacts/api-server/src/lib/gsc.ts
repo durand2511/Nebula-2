@@ -203,6 +203,47 @@ export async function submitSitemapToGoogle(projectId: number): Promise<void> {
   } catch (err) { logger.warn({ err, projectId }, "[gsc] auto sitemap resubmit failed"); }
 }
 
+// Read the studio's REAL Google positions from Search Console (Search Analytics API). Returns the top
+// search terms with their average position, clicks, impressions and CTR — no scraping, first-party data.
+export type SearchRow = { query: string; position: number; clicks: number; impressions: number; ctr: number };
+export async function getSearchPositions(projectId: number, days = 28): Promise<{ ok: boolean; detail: string; rows: SearchRow[]; totals: { clicks: number; impressions: number; position: number } }> {
+  const empty = { clicks: 0, impressions: 0, position: 0 };
+  const at = await getAccessToken(projectId);
+  if (!at) return { ok: false, detail: "Niet gekoppeld met Google.", rows: [], totals: empty };
+  const domain = await resolvePublishedDomain(projectId);
+  if (!domain || /localhost|127\.0\.0\.1/.test(domain)) return { ok: false, detail: "Publiceer eerst je site.", rows: [], totals: empty };
+  const siteUrl = `https://${domain}/`;
+  const d = Math.min(Math.max(days, 1), 90);
+  const fmt = (t: number) => new Date(t).toISOString().slice(0, 10);
+  // GSC data lags ~2-3 days; end 2 days ago.
+  const endDate = fmt(Date.now() - 2 * 86400000);
+  const startDate = fmt(Date.now() - (d + 2) * 86400000);
+  try {
+    const q = async (dimensions: string[]) => {
+      const r = await fetch(`https://www.googleapis.com/webmasters/v3/sites/${encodeURIComponent(siteUrl)}/searchAnalytics/query`, {
+        method: "POST", headers: { Authorization: `Bearer ${at}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ startDate, endDate, dimensions, rowLimit: dimensions.length ? 25 : 1 }),
+      });
+      const j: any = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j?.error?.message || `Google API ${r.status}`);
+      return (j.rows || []) as any[];
+    };
+    const rows: SearchRow[] = (await q(["query"])).map((row) => ({
+      query: String(row.keys?.[0] || ""),
+      position: Math.round((row.position || 0) * 10) / 10,
+      clicks: Number(row.clicks || 0),
+      impressions: Number(row.impressions || 0),
+      ctr: Math.round((row.ctr || 0) * 1000) / 10,
+    }));
+    const [agg] = await q([]);
+    const totals = agg ? { clicks: Number(agg.clicks || 0), impressions: Number(agg.impressions || 0), position: Math.round((agg.position || 0) * 10) / 10 } : empty;
+    return { ok: true, detail: rows.length ? "" : "Nog geen zoekdata bij Google (kan enkele dagen duren na publiceren).", rows, totals };
+  } catch (err) {
+    logger.warn({ err, projectId }, "[gsc] positions failed");
+    return { ok: false, detail: "Kon de posities niet ophalen.", rows: [], totals: empty };
+  }
+}
+
 export async function disconnectGsc(projectId: number): Promise<void> {
   const [row] = await db.select().from(projectGsc).where(eq(projectGsc.projectId, projectId));
   if (row?.refreshToken) { try { await fetch("https://oauth2.googleapis.com/revoke?token=" + encodeURIComponent(row.refreshToken), { method: "POST" }); } catch { /* ignore */ } }

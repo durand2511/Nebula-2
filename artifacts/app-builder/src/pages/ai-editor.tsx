@@ -446,55 +446,79 @@ function BackupsDialog({ open, onClose, onOpenProject, onRestored }: { open: boo
 function BillingDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { t } = useLang();
   const [data, setData] = useState<any>(null);
-  const [busy, setBusy] = useState(false);
-  const [checkout, setCheckout] = useState<{ clientSecret: string; publishableKey: string; email?: string } | null>(null);
-  const load = () => billingApi("").then((r) => { if (r.ok) setData(r.d); });
+  const [busy, setBusy] = useState<string>("");
+  const [selected, setSelected] = useState<string>("pro");
+  const [checkout, setCheckout] = useState<{ clientSecret: string; publishableKey: string; email?: string; price: number } | null>(null);
+  const load = () => billingApi("").then((r) => { if (r.ok) { setData(r.d); if (r.d.plan) setSelected(r.d.plan); } });
   useEffect(() => { if (open) { setData(null); load(); } }, [open]);
   if (!open) return null;
 
-  const subscribe = async () => {
-    setBusy(true);
-    const r = await billingApi("/subscribe", {});
-    setBusy(false);
+  const subscribe = async (planId: string) => {
+    setBusy(planId);
+    const r = await billingApi("/subscribe", { plan: planId });
+    setBusy("");
     if (!r.ok) { alert(r.d.error || "Abonneren mislukt."); return; }
-    if (r.d.clientSecret && r.d.publishableKey) { setCheckout({ clientSecret: r.d.clientSecret, publishableKey: r.d.publishableKey, email: r.d.email || "" }); return; }
+    if (r.d.clientSecret && r.d.publishableKey) { setCheckout({ clientSecret: r.d.clientSecret, publishableKey: r.d.publishableKey, email: r.d.email || "", price: r.d.price ?? 50 }); return; }
     if (r.d.url) { window.location.href = r.d.url; return; }
     alert("Abonneren mislukt.");
   };
-  const cancel = async () => { if (!window.confirm("Je abonnement opzeggen? Je houdt toegang tot het einde van de periode.")) return; setBusy(true); const r = await billingApi("/cancel", {}); setBusy(false); if (r.ok) load(); else alert(r.d.error || "Opzeggen mislukt."); };
+  const cancel = async () => { if (!window.confirm("Je abonnement opzeggen? Je houdt toegang tot het einde van de periode.")) return; setBusy("cancel"); const r = await billingApi("/cancel", {}); setBusy(""); if (r.ok) load(); else alert(r.d.error || "Opzeggen mislukt."); };
   const price = data?.priceEur ?? 50;
+  const plans: { id: string; name: string; price: number; tagline: string; highlight?: boolean; features: string[] }[] = data?.plans ?? [];
 
   // One dialog at a time: while the checkout is open it fully replaces the plan dialog instead of
   // stacking a popup on a popup. Closing the checkout falls back to the plan; success reloads it.
   if (checkout) {
-    return <CheckoutModal clientSecret={checkout.clientSecret} publishableKey={checkout.publishableKey} initialEmail={checkout.email || ""} price={price} onClose={() => setCheckout(null)} onDone={() => { setCheckout(null); load(); }} />;
+    return <CheckoutModal clientSecret={checkout.clientSecret} publishableKey={checkout.publishableKey} initialEmail={checkout.email || ""} price={checkout.price} onClose={() => setCheckout(null)} onDone={() => { setCheckout(null); load(); }} />;
   }
 
+  const showPlans = data && !data.subscribed;
   return (
     <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
-      <div className="w-[min(500px,96%)] max-h-[88vh] overflow-y-auto rounded-xl bg-background border shadow-2xl p-6" onClick={(e) => e.stopPropagation()}>
+      <div className={`${showPlans ? "w-[min(920px,97%)]" : "w-[min(500px,96%)]"} max-h-[90vh] overflow-y-auto rounded-2xl bg-background border shadow-2xl p-6` } onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4"><h3 className="text-lg font-semibold flex items-center gap-2"><CreditCard className="h-5 w-5" /> {t("Abonnement", "Subscription")}</h3><Button variant="ghost" size="icon" className="h-8 w-8" onClick={onClose}><X className="h-4 w-4" /></Button></div>
         {!data ? (<div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>) : data.subscribed ? (
           <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-5">
-            <div className="flex items-center gap-2 text-emerald-700 font-semibold"><Check className="h-4 w-4" /> {t("Actief abonnement", "Active subscription")} — €{price}{t("/maand", "/month")}</div>
+            <div className="flex items-center gap-2 text-emerald-700 font-semibold"><Check className="h-4 w-4" /> {t("Actief abonnement", "Active subscription")} — {data.plan ? `${data.plan[0].toUpperCase()}${data.plan.slice(1)} · ` : ""}€{price}{t("/maand", "/month")}</div>
             {data.currentPeriodEnd && <p className="text-xs text-emerald-700/80 mt-1">{t("Verlengt op", "Renews on")} {data.currentPeriodEnd}</p>}
             <p className="text-sm text-emerald-900/80 mt-2">{t("Je hebt volledige toegang: Claude Code instellen & bewerken, je eigen domein koppelen en publiceren zonder watermerk.", "You have full access: set up & edit with Claude Code, connect your own domain and publish without a watermark.")}</p>
-            <Button variant="outline" size="sm" className="mt-3 border-destructive/40 text-destructive hover:bg-destructive/10" disabled={busy} onClick={cancel}>{t("Opzeggen", "Cancel plan")}</Button>
+            <Button variant="outline" size="sm" className="mt-3 border-destructive/40 text-destructive hover:bg-destructive/10" disabled={!!busy} onClick={cancel}>{t("Opzeggen", "Cancel plan")}</Button>
           </div>
         ) : (
-          <div className="rounded-xl border p-5 text-center">
-            <h4 className="text-xl font-bold">{t("Volledige toegang", "Full access")}</h4>
-            <p className="text-4xl font-extrabold mt-1">€{price}<span className="text-base font-medium text-muted-foreground">{t("/maand", "/month")}</span></p>
-            <ul className="text-sm text-muted-foreground mt-4 space-y-1.5 text-left max-w-xs mx-auto">
-              <li className="flex gap-2"><Check className="h-4 w-4 text-primary shrink-0" /> {t("Je website bewerken met Claude Code", "Edit your website with Claude Code")}</li>
-              <li className="flex gap-2"><Check className="h-4 w-4 text-primary shrink-0" /> {t("Je eigen domein koppelen", "Connect your own domain")}</li>
-              <li className="flex gap-2"><Check className="h-4 w-4 text-primary shrink-0" /> {t("Geen watermerk op je site", "No watermark on your site")}</li>
-              <li className="flex gap-2"><Check className="h-4 w-4 text-primary shrink-0" /> {t("Auto-SEO en alle platformfuncties", "Auto-SEO and all platform features")}</li>
-            </ul>
-            <Button className="mt-5 w-full h-11 font-bold" disabled={busy} onClick={subscribe} data-testid="button-subscribe">{busy ? <Loader2 className="h-5 w-5 animate-spin" /> : t("Abonneren met iDEAL of creditcard", "Subscribe with iDEAL or credit card")}</Button>
-            <p className="text-[11px] text-muted-foreground mt-2">{t("Betalen gaat veilig via Stripe (iDEAL, creditcard). Je vult je naam en adres in voor de factuur. Maandelijks opzegbaar.", "Payments are handled securely by Stripe (iDEAL, credit card). You fill in your name and address for the invoice. Cancel monthly.")}</p>
-            <p className="text-[11px] text-muted-foreground mt-1">{t("Het bewerken zelf werkt op je eigen Claude-abonnement.", "Editing itself runs on your own Claude subscription.")}</p>
-            <button className="mt-3 text-xs text-muted-foreground underline hover:text-destructive" disabled={busy} onClick={cancel} data-testid="button-cancel-inline">{t("Al een abonnement? Opzeggen", "Already subscribed? Cancel")}</button>
+          <div>
+            <div className="text-center mb-6">
+              <h4 className="text-2xl font-bold">{t("Kies je abonnement", "Choose your plan")}</h4>
+              <p className="text-sm text-muted-foreground mt-1">{t("Maandelijks opzegbaar · veilig betalen met iDEAL of creditcard", "Cancel monthly · secure payment with iDEAL or credit card")}</p>
+            </div>
+            {/* Cheapest left → most expensive right; the highlighted middle plan is a slightly larger island. */}
+            <div className="flex flex-col md:flex-row md:items-stretch justify-center gap-4 md:gap-3">
+              {plans.map((p) => {
+                const isSel = selected === p.id;
+                const hi = !!p.highlight;
+                return (
+                  <div key={p.id} onClick={() => setSelected(p.id)}
+                    className={`relative text-left rounded-2xl border p-5 transition-all flex flex-col md:flex-1 cursor-pointer ${hi ? "md:-my-3 md:scale-[1.04] md:z-10 shadow-xl" : "shadow-sm"} ${isSel ? "border-primary ring-2 ring-primary/40 bg-primary/[0.03]" : "border-border hover:border-primary/50"}`}>
+                    {hi && <span className="absolute -top-2.5 left-1/2 -translate-x-1/2 text-[10px] font-bold uppercase tracking-wider bg-primary text-primary-foreground px-2.5 py-1 rounded-full">{t("Populair", "Popular")}</span>}
+                    <div className="flex items-center justify-between">
+                      <span className={`font-semibold ${hi ? "text-lg" : "text-base"}`}>{p.name}</span>
+                      {isSel && <Check className="h-4 w-4 text-primary" />}
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-0.5">{t(p.tagline, p.tagline)}</p>
+                    <p className={`font-extrabold mt-3 ${hi ? "text-4xl" : "text-3xl"}`}>€{p.price}<span className="text-sm font-medium text-muted-foreground">{t("/mnd", "/mo")}</span></p>
+                    <ul className="text-[13px] text-muted-foreground mt-3 space-y-1.5 flex-1">
+                      {p.features.map((f, i) => (<li key={i} className="flex gap-1.5"><Check className="h-3.5 w-3.5 text-primary shrink-0 mt-0.5" /> {t(f, f)}</li>))}
+                    </ul>
+                    <div onClick={(e) => { e.stopPropagation(); setSelected(p.id); subscribe(p.id); }}
+                      className={`mt-4 w-full rounded-xl font-bold text-center cursor-pointer transition-colors flex items-center justify-center ${hi ? "h-12 text-[15px]" : "h-10 text-sm"} ${isSel || hi ? "bg-primary text-primary-foreground hover:opacity-90" : "bg-secondary text-secondary-foreground hover:bg-secondary/80"}`}
+                      role="button" data-testid={`button-subscribe-${p.id}`}>
+                      {busy === p.id ? <Loader2 className="h-5 w-5 animate-spin" /> : t("Kies dit", "Choose")}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <p className="text-[11px] text-muted-foreground mt-5 text-center max-w-lg mx-auto">{t("Betalen gaat veilig via Stripe. Je vult je naam en adres in voor de factuur. Het bewerken zelf werkt op je eigen Claude-abonnement.", "Payments are handled securely by Stripe. You fill in your name and address for the invoice. Editing itself runs on your own Claude subscription.")}</p>
+            <div className="text-center mt-2"><button className="text-xs text-muted-foreground underline hover:text-destructive" disabled={!!busy} onClick={cancel} data-testid="button-cancel-inline">{t("Al een abonnement? Opzeggen", "Already subscribed? Cancel")}</button></div>
           </div>
         )}
       </div>

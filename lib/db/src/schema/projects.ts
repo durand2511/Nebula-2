@@ -15,6 +15,7 @@ export const platformUsers = pgTable("platform_users", {
   stripeCustomerId: text("stripe_customer_id").notNull().default(""),
   subscriptionId: text("subscription_id").notNull().default(""),
   subscriptionStatus: text("subscription_status").notNull().default("none"), // none | active | past_due | canceled
+  plan: text("plan").notNull().default("instap"),                             // instap | pro | premium
   currentPeriodEnd: text("current_period_end").notNull().default(""),         // yyyy-mm-dd
   aiCredit: real("ai_credit").notNull().default(0),                            // euros of AI budget left
   // Claude Code-koppeling: the user's own Claude login (OAuth credential files), encrypted JSON blob.
@@ -49,6 +50,11 @@ export const projects = pgTable("projects", {
   // Opt-in lead capture: when set to an e-mail address, the published site shows a floating
   // "contact / laat je nummer achter" widget and submissions are mailed here (platform SMTP).
   leadEmail: text("lead_email").notNull().default(""),
+  // Opt-in exit-intent conversion pop-up (JSON: {enabled,title,body,button,code}). "" = off.
+  exitPopup: text("exit_popup").notNull().default(""),
+  // Bundled site features as JSON: { welcomeBack:{enabled,message}, newsletter:{enabled,title,text},
+  // abTest:{enabled,label,selector,variant}, brandKit:{primary,accent,font,logoUrl} }. "" = all defaults.
+  siteConfig: text("site_config").notNull().default(""),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
@@ -441,6 +447,47 @@ export const importAssets = pgTable("import_assets", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 }, (t) => ({ byProjPath: uniqueIndex("import_assets_proj_path").on(t.projectId, t.path) }));
 
+// First-party, privacy-friendly visitor analytics for a published site. One row per pageview
+// (no cookies, no PII — the visitor id is a random token in the visitor's own localStorage).
+// The tracking beacon updates `durationMs` on page-leave, keyed by `eventId`.
+export const analyticsEvents = pgTable("analytics_events", {
+  id: serial("id").primaryKey(),
+  projectId: integer("project_id").notNull(),   // no FK: keep raw stats even if a project is recreated
+  eventId: text("event_id").notNull(),          // client-generated per pageview (for the leave-update)
+  visitorId: text("visitor_id").notNull().default(""),
+  path: text("path").notNull().default("/"),
+  referrer: text("referrer").notNull().default(""),
+  referrerHost: text("referrer_host").notNull().default(""), // "" = direct
+  device: text("device").notNull().default("desktop"),       // mobile | tablet | desktop
+  screenW: integer("screen_w").notNull().default(0),
+  screenH: integer("screen_h").notNull().default(0),
+  language: text("language").notNull().default(""),
+  durationMs: integer("duration_ms").notNull().default(0),
+  goal: text("goal").notNull().default(""),   // "" = normal pageview; else a conversion name (e.g. "boeking")
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => ({
+  byProj: index("analytics_proj_time").on(t.projectId, t.createdAt),
+  byEvent: uniqueIndex("analytics_event_id").on(t.eventId),
+}));
+
+// Newsletter sign-ups collected by the injected subscribe widget (privacy-friendly, opt-in).
+export const newsletterSubscribers = pgTable("newsletter_subscribers", {
+  id: serial("id").primaryKey(),
+  projectId: integer("project_id").notNull(),   // no FK: keep the list even if a project is recreated
+  email: text("email").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => ({ byProjEmail: uniqueIndex("newsletter_proj_email").on(t.projectId, t.email) }));
+
+// Click positions for the visitor heat-map (normalised 0..1000 so it's resolution-independent).
+export const clickEvents = pgTable("click_events", {
+  id: serial("id").primaryKey(),
+  projectId: integer("project_id").notNull(),
+  path: text("path").notNull().default("/"),
+  xPct: integer("x_pct").notNull().default(0),   // 0..1000 (‰ of page width)
+  yPct: integer("y_pct").notNull().default(0),   // 0..1000 (‰ of document height)
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => ({ byProjPath: index("click_proj_path").on(t.projectId, t.path) }));
+
 // Per-studio toggles. Additive: a missing row means all defaults (everything off).
 export const studioSettings = pgTable("studio_settings", {
   projectId: integer("project_id").primaryKey().references(() => projects.id, { onDelete: "cascade" }),
@@ -721,3 +768,6 @@ export type SitePublish = typeof sitePublishes.$inferSelect;
 export type PlatformUser = typeof platformUsers.$inferSelect;
 export type PlatformSession = typeof platformSessions.$inferSelect;
 export type PlatformAiUsage = typeof platformAiUsage.$inferSelect;
+export type AnalyticsEvent = typeof analyticsEvents.$inferSelect;
+export type NewsletterSubscriber = typeof newsletterSubscribers.$inferSelect;
+export type ClickEvent = typeof clickEvents.$inferSelect;

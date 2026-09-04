@@ -7,7 +7,23 @@ import { db, platformUsers, platformAiUsage, projects, type PlatformUser } from 
 import { eq, sql, desc } from "drizzle-orm";
 import { logger } from "./logger";
 
-export const SUBSCRIPTION_PRICE_EUR = 50;
+export const SUBSCRIPTION_PRICE_EUR = 50; // default / legacy (= the Instap plan)
+
+// Three subscription tiers. Cheapest → most expensive. `features` are the short bullet points shown
+// on the pricing cards; access itself stays "active subscription = full access" for now (the tier
+// mainly sets the price + what we promise), so upgrading is friction-free.
+export type PlanId = "instap" | "pro" | "premium";
+export const PLANS: { id: PlanId; name: string; price: number; tagline: string; highlight?: boolean; features: string[] }[] = [
+  { id: "instap", name: "Instap", price: 50, tagline: "Alles om online te gaan",
+    features: ["Website bewerken met Claude Code", "Online boekingssysteem", "Basis-SEO & eigen domein", "Publiceren zonder watermerk"] },
+  { id: "pro", name: "Pro", price: 80, tagline: "Groeien met inzicht", highlight: true,
+    features: ["Alles van Instap", "Bezoekers-statistieken & live online", "Klik-heatmap & conversie-tools", "Google-posities (Search Console)"] },
+  { id: "premium", name: "Premium", price: 140, tagline: "Alles eruit halen",
+    features: ["Alles van Pro", "A/B-testen", "Automatisering & meertalige site", "Voorrang bij support"] },
+];
+export function planById(id: string | null | undefined): { id: PlanId; name: string; price: number } {
+  return PLANS.find((p) => p.id === id) || PLANS[0];
+}
 export const MONTHLY_AI_CREDIT_EUR = 7.5;     // included each billing month
 export const AI_MARKUP = 2;                   // charge 100% on top of cost (×2)
 const EUR_PER_USD = 0.92;

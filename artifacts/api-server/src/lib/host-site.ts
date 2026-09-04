@@ -27,6 +27,94 @@ async function ownerSubscribed(projectId: number): Promise<boolean> {
 // Opt-in lead-capture widget (shown when the project has a leadEmail). A small fixed button opens a
 // compact form (naam/telefoon/e-mail/bericht) that POSTs to /api/projects/:id/lead → mailed to the
 // site owner. Self-contained (own CSS/JS), neutral styling that sits calmly on any site.
+// Tiny first-party analytics beacon (no cookies, no PII). Records a pageview on load and updates its
+// duration on page-leave via sendBeacon. The visitor id is a random token in the visitor's own storage.
+function analyticsBeacon(projectId: number): string {
+  return `<script>(function(){try{
+var PID=${projectId};
+function vid(){try{var k='nb_vid',v=localStorage.getItem(k);if(!v){v=(Date.now().toString(36)+Math.random().toString(36).slice(2,10));localStorage.setItem(k,v);}return v;}catch(e){return 'anon';}}
+var W=screen.width||0,dev=W<=640?'mobile':(W<=1024?'tablet':'desktop');
+var eid=Date.now().toString(36)+Math.random().toString(36).slice(2,10);
+var t0=Date.now();
+var base={pid:PID,vid:vid(),dev:dev,dw:W,dh:screen.height||0,lang:(navigator.language||'')};
+function post(extra){try{var b=JSON.stringify(Object.assign({},base,extra||{}));if(navigator.sendBeacon){navigator.sendBeacon('/api/track',new Blob([b],{type:'application/json'}));}else{fetch('/api/track',{method:'POST',headers:{'Content-Type':'application/json'},body:b,keepalive:true});}}catch(e){}}
+post({eid:eid,path:location.pathname||'/',ref:document.referrer||''});
+var sent=false;
+function leave(){if(sent)return;sent=true;post({eid:eid,dur:Date.now()-t0});}
+addEventListener('pagehide',leave);addEventListener('beforeunload',leave);
+document.addEventListener('visibilitychange',function(){if(document.visibilityState==='hidden')leave();else hb();});
+// Heartbeat so a visitor reading one page still counts as "online now" (presence only, no pageview).
+function hb(){post({ping:1});}
+var hbTimer=setInterval(function(){if(document.visibilityState!=='hidden')hb();},45000);
+addEventListener('pagehide',function(){clearInterval(hbTimer);});
+// Conversion helper for the site's own buttons: window.nbGoal('boeking'). Includes the A/B variant.
+window.nbGoal=function(name){var g=String(name||'doel').slice(0,40);if(window.__nbVar)g=g+' ['+window.__nbVar+']';post({eid:'g'+Date.now().toString(36)+Math.random().toString(36).slice(2,8),path:location.pathname||'/',goal:g});};
+// Click heat-map: record where people click (normalised 0..1000 of the document), throttled.
+var lastClick=0;
+document.addEventListener('click',function(e){var now=Date.now();if(now-lastClick<120)return;lastClick=now;try{
+var dw=Math.max(document.documentElement.scrollWidth,1),dh=Math.max(document.documentElement.scrollHeight,1);
+var x=Math.round(((e.pageX||0)/dw)*1000),y=Math.round(((e.pageY||0)/dh)*1000);
+if(x<0||x>1000||y<0||y>1000)return;
+var b=JSON.stringify({pid:PID,path:location.pathname||'/',x:x,y:y});
+if(navigator.sendBeacon){navigator.sendBeacon('/api/track-click',new Blob([b],{type:'application/json'}));}else{fetch('/api/track-click',{method:'POST',headers:{'Content-Type':'application/json'},body:b,keepalive:true});}
+}catch(err){}},true);
+}catch(e){}})();</script>`;
+}
+
+// Exit-intent conversion pop-up: shows once per visitor when they move to leave (desktop: mouse to
+// the top; mobile: fast scroll up after a while). Fires nbGoal('exit-aanbod') so it shows up in
+// conversions. Config comes from the project's exitPopup JSON. Self-contained, no cookies (localStorage).
+type ExitCfg = { enabled?: boolean; title?: string; body?: string; button?: string; code?: string };
+function exitPopupWidget(cfg: ExitCfg): string {
+  const esc = (s: string) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c] as string));
+  const title = esc(cfg.title || "Wacht — mis dit niet!");
+  const body = esc(cfg.body || "Boek nu je gratis proefles.");
+  const button = esc(cfg.button || "Ja, ik wil dit");
+  const code = esc(cfg.code || "");
+  return `<div id="nb-exit" style="display:none;position:fixed;inset:0;z-index:2147483200;background:rgba(15,23,42,.55);align-items:center;justify-content:center;padding:20px;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif"><div style="background:#fff;color:#1f2937;max-width:420px;width:100%;border-radius:20px;box-shadow:0 30px 80px rgba(0,0,0,.35);padding:30px 28px;text-align:center;position:relative"><button id="nb-exit-x" aria-label="Sluiten" style="position:absolute;top:12px;right:16px;border:none;background:none;font-size:22px;color:#9aa1aa;cursor:pointer">&times;</button><h3 style="margin:0 0 10px;font-size:23px">${title}</h3><p style="margin:0 0 18px;font-size:15px;color:#4b5563;line-height:1.5">${body}</p>${code ? `<div style="margin:0 0 18px;font-size:14px">Gebruik code <b style="background:#f1f5f9;padding:4px 10px;border-radius:8px;letter-spacing:.05em">${code}</b></div>` : ""}<button id="nb-exit-cta" style="width:100%;background:#1f2937;color:#fff;border:none;border-radius:12px;padding:14px;font-size:15px;font-weight:600;cursor:pointer">${button}</button></div></div>
+<script>(function(){try{var K='nb_exit_seen';if(localStorage.getItem(K))return;var el=document.getElementById('nb-exit');if(!el)return;var shown=false;function show(){if(shown)return;shown=true;try{localStorage.setItem(K,'1');}catch(e){}el.style.display='flex';try{if(window.nbGoal)window.nbGoal('exit-popup-getoond');}catch(e){}}
+function hide(){el.style.display='none';}
+document.getElementById('nb-exit-x').onclick=hide;el.onclick=function(e){if(e.target===el)hide();};
+document.getElementById('nb-exit-cta').onclick=function(){try{if(window.nbGoal)window.nbGoal('exit-aanbod');}catch(e){}hide();var f=document.getElementById('nb-lead');if(f){f.classList.add('open');f.scrollIntoView&&f.scrollIntoView();}};
+// desktop: cursor leaves via the top. mobile: quick upward scroll after 8s.
+document.addEventListener('mouseout',function(e){if(!e.relatedTarget&&e.clientY<=0)show();});
+var ready=false;setTimeout(function(){ready=true;},8000);var ly=window.scrollY;
+addEventListener('scroll',function(){var y=window.scrollY;if(ready&&y<ly-40&&y<200)show();ly=y;},{passive:true});
+}catch(e){}})();</script>`;
+}
+
+// Bundled site-feature config (stored as JSON on projects.siteConfig).
+type SiteConfig = {
+  welcomeBack?: { enabled?: boolean; message?: string };
+  newsletter?: { enabled?: boolean; title?: string; text?: string };
+  abTest?: { enabled?: boolean; label?: string; selector?: string; variant?: string };
+};
+const escHtml = (s: string) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c] as string));
+const escJs = (s: string) => JSON.stringify(String(s ?? ""));
+
+// "Welcome back" banner for returning visitors (detected via the analytics visitor-id in localStorage).
+function welcomeBackWidget(cfg: NonNullable<SiteConfig["welcomeBack"]>): string {
+  const msg = escHtml(cfg.message || "Welkom terug! Leuk dat je er weer bent 👋");
+  return `<div id="nb-wb" style="display:none;position:fixed;left:50%;transform:translateX(-50%);bottom:22px;z-index:2147483100;background:#1f2937;color:#fff;padding:12px 18px;border-radius:999px;font:500 14px/1 system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;box-shadow:0 10px 40px rgba(0,0,0,.3)">${msg}<button aria-label="Sluiten" onclick="this.parentNode.style.display='none'" style="background:none;border:none;color:#cbd5e1;margin-left:12px;font-size:16px;cursor:pointer">&times;</button></div>
+<script>(function(){try{var K='nb_vid',seen='nb_wb_shown';if(!localStorage.getItem(K)||sessionStorage.getItem(seen))return;setTimeout(function(){var el=document.getElementById('nb-wb');if(el){el.style.display='block';try{sessionStorage.setItem(seen,'1');}catch(e){}setTimeout(function(){el.style.display='none';},7000);}},1500);}catch(e){}})();</script>`;
+}
+
+// Inline newsletter sign-up bar, posts to the public subscribe endpoint.
+function newsletterWidget(projectId: number, cfg: NonNullable<SiteConfig["newsletter"]>): string {
+  const title = escHtml(cfg.title || "Blijf op de hoogte");
+  const text = escHtml(cfg.text || "Meld je aan voor nieuws en aanbiedingen.");
+  return `<div id="nb-nl" style="max-width:560px;margin:32px auto;padding:22px 24px;background:#f8fafc;border:1px solid #e6e8ec;border-radius:16px;text-align:center;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif"><h3 style="margin:0 0 4px;font-size:19px;color:#1f2937">${title}</h3><p style="margin:0 0 14px;font-size:14px;color:#6b7280">${text}</p><div style="display:flex;gap:8px;max-width:400px;margin:0 auto"><input id="nb-nl-email" type="email" placeholder="jouw@email.nl" style="flex:1;border:1px solid #d7dbe0;border-radius:10px;padding:11px 13px;font-size:14px"><button id="nb-nl-btn" style="background:#1f2937;color:#fff;border:none;border-radius:10px;padding:11px 18px;font-size:14px;font-weight:600;cursor:pointer">Aanmelden</button></div><div id="nb-nl-msg" style="font-size:13px;margin-top:10px;min-height:16px"></div></div>
+<script>(function(){var b=document.getElementById('nb-nl-btn'),i=document.getElementById('nb-nl-email'),m=document.getElementById('nb-nl-msg');if(!b)return;b.onclick=function(){var e=(i.value||'').trim();if(!/^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/.test(e)){m.style.color='#c0392b';m.textContent='Vul een geldig e-mailadres in.';return;}b.disabled=true;fetch('/api/subscribe',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pid:${projectId},email:e})}).then(function(r){return r.json();}).then(function(){m.style.color='#0f7a4d';m.textContent='Bedankt! Je bent aangemeld.';try{if(window.nbGoal)window.nbGoal('nieuwsbrief');}catch(x){}document.getElementById('nb-nl-email').style.display='none';b.style.display='none';}).catch(function(){m.style.color='#c0392b';m.textContent='Aanmelden mislukt. Probeer later opnieuw.';b.disabled=false;});};})();</script>`;
+}
+
+// A/B test: randomly assign a variant, swap one element's text for variant B, expose window.__nbVar
+// so conversions get tagged with the variant. MUST be injected before the analytics beacon.
+function abTestScript(cfg: NonNullable<SiteConfig["abTest"]>): string {
+  const selector = escJs(cfg.selector || "");
+  const variant = escJs(cfg.variant || "");
+  return `<script>(function(){try{if(!${selector})return;var K='nb_ab',v=localStorage.getItem(K);if(v!=='A'&&v!=='B'){v=Math.random()<0.5?'A':'B';try{localStorage.setItem(K,v);}catch(e){}}window.__nbVar=v;if(v==='B'){var run=function(){try{var el=document.querySelector(${selector});if(el&&${variant})el.textContent=${variant};}catch(e){}};if(document.readyState!=='loading')run();else document.addEventListener('DOMContentLoaded',run);}}catch(e){}})();</script>`;
+}
+
 function leadWidget(projectId: number): string {
   return `<div id="nb-lead" data-pid="${projectId}"><style>
 #nb-lead{--nb:#1f2937;position:fixed;right:20px;bottom:20px;z-index:2147483000;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif}
@@ -68,7 +156,7 @@ if(digits.length<6&&!okmail){show('Vul je telefoonnummer of e-mailadres in.');re
 show('');send.disabled=true;send.textContent='Versturen…';
 fetch('/api/projects/'+pid+'/lead',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:document.getElementById('nb-lead-name').value.trim(),phone:phone,email:email,message:document.getElementById('nb-lead-msg').value.trim(),page:location.href})})
 .then(function(r){return r.json().catch(function(){return{};}).then(function(d){return{ok:r.ok,d:d};});})
-.then(function(x){if(x.ok){document.getElementById('nb-lead-form').innerHTML='<div class=\\'nb-done\\'>Bedankt! We nemen snel contact met je op.</div>';}else{show((x.d&&x.d.error)||'Versturen mislukt. Probeer het later opnieuw.');send.disabled=false;send.textContent='Versturen';}})
+.then(function(x){if(x.ok){try{if(window.nbGoal)window.nbGoal('contactaanvraag');}catch(e){}document.getElementById('nb-lead-form').innerHTML='<div class=\\'nb-done\\'>Bedankt! We nemen snel contact met je op.</div>';}else{show((x.d&&x.d.error)||'Versturen mislukt. Probeer het later opnieuw.');send.disabled=false;send.textContent='Versturen';}})
 .catch(function(){show('Versturen mislukt. Probeer het later opnieuw.');send.disabled=false;send.textContent='Versturen';});
 });})();</script></div>`;
 }
@@ -397,19 +485,28 @@ export async function serveProjectSite(projectId: number, req: Request, res: Res
     if (!isBookingApp && rows.some((r) => r.path === "booking-app.html") && showBookButtonOn(file.path, rows.find((r) => r.path === ".nebula-book-scope")?.content)) {
       content = /<\/body>/i.test(content) ? content.replace(/<\/body>/i, BOOK_FLOAT_BUTTON + "</body>") : content + BOOK_FLOAT_BUTTON;
     }
-    // Opt-in lead-capture widget when the project has a leadEmail set (not on the booking-app page).
+    // Opt-in growth widgets (not on the booking-app page): lead capture, exit pop-up, A/B test,
+    // welcome-back banner, newsletter sign-up.
     if (!isBookingApp) {
-      const [prj] = await db.select({ leadEmail: projects.leadEmail }).from(projects).where(eq(projects.id, projectId));
-      if (prj?.leadEmail) {
-        const w = leadWidget(projectId);
-        content = /<\/body>/i.test(content) ? content.replace(/<\/body>/i, w + "</body>") : content + w;
-      }
+      const [prj] = await db.select({ leadEmail: projects.leadEmail, exitPopup: projects.exitPopup, siteConfig: projects.siteConfig }).from(projects).where(eq(projects.id, projectId));
+      const inject = (w: string) => { content = /<\/body>/i.test(content) ? content.replace(/<\/body>/i, w + "</body>") : content + w; };
+      let sc: SiteConfig = {};
+      try { sc = prj?.siteConfig ? JSON.parse(prj.siteConfig) as SiteConfig : {}; } catch { /* ignore */ }
+      // A/B first so window.__nbVar is set before the beacon.
+      if (sc.abTest?.enabled && sc.abTest.selector) inject(abTestScript(sc.abTest));
+      if (prj?.leadEmail) inject(leadWidget(projectId));
+      if (prj?.exitPopup) { try { const cfg = JSON.parse(prj.exitPopup) as ExitCfg; if (cfg?.enabled) inject(exitPopupWidget(cfg)); } catch { /* skip */ } }
+      if (sc.welcomeBack?.enabled) inject(welcomeBackWidget(sc.welcomeBack));
+      if (sc.newsletter?.enabled) inject(newsletterWidget(projectId, sc.newsletter));
     }
     // Free (unsubscribed) sites carry a big non-removable Nebula watermark + a clickable corner badge.
     if (!(await ownerSubscribed(projectId))) {
       const mark = NEBULA_WATERMARK + NEBULA_BADGE;
       content = /<\/body>/i.test(content) ? content.replace(/<\/body>/i, mark + "</body>") : content + mark;
     }
+    // Visitor analytics beacon on every hosted page (booking-app included) — counts real traffic.
+    const beacon = analyticsBeacon(projectId);
+    content = /<\/body>/i.test(content) ? content.replace(/<\/body>/i, beacon + "</body>") : content + beacon;
   }
   res.send(content);
 }

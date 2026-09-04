@@ -17,6 +17,7 @@ import {
   ChevronLeft,
   Code2,
   MonitorPlay,
+  Gauge,
   FolderOpen,
   File as FileIcon,
   RefreshCw,
@@ -62,6 +63,7 @@ import {
   type AttachedImage,
 } from "@/lib/image";
 import { useLang } from "@/lib/i18n";
+import { SeoPanel } from "@/components/seo-panel";
 
 type ProjectFile = { id: number; path: string; content: string; language: string };
 
@@ -1179,7 +1181,7 @@ export function ProjectWorkspace() {
 
   const [prompt, setPrompt] = useState("");
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"code" | "preview">("preview");
+  const [activeTab, setActiveTab] = useState<"code" | "preview" | "seo">("preview");
   const [isDownloading, setIsDownloading] = useState(false);
   // Setup instructions stay reachable (collapsible), not just before the first message.
   const [showHelp, setShowHelp] = useState(true);
@@ -2691,6 +2693,13 @@ export function ProjectWorkspace() {
     else window.alert(t("Koppel eerst Claude Code — log in de terminal links in.", "Connect Claude Code first — log in in the terminal on the left."));
   };
 
+  // SEO panel → send a fix instruction into the Claude terminal (returns whether it was delivered).
+  const sendSeoFix = (prompt: string): boolean => {
+    const sent = termHandleRef.current?.send(prompt.trim() + "\r");
+    if (!sent) window.alert(t("Koppel eerst Claude Code — log in de terminal links in.", "Connect Claude Code first — log in in the terminal on the left."));
+    return !!sent;
+  };
+
   // Computed from streamedText — handles FILE: and PATCH: blocks interleaved with narration text.
   const streamSegments = useMemo(() => parseStreamSegments(streamedText), [streamedText]);
 
@@ -2976,7 +2985,7 @@ export function ProjectWorkspace() {
         <div className="flex-1 flex flex-col min-w-0 min-h-0 bg-background">
           <Tabs
             value={activeTab}
-            onValueChange={(v) => setActiveTab(v as "code" | "preview")}
+            onValueChange={(v) => setActiveTab(v as "code" | "preview" | "seo")}
             className="flex-1 flex flex-col min-h-0"
           >
             <div className="h-12 border-b border-border bg-card/50 flex items-center px-4 shrink-0">
@@ -3001,6 +3010,13 @@ export function ProjectWorkspace() {
                       {changedFilePaths.size}
                     </span>
                   )}
+                </TabsTrigger>
+                <TabsTrigger
+                  value="seo"
+                  className="data-[state=active]:bg-transparent data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:shadow-none rounded-none px-2 py-3 h-12 text-muted-foreground data-[state=active]:text-foreground"
+                >
+                  <Gauge className="h-4 w-4 mr-2" />
+                  {t("SEO & Statistieken", "SEO & Stats")}
                 </TabsTrigger>
               </TabsList>
 
@@ -3683,6 +3699,11 @@ export function ProjectWorkspace() {
                   </p>
                 </div>
               )}
+            </TabsContent>
+
+            {/* SEO & Statistieken Tab — full-screen audit + visitor analytics */}
+            <TabsContent value="seo" className="flex-1 flex flex-col min-h-0 overflow-hidden m-0 border-none p-0 outline-none">
+              {activeTab === "seo" && <SeoPanel projectId={projectId} onFix={sendSeoFix} />}
             </TabsContent>
           </Tabs>
         </div>

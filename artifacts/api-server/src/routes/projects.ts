@@ -16,8 +16,12 @@ import { runAgentEdit } from "../lib/agent-editor.js";
 import { unlazyImages, RENDER_FIX_STYLE, NEBULA_RESTYLE_PATH, BOOK_FLOAT_BUTTON, showBookButtonOn, TICKER_SCRIPT } from "../lib/host-site.js";
 import { smtpConfigFromEnv, sendMail } from "../lib/smtp.js";
 import { resolvePublishedDomain } from "../lib/seo.js";
+import { runAudit, compareCompetitor, type AuditKind } from "../lib/seo-audit.js";
+import { track as trackVisit, summary as analyticsSummary, liveVisitors } from "../lib/analytics.js";
+import { getSearchPositions } from "../lib/gsc.js";
 import { createBackup, backupStatus, restoreBackup, restoreAsNewProject, deleteBackup } from "../lib/project-backups.js";
 import { projectBackups } from "@workspace/db";
+import { clickEvents, newsletterSubscribers } from "@workspace/db";
 import {
   CreateProjectBody,
   GetProjectParams,
@@ -3803,6 +3807,174 @@ router.delete("/backups/:backupId", async (req, res) => {
   if (!u) { res.status(401).json({ error: "Niet ingelogd." }); return; }
   try { res.json({ ok: await deleteBackup(backupId, u.id) }); }
   catch (err) { req.log.error({ err }, "[backups] delete failed"); res.status(500).json({ error: "Verwijderen mislukt." }); }
+});
+
+// Native site-health audit (kind = seo | a11y | speed) of the project's own pages (owner-only).
+router.get("/projects/:projectId/seo-audit", async (req, res) => {
+  const projectId = Number(req.params.projectId);
+  if (isNaN(projectId)) { res.status(400).json({ error: "Invalid project ID" }); return; }
+  if (!(await requireOwner(req, res, projectId))) return;
+  const kindRaw = String(req.query.kind || "seo");
+  const kind: AuditKind = kindRaw === "a11y" || kindRaw === "speed" ? kindRaw : "seo";
+  try { res.json(await runAudit(projectId, kind)); }
+  catch (err) { req.log.error({ err }, "[seo-audit] failed"); res.status(500).json({ error: "Audit mislukt." }); }
+});
+
+// Compare your homepage's on-page SEO against a competitor URL (owner-only). One plain GET, best-effort.
+router.get("/projects/:projectId/competitor", async (req, res) => {
+  const projectId = Number(req.params.projectId);
+  if (isNaN(projectId)) { res.status(400).json({ error: "Invalid project ID" }); return; }
+  if (!(await requireOwner(req, res, projectId))) return;
+  const url = String(req.query.url || "").trim();
+  if (!url) { res.status(400).json({ ok: false, error: "Geef een URL op." }); return; }
+  try { res.json(await compareCompetitor(projectId, url)); }
+  catch (err) { req.log.error({ err }, "[competitor] failed"); res.status(500).json({ ok: false, error: "Vergelijking mislukt." }); }
+});
+
+// PUBLIC visitor beacon — called by the tracking script on published sites (no auth, no digits in
+// the path so it stays outside the owner-guard). Always answers fast; never throws to the visitor.
+router.post("/track", async (req, res) => {
+  res.status(204).end();
+  try {
+    const b = req.body || {};
+    const selfHost = String(req.headers["host"] || "").replace(/^www\./, "").split(":")[0];
+    await trackVisit({
+      projectId: Number(b.pid), eventId: String(b.eid || ""), visitorId: String(b.vid || ""),
+      path: String(b.path || "/"), referrer: String(b.ref || ""), device: String(b.dev || ""),
+      screenW: Number(b.dw), screenH: Number(b.dh), language: String(b.lang || ""), durationMs: Number(b.dur),
+      goal: String(b.goal || ""), ping: !!b.ping,
+    }, selfHost);
+  } catch (err) { req.log?.warn?.({ err }, "[track] failed"); }
+});
+
+// PUBLIC heat-map click beacon (no digits in the path → outside the owner-guard). Fire-and-forget.
+router.post("/track-click", async (req, res) => {
+  res.status(204).end();
+  try {
+    const b = req.body || {};
+    const pid = Number(b.pid); const x = Math.round(Number(b.x)); const y = Math.round(Number(b.y));
+    if (!Number.isInteger(pid) || !Number.isFinite(x) || !Number.isFinite(y)) return;
+    if (x < 0 || x > 1000 || y < 0 || y > 1000) return;
+    await db.insert(clickEvents).values({ projectId: pid, path: String(b.path || "/").slice(0, 500), xPct: x, yPct: y });
+  } catch (err) { req.log?.warn?.({ err }, "[track-click] failed"); }
+});
+
+// PUBLIC newsletter subscribe (pid in body, no digits in path → outside the owner-guard).
+router.post("/subscribe", async (req, res) => {
+  try {
+    const b = req.body || {};
+    const pid = Number(b.pid);
+    const email = String(b.email || "").trim().toLowerCase();
+    if (!Number.isInteger(pid) || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) || email.length > 200) { res.status(400).json({ ok: false }); return; }
+    await db.insert(newsletterSubscribers).values({ projectId: pid, email }).onConflictDoNothing();
+    res.json({ ok: true });
+  } catch (err) { req.log?.warn?.({ err }, "[subscribe] failed"); res.status(500).json({ ok: false }); }
+});
+
+// Owner dashboard: aggregated visitor stats for a project.
+router.get("/projects/:projectId/analytics", async (req, res) => {
+  const projectId = Number(req.params.projectId);
+  if (isNaN(projectId)) { res.status(400).json({ error: "Invalid project ID" }); return; }
+  if (!(await requireOwner(req, res, projectId))) return;
+  try { res.json(await analyticsSummary(projectId, Number(req.query.days) || 30)); }
+  catch (err) { req.log.error({ err }, "[analytics] failed"); res.status(500).json({ error: "Statistieken mislukt." }); }
+});
+
+// Lightweight "who is online right now" counter (owner-only), for fast polling.
+router.get("/projects/:projectId/analytics/live", async (req, res) => {
+  const projectId = Number(req.params.projectId);
+  if (isNaN(projectId)) { res.status(400).json({ error: "Invalid project ID" }); return; }
+  if (!(await requireOwner(req, res, projectId))) return;
+  res.json({ online: liveVisitors(projectId) });
+});
+
+// Real Google positions from Search Console (owner-only). Uses the existing GSC OAuth coupling.
+router.get("/projects/:projectId/gsc/positions", async (req, res) => {
+  const projectId = Number(req.params.projectId);
+  if (isNaN(projectId)) { res.status(400).json({ error: "Invalid project ID" }); return; }
+  if (!(await requireOwner(req, res, projectId))) return;
+  try { res.json(await getSearchPositions(projectId, Number(req.query.days) || 28)); }
+  catch (err) { req.log.error({ err }, "[gsc-positions] failed"); res.status(500).json({ ok: false, detail: "Ophalen mislukt.", rows: [], totals: { clicks: 0, impressions: 0, position: 0 } }); }
+});
+
+// Exit-intent conversion pop-up config (owner-only). Stored as JSON on the project.
+router.get("/projects/:projectId/exit-popup", async (req, res) => {
+  const projectId = Number(req.params.projectId);
+  if (isNaN(projectId)) { res.status(400).json({ error: "Invalid project ID" }); return; }
+  if (!(await requireOwner(req, res, projectId))) return;
+  const [prj] = await db.select({ exitPopup: projects.exitPopup }).from(projects).where(eq(projects.id, projectId));
+  let cfg = {}; try { cfg = prj?.exitPopup ? JSON.parse(prj.exitPopup) : {}; } catch { /* ignore */ }
+  res.json(cfg);
+});
+router.put("/projects/:projectId/exit-popup", async (req, res) => {
+  const projectId = Number(req.params.projectId);
+  if (isNaN(projectId)) { res.status(400).json({ error: "Invalid project ID" }); return; }
+  if (!(await requireOwner(req, res, projectId))) return;
+  const b = req.body || {};
+  const cfg = {
+    enabled: !!b.enabled,
+    title: String(b.title || "").slice(0, 120),
+    body: String(b.body || "").slice(0, 300),
+    button: String(b.button || "").slice(0, 60),
+    code: String(b.code || "").slice(0, 40),
+  };
+  await db.update(projects).set({ exitPopup: JSON.stringify(cfg), updatedAt: new Date() }).where(eq(projects.id, projectId));
+  res.json({ ok: true, ...cfg });
+});
+
+// Bundled site-feature config (welcome-back, newsletter, A/B, brand kit) — owner-only.
+router.get("/projects/:projectId/site-config", async (req, res) => {
+  const projectId = Number(req.params.projectId);
+  if (isNaN(projectId)) { res.status(400).json({ error: "Invalid project ID" }); return; }
+  if (!(await requireOwner(req, res, projectId))) return;
+  const [prj] = await db.select({ siteConfig: projects.siteConfig }).from(projects).where(eq(projects.id, projectId));
+  let cfg = {}; try { cfg = prj?.siteConfig ? JSON.parse(prj.siteConfig) : {}; } catch { /* ignore */ }
+  res.json(cfg);
+});
+router.put("/projects/:projectId/site-config", async (req, res) => {
+  const projectId = Number(req.params.projectId);
+  if (isNaN(projectId)) { res.status(400).json({ error: "Invalid project ID" }); return; }
+  if (!(await requireOwner(req, res, projectId))) return;
+  const b = req.body || {};
+  const s = (v: unknown, n: number) => String(v ?? "").slice(0, n);
+  const [prj] = await db.select({ siteConfig: projects.siteConfig }).from(projects).where(eq(projects.id, projectId));
+  let cur: Record<string, unknown> = {}; try { cur = prj?.siteConfig ? JSON.parse(prj.siteConfig) : {}; } catch { /* ignore */ }
+  // Merge: only overwrite the sections present in the request body, keep the rest.
+  if (b.welcomeBack) cur.welcomeBack = { enabled: !!b.welcomeBack.enabled, message: s(b.welcomeBack.message, 160) };
+  if (b.newsletter) cur.newsletter = { enabled: !!b.newsletter.enabled, title: s(b.newsletter.title, 120), text: s(b.newsletter.text, 240) };
+  if (b.abTest) cur.abTest = { enabled: !!b.abTest.enabled, label: s(b.abTest.label, 80), selector: s(b.abTest.selector, 200), variant: s(b.abTest.variant, 300) };
+  if (b.brandKit) cur.brandKit = { primary: s(b.brandKit.primary, 20), accent: s(b.brandKit.accent, 20), font: s(b.brandKit.font, 60), logoUrl: s(b.brandKit.logoUrl, 500) };
+  await db.update(projects).set({ siteConfig: JSON.stringify(cur), updatedAt: new Date() }).where(eq(projects.id, projectId));
+  res.json({ ok: true, ...cur });
+});
+
+// Newsletter subscriber list + CSV export (owner-only).
+router.get("/projects/:projectId/subscribers", async (req, res) => {
+  const projectId = Number(req.params.projectId);
+  if (isNaN(projectId)) { res.status(400).json({ error: "Invalid project ID" }); return; }
+  if (!(await requireOwner(req, res, projectId))) return;
+  const rows = await db.select({ email: newsletterSubscribers.email, createdAt: newsletterSubscribers.createdAt })
+    .from(newsletterSubscribers).where(eq(newsletterSubscribers.projectId, projectId)).orderBy(desc(newsletterSubscribers.createdAt)).limit(2000);
+  if (String(req.query.format) === "csv") {
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="nieuwsbrief-${projectId}.csv"`);
+    res.send("email,aangemeld\n" + rows.map((r) => `${r.email},${new Date(r.createdAt).toISOString()}`).join("\n"));
+    return;
+  }
+  res.json({ count: rows.length, subscribers: rows });
+});
+
+// Heat-map: click points for a page + the list of pages that have clicks (owner-only).
+router.get("/projects/:projectId/heatmap", async (req, res) => {
+  const projectId = Number(req.params.projectId);
+  if (isNaN(projectId)) { res.status(400).json({ error: "Invalid project ID" }); return; }
+  if (!(await requireOwner(req, res, projectId))) return;
+  const pages = await db.select({ path: clickEvents.path, clicks: sql<number>`count(*)::int` })
+    .from(clickEvents).where(eq(clickEvents.projectId, projectId)).groupBy(clickEvents.path).orderBy(sql`2 desc`).limit(30);
+  const page = String(req.query.page || pages[0]?.path || "/");
+  const points = await db.select({ x: clickEvents.xPct, y: clickEvents.yPct })
+    .from(clickEvents).where(and(eq(clickEvents.projectId, projectId), eq(clickEvents.path, page))).orderBy(desc(clickEvents.createdAt)).limit(3000);
+  res.json({ page, pages, points });
 });
 
 router.get("/projects/:projectId/messages", async (req, res) => {

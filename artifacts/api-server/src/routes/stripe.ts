@@ -16,7 +16,7 @@ import { logger } from "../lib/logger";
 import { sendBookingEmail } from "../lib/email.js";
 import { getSessionUser, tokenFrom } from "../lib/platform-auth.js";
 import { getSessionUser as getStudioUser } from "../lib/studio-auth.js";
-import { addCredit, recentUsage, isSubscribed, MONTHLY_AI_CREDIT_EUR, SUBSCRIPTION_PRICE_EUR } from "../lib/billing.js";
+import { addCredit, recentUsage, isSubscribed, MONTHLY_AI_CREDIT_EUR, SUBSCRIPTION_PRICE_EUR, PLANS, planById } from "../lib/billing.js";
 import { reqBaseUrl } from "../lib/req-url.js";
 import { resolveSmtpConfig } from "../lib/email-config.js";
 import { sendMail } from "../lib/smtp.js";
@@ -46,18 +46,23 @@ async function ensureCustomer(u: { id: number; email: string; name: string; stri
   return c.id;
 }
 
-// Get-or-create the €50/mo recurring price (by lookup_key), unless a fixed price is set via env.
-async function nebulaPriceId(): Promise<string> {
-  const env = process.env.STRIPE_NEBULA_PRICE || "";
-  if (/^price_/.test(env)) return env;
+// Get-or-create the recurring price for a plan (by lookup_key `nebula_monthly_<amount>`). The Instap
+// plan (€50) can still be pinned via STRIPE_NEBULA_PRICE for backward compatibility.
+async function nebulaPlanPriceId(planId: string): Promise<string> {
+  const plan = planById(planId);
+  if (plan.id === "instap") {
+    const env = process.env.STRIPE_NEBULA_PRICE || "";
+    if (/^price_/.test(env)) return env;
+  }
+  const lookup = `nebula_monthly_${plan.price}`;
   try {
-    const found = await stripeReq("GET", `prices?lookup_keys[]=nebula_monthly_50&active=true&limit=1`);
+    const found = await stripeReq("GET", `prices?lookup_keys[]=${lookup}&active=true&limit=1`);
     if (found?.data?.[0]?.id) return found.data[0].id;
   } catch { /* fall through to create */ }
   const price = await stripeReq("POST", "prices", {
-    currency: "eur", unit_amount: Math.round(SUBSCRIPTION_PRICE_EUR * 100),
-    recurring: { interval: "month" }, lookup_key: "nebula_monthly_50",
-    product_data: { name: "Nebula — volledige toegang" },
+    currency: "eur", unit_amount: Math.round(plan.price * 100),
+    recurring: { interval: "month" }, lookup_key: lookup,
+    product_data: { name: `Nebula ${plan.name} — €${plan.price}/mnd` },
   });
   return price.id;
 }
@@ -873,13 +878,14 @@ router.post("/billing/subscribe", async (req, res) => {
     const pk = process.env.STRIPE_PUBLISHABLE_KEY
       || (sk.startsWith("sk_test") ? "pk_test_51Sk17JHyqZ2ZUEjYuhLf3UJ1asUQDhj5VhTS8YUVEtllknDO2HkqKRargBFvtSGSIWldq2M4luirH81IRsX0bc8j00dRMdgdth" : "");
     if (!pk) { res.status(500).json({ error: "Betalen is nog niet geconfigureerd: zet STRIPE_PUBLISHABLE_KEY (pk_live…) in de serveromgeving." }); return; }
+    const plan = planById(req.body?.plan);
     const si = await stripeReq("POST", "setup_intents", {
       customer,
       payment_method_types: ["card", "ideal", "sepa_debit"],
       usage: "off_session",
-      metadata: { platformUserId: String(u.id) },
+      metadata: { platformUserId: String(u.id), plan: plan.id },
     });
-    res.json({ clientSecret: si.client_secret, publishableKey: pk, setupIntentId: si.id, email: u.email || "" });
+    res.json({ clientSecret: si.client_secret, publishableKey: pk, setupIntentId: si.id, email: u.email || "", plan: plan.id, price: plan.price });
   } catch (err) { logger.error({ err, userId: u.id }, "[billing] subscribe failed"); res.status(500).json({ error: err instanceof Error ? err.message : "Abonneren mislukt." }); }
 });
 
@@ -923,17 +929,18 @@ router.post("/billing/subscribe/complete", async (req, res) => {
       }
     } catch { /* billing details optional */ }
     await stripeReq("POST", `customers/${encodeURIComponent(customer)}`, custParams);
+    const plan = planById(si.metadata?.plan);
     const taxRate = await nebulaTaxRateId().catch(() => "");
     const sub = await stripeReq("POST", "subscriptions", {
       customer,
-      items: [{ price: await nebulaPriceId() }],
+      items: [{ price: await nebulaPlanPriceId(plan.id) }],
       default_payment_method: pm,
       payment_behavior: "allow_incomplete",
       ...(taxRate ? { default_tax_rates: [taxRate] } : {}),
-      metadata: { platformUserId: String(u.id) },
+      metadata: { platformUserId: String(u.id), plan: plan.id },
     });
     const pe = sub?.current_period_end ? ymdUTC(new Date(sub.current_period_end * 1000)) : "";
-    await db.update(platformUsers).set({ subscriptionId: String(sub.id), subscriptionStatus: "active", ...(pe ? { currentPeriodEnd: pe } : {}) }).where(eq(platformUsers.id, u.id));
+    await db.update(platformUsers).set({ subscriptionId: String(sub.id), subscriptionStatus: "active", plan: plan.id, ...(pe ? { currentPeriodEnd: pe } : {}) }).where(eq(platformUsers.id, u.id));
     await addCredit(u.id, 0, "refill");
     logger.info({ userId: u.id, sub: sub.id, pm }, "[billing] subscription started via in-app checkout");
     res.json({ ok: true });
@@ -962,9 +969,11 @@ router.post("/billing/topup", async (req, res) => {
 // Status: subscription + AI credit + recent usage.
 router.get("/billing", async (req, res) => {
   const u = await billingUser(req); if (!u) { res.status(401).json({ error: "Niet ingelogd." }); return; }
+  const cur = planById((u as { plan?: string }).plan);
   res.json({
     subscribed: isSubscribed(u), status: u.subscriptionStatus, currentPeriodEnd: u.currentPeriodEnd,
-    aiCredit: Math.round((u.aiCredit || 0) * 100) / 100, monthlyCredit: MONTHLY_AI_CREDIT_EUR, priceEur: SUBSCRIPTION_PRICE_EUR,
+    aiCredit: Math.round((u.aiCredit || 0) * 100) / 100, monthlyCredit: MONTHLY_AI_CREDIT_EUR, priceEur: cur.price,
+    plan: cur.id, plans: PLANS,
     usage: await recentUsage(u.id),
   });
 });
