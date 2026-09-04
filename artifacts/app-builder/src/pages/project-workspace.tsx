@@ -3742,9 +3742,15 @@ export function ProjectWorkspace() {
               )}
             </TabsContent>
 
-            {/* SEO & Statistieken Tab — full-screen audit + visitor analytics */}
+            {/* SEO & Statistieken Tab — full-screen audit + visitor analytics. The panel is absolutely
+                positioned inside a bounded box (like the preview iframe) so its long list can NEVER
+                grow the layout / the terminal — it scrolls inside itself. */}
             <TabsContent value="seo" className="flex-1 flex flex-col min-h-0 overflow-hidden m-0 border-none p-0 outline-none">
-              {activeTab === "seo" && <SeoPanel projectId={projectId} onFix={sendSeoFix} changeSignal={filesChangedTick} />}
+              {activeTab === "seo" && (
+                <div className="relative flex-1 min-h-0">
+                  <SeoPanel projectId={projectId} onFix={sendSeoFix} changeSignal={filesChangedTick} />
+                </div>
+              )}
             </TabsContent>
           </Tabs>
         </div>

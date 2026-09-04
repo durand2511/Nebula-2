@@ -75,7 +75,9 @@ export function SeoPanel({ projectId, onFix, changeSignal = 0 }: { projectId: nu
   const min = TAB_MIN[view];
   const locked = level !== null && level < min;
   return (
-    <div className="flex-1 flex flex-col min-h-0 bg-background">
+    // absolute inset-0: fill the bounded parent exactly (never grow it) — mirrors the preview iframe,
+    // so the long audit list scrolls INSIDE and can't push the terminal/page taller.
+    <div className="absolute inset-0 flex flex-col bg-background">
       <div className="shrink-0 border-b border-border px-4 pt-2 flex items-center gap-1 overflow-x-auto">
         {tabs.map(({ key, label, Icon }) => {
           const isLocked = level !== null && level < TAB_MIN[key];
@@ -213,6 +215,23 @@ function AuditView({ projectId, kind, onFix, changeSignal = 0 }: { projectId: nu
     );
     if (onFix(msg)) { setFixing("__links__"); setTimeout(() => setFixing(null), 3000); }
   };
+  // Manual "check if Claude fixed it": re-analyse fresh and tick off what's now resolved. Press this
+  // when you think Claude is done.
+  const [checking, setChecking] = useState(false);
+  const recheck = () => {
+    setChecking(true);
+    getReport(true).then((rep) => {
+      const present = new Set(rep.findings.map((f) => f.id));
+      const newlyResolved: { id: string; title: string }[] = [];
+      const stillWorking = new Map<string, { title: string; at: number }>();
+      for (const [id, info] of workingRef.current) {
+        if (!present.has(id)) newlyResolved.push({ id, title: info.title });
+        else stillWorking.set(id, info);
+      }
+      setData(rep); auditCache.set(cacheKey, rep); setWorking(stillWorking);
+      if (newlyResolved.length) setResolved((prev) => { const m = [...prev, ...newlyResolved.filter((r) => !prev.some((p) => p.id === r.id))]; saveResolved(m); return m; });
+    }).catch(() => {}).finally(() => setChecking(false));
+  };
 
   if (loading) return <Centered><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /><p className="mt-3 text-sm text-muted-foreground">{t("Website analyseren…", "Analysing website…")}</p></Centered>;
   if (err || !data) return <Centered><AlertCircle className="h-6 w-6 text-rose-500" /><p className="mt-3 text-sm text-muted-foreground">{t("Analyse mislukt.", "Analysis failed.")}</p><Button variant="outline" size="sm" className="mt-3" onClick={retry}><RefreshCw className="h-3.5 w-3.5 mr-1.5" />{t("Opnieuw proberen", "Retry")}</Button></Centered>;
@@ -252,6 +271,11 @@ function AuditView({ projectId, kind, onFix, changeSignal = 0 }: { projectId: nu
               {t("Interne links", "Internal links")}
             </Button>
           )}
+          <Button size="sm" variant="ghost" className="gap-1.5 text-muted-foreground" onClick={recheck} disabled={checking}
+            title={t("Analyseer opnieuw om te controleren of Claude alles heeft gefixt", "Re-analyse to check whether Claude fixed everything")}>
+            {checking ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+            {t("Controleer", "Re-check")}
+          </Button>
         </div>
       </div>
 
