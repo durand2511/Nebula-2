@@ -206,11 +206,13 @@ type TaskState = { running: boolean; result: { ok: boolean; text: string; domain
 const tasks = new Map<string, TaskState>();
 // Instant spoken acknowledgement — echoes back WHAT was understood so the user knows it heard them right,
 // with a varied opener so it doesn't sound robotic.
-const ACK_OPENERS = ["Oké", "Doe ik", "Komt goed", "Top", "Prima", "Helder"];
+// Neutral — just confirm WHAT was heard (works for a question, a chat OR an edit); never imply editing,
+// since we don't yet know what the user wants.
+const ACK_OPENERS = ["Oké", "Helder", "Duidelijk", "Prima", "Top", "Begrepen"];
 function makeAck(message: string): string {
   const opener = ACK_OPENERS[Math.floor(Math.random() * ACK_OPENERS.length)];
   const heard = message.length > 140 ? message.slice(0, 140) + "…" : message;
-  return `${opener}. Ik hoorde: ${heard}. Momentje, ik ga ermee aan de slag.`;
+  return `${opener}. Ik hoorde: ${heard}. Momentje!`;
 }
 function statusReply(key: string): string {
   const a = progress.get(key)?.activity || "";
