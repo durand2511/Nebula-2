@@ -121,19 +121,19 @@ app.use((req, res, next) => {
 
 // 🐕 DDoS / flood → angry chihuahua. High threshold so normal browsing/polling never trips it.
 // In-memory, best-effort (NOT real DDoS protection — that's the CDN's job), just a cheeky wall.
+// Burst counter — counted ONLY for honeypot-pattern requests (see below), never for normal traffic.
+// This is the key safety property: a real visitor (even many behind one shared/CGNAT ip) never sends
+// scan/attack requests, so they can never trip this. Only a scanner hammering the fake attack surface does.
 const FLOOD = new Map<string, { count: number; start: number }>();
-const FLOOD_WINDOW_MS = 10_000, FLOOD_MAX = 250; // >250 req/10s from ONE ip = abusive (a real page load is < 50)
-app.use((req, res, next) => {
-  const ip = realIp(req);
-  if (!ip) return next();
+const FLOOD_WINDOW_MS = 10_000, FLOOD_MAX = 40; // >40 SCAN requests/10s from one ip = clearly hammering
+function bumpFlood(ip: string): number {
   const now = Date.now();
   let e = FLOOD.get(ip);
   if (!e || now - e.start > FLOOD_WINDOW_MS) { e = { count: 0, start: now }; FLOOD.set(ip, e); }
   e.count++;
   if (FLOOD.size > 20_000) { for (const [k, v] of FLOOD) if (now - v.start > FLOOD_WINDOW_MS) FLOOD.delete(k); }
-  if (e.count > FLOOD_MAX) { res.status(429).set("Retry-After", "60").type("html").send(chihuahuaPage("Rustig aan, cowboy. 🖕", "Zoveel verzoeken en tóch niks. Denk je echt dat je de eerste bent? Koel maar even af.", psyOps(req, bumpHits(ip)))); return; }
-  next();
-});
+  return e.count;
+}
 
 // 🖕 Honeypot for exploit scanners — no real stack revealed. Two tiers:
 //  • EXPLOIT/LOGIN paths (the bait: admin login, shells, config/db dumps) → angry chihuahua.
@@ -142,7 +142,9 @@ app.use((req, res, next) => {
 // If someone throws these, they mean business → the red-alert page (a fake "you tripped the alarm").
 const ATTACK = /(?:\.\.[/\\]|\/etc\/(?:passwd|shadow)|\/proc\/self|\bwin\.ini\b|union\s+select|information_schema|\bsleep\(|\bbenchmark\(|\bor\b\s*['"]?1['"]?\s*=\s*['"]?1|php:\/\/|data:\/\/|file:\/\/|\$\{jndi:|\bexec\(|\bsystem\(|\bpassthru\(|;\s*(?:cat|ls|id|whoami|wget|curl)\b|\|\s*(?:nc|bash|sh)\b)/i;
 const EXPLOIT = /^\/(?:admin\.php|wp-config\.php|wp-login\.php|shell\.php|c99\.php|r57\.php|backup\.sql|dump\.sql|database\.sql|db\.sql|eval-stdin\.php|config\.php|configuration\.php|vendor\/phpunit)/i;
-const RECON = /^\/(?:\.env|\.git(?:\/|$)|\.svn|\.aws|\.ssh|\.htpasswd|wp-admin|wp-content|wordpress|xmlrpc\.php|phpmyadmin|phpMyAdmin|pma(?:\/|$)|adminer(?:\.php)?|administrator(?:\/|$)|cgi-bin|boaform|actuator|solr(?:\/|$))/i;
+// Every token ends at a segment boundary (/ or end-of-path) so a legit customer page whose slug merely
+// STARTS with one of these words (e.g. /wordpress-tips, /actuator-onderhoud) is never mistaken for a scan.
+const RECON = /^\/(?:\.env|\.git(?:\/|$)|\.svn(?:\/|$)|\.aws(?:\/|$)|\.ssh(?:\/|$)|\.htpasswd|wp-admin(?:\/|$)|wp-content(?:\/|$)|wp-includes(?:\/|$)|wordpress(?:\/|$)|xmlrpc\.php|phpmyadmin(?:\/|$)|phpMyAdmin(?:\/|$)|pma(?:\/|$)|adminer(?:\.php|\/|$)|administrator(?:\/|$)|cgi-bin(?:\/|$)|boaform(?:\/|$)|actuator(?:\/|$)|solr(?:\/|$))/i;
 // Persistent-attacker counter: keep probing after all the trolls and you eventually get the ultimate
 // disdain — Ian McShane calling you pathetic.
 const HITS = new Map<string, { count: number; start: number }>();
@@ -157,14 +159,25 @@ function bumpHits(ip: string): number {
 }
 app.use((req, res, next) => {
   if (req.method !== "GET" && req.method !== "POST") return next();
+  // Never honeypot the real API: it has its own auth (default-deny) and legitimately carries URLs/HTML
+  // in query params (import/proxy), which could otherwise false-match the ATTACK payload patterns.
+  if (req.path === "/api" || req.path.startsWith("/api/")) return next();
   let full = req.originalUrl || req.url;
   try { full = decodeURIComponent(full); } catch { /* keep raw if it won't decode */ }
   const attack = ATTACK.test(full), exploit = EXPLOIT.test(req.path), recon = RECON.test(req.path);
   if (!attack && !exploit && !recon) return next();
 
   // Every hit is counted, and the count feeds the psy-ops panel (poging #N) + the PATHETIC gate.
-  const n = bumpHits(realIp(req));
+  const ip = realIp(req);
+  const n = bumpHits(ip);
   const psy = psyOps(req, n);
+
+  // Hammering the fake attack surface fast? → the DDoS chihuahua. Counted ONLY here, so it can only
+  // ever trip on scan traffic — a normal visitor (even a burst of them behind one ip) never reaches it.
+  if (bumpFlood(ip) > FLOOD_MAX) {
+    res.status(429).set("Retry-After", "60").type("html").send(chihuahuaPage("Rustig aan, cowboy. 🖕", "Zoveel pogingen en tóch niks. Denk je echt dat je de eerste bent? Koel maar even af.", psy));
+    return;
+  }
 
   // Still probing after everything? → PATHETIC.
   if (n > PATHETIC_AT) {
