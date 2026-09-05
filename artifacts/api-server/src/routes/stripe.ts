@@ -17,6 +17,7 @@ import { sendBookingEmail } from "../lib/email.js";
 import { getSessionUser, tokenFrom } from "../lib/platform-auth.js";
 import { getSessionUser as getStudioUser } from "../lib/studio-auth.js";
 import { addCredit, recentUsage, isSubscribed, MONTHLY_AI_CREDIT_EUR, SUBSCRIPTION_PRICE_EUR, PLANS, planById, userFeatureLevel } from "../lib/billing.js";
+import { grantVoiceTopup, VOICE_TOPUP_PRICE_EUR, VOICE_TOPUP_GRANT_EUR } from "./voice.js";
 import { reqBaseUrl } from "../lib/req-url.js";
 import { resolveSmtpConfig } from "../lib/email-config.js";
 import { sendMail } from "../lib/smtp.js";
@@ -772,6 +773,8 @@ router.post("/stripe/webhook", raw({ type: "*/*" }), async (req, res) => {
           await db.update(platformUsers).set({ subscriptionId: String(obj.subscription || ""), subscriptionStatus: "active" }).where(eq(platformUsers.id, u.id));
           await addCredit(u.id, 0, "refill"); // grant the included €7,50 right away
           logger.info({ userId: u.id }, "[billing] subscription started");
+        } else if (u && obj.mode === "payment" && obj.metadata?.kind === "voice-topup") {
+          await grantVoiceTopup(u.id); // paid €10 → +€5 voice usage this month
         } else if (u && obj.mode === "payment" && obj.metadata?.kind === "topup") {
           await addCredit(u.id, Number(obj.metadata?.amountEur) || 0, "add");
           logger.info({ userId: u.id, amount: obj.metadata?.amountEur }, "[billing] AI credit topped up");
@@ -964,6 +967,23 @@ router.post("/billing/topup", async (req, res) => {
     });
     res.json({ url: session.url });
   } catch (err) { logger.error({ err, userId: u.id }, "[billing] topup failed"); res.status(500).json({ error: err instanceof Error ? err.message : "Bijkopen mislukt." }); }
+});
+
+// Voice top-up: pay €10 to get €5 more voice usage for this month (rest is the platform's margin).
+router.post("/voice/topup", async (req, res) => {
+  const u = await billingUser(req); if (!u) { res.status(401).json({ error: "Niet ingelogd." }); return; }
+  try {
+    const customer = await ensureCustomer(u);
+    const base = baseUrl(req as any);
+    const session = await stripeReq("POST", "checkout/sessions", {
+      mode: "payment", customer, client_reference_id: String(u.id),
+      line_items: [{ quantity: 1, price_data: { currency: "eur", unit_amount: VOICE_TOPUP_PRICE_EUR * 100, product_data: { name: `Nebula spraak-tegoed (+€${VOICE_TOPUP_GRANT_EUR})` } } }],
+      metadata: { kind: "voice-topup", platformUserId: String(u.id) },
+      payment_intent_data: { metadata: { kind: "voice-topup", platformUserId: String(u.id) } },
+      success_url: `${base}/assistent?voice_topup=ok`, cancel_url: `${base}/assistent?voice_topup=cancel`,
+    });
+    res.json({ url: session.url });
+  } catch (err) { logger.error({ err, userId: u.id }, "[voice] topup failed"); res.status(500).json({ error: err instanceof Error ? err.message : "Bijkopen mislukt." }); }
 });
 
 // Status: subscription + AI credit + recent usage.

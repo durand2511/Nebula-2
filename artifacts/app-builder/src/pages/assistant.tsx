@@ -35,6 +35,8 @@ function silentWavUrl(): string {
 export default function Assistant() {
   const [authState, setAuthState] = useState<"checking" | "out" | "in">("checking");
   const [premium, setPremium] = useState<boolean | null>(null); // has the Premium voice assistant?
+  const [voiceBlocked, setVoiceBlocked] = useState(false);       // monthly OpenAI voice cap reached
+  const [topupBusy, setTopupBusy] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectId, setProjectId] = useState<number>(0);
@@ -51,6 +53,8 @@ export default function Assistant() {
 
   const [ttsOn, setTtsOn] = useState(true);
   const ttsRef = useRef(true); ttsRef.current = ttsOn;
+  const [ttsVoice, setTtsVoice] = useState<"nl" | "openai">(() => { try { return (localStorage.getItem("nebula_tts_voice") as "nl" | "openai") || "nl"; } catch { return "nl"; } });
+  useEffect(() => { try { localStorage.setItem("nebula_tts_voice", ttsVoice); } catch { /* ignore */ } }, [ttsVoice]);
   const [notice, setNotice] = useState("");
 
   const streamRef = useRef<MediaStream | null>(null);
@@ -83,7 +87,7 @@ export default function Assistant() {
     fetch("/api/auth/me").then((r) => (r.ok ? r.json() : null)).then((me) => {
       if (!me || !me.user?.id) { setAuthState("out"); return; }
       setAuthState("in"); loadProjects();
-      fetch("/api/voice/access").then((r) => (r.ok ? r.json() : null)).then((d) => setPremium(!!d?.premium)).catch(() => setPremium(true));
+      fetch("/api/voice/access").then((r) => (r.ok ? r.json() : null)).then((d) => { setPremium(!!d?.premium); if (d?.blocked) setVoiceBlocked(true); }).catch(() => setPremium(true));
     }).catch(() => setAuthState("out"));
   }, []);
 
@@ -94,6 +98,9 @@ export default function Assistant() {
     fetch(`/api/voice/publish-status?projectId=${projectId}`).then((r) => (r.ok ? r.json() : null)).then((d) => setPublishDomain(d?.domain || null)).catch(() => {});
   }, [projectId]);
   useEffect(() => { try { window.speechSynthesis?.getVoices(); } catch { /* ignore */ } }, []);
+  useEffect(() => { // returned from a successful voice top-up → the cap is lifted
+    try { if (new URLSearchParams(window.location.search).get("voice_topup") === "ok") { setVoiceBlocked(false); window.history.replaceState({}, "", window.location.pathname); } } catch { /* ignore */ }
+  }, []);
   useEffect(() => () => { releaseMic(); stopSpeaking(); stopPolling(); }, []);
 
   // Phone woke up: resume audio and grab any answer that finished while the screen was off (the task
@@ -128,6 +135,17 @@ export default function Assistant() {
   function logout() {
     setConv(false); releaseMic(); stopSpeaking(); stopPolling(); setModeS("idle");
     clearToken(); setProjects([]); setProjectId(0); setPickerOpen(false); setShowForm(false); setAuthState("out");
+  }
+
+  async function doTopup() {
+    setTopupBusy(true);
+    try {
+      const r = await fetch("/api/voice/topup", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+      const j = await r.json();
+      if (j.url) { window.location.href = j.url; return; }
+      flash(j.error || "Bijkopen lukte niet.", 4000);
+    } catch { flash("Bijkopen lukte niet.", 4000); }
+    finally { setTopupBusy(false); }
   }
 
   const currentName = useMemo(() => projects.find((p) => p.id === projectId)?.name || "website", [projects, projectId]);
@@ -165,8 +183,15 @@ export default function Assistant() {
     else setModeS("idle");
   }
 
+  function hasDutchVoice(): boolean {
+    try { return "speechSynthesis" in window && window.speechSynthesis.getVoices().some((v) => /^nl/i.test(v.lang)); } catch { return false; }
+  }
+
   function speakOne(text: string): Promise<void> {
     return new Promise((resolve) => {
+      // Prefer the phone's REAL Dutch voice (proper NL accent, free) when available; OpenAI (English
+      // accent, costs money) is only the fallback for devices without a Dutch voice.
+      if (ttsVoice === "nl" && hasDutchVoice()) { speakBrowserOnce(text, () => resolve()); return; }
       void (async () => {
         try {
           const r = await fetch("/api/voice/speak", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, voice: "nova" }) });
@@ -384,8 +409,9 @@ export default function Assistant() {
     try {
       const dataUrl: string = await new Promise((resolve, reject) => { const fr = new FileReader(); fr.onload = () => resolve(String(fr.result)); fr.onerror = reject; fr.readAsDataURL(blob); });
       const r = await fetch("/api/voice/transcribe", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ audio: dataUrl }) });
-      let j: { text?: string; error?: string } = {};
+      let j: { text?: string; error?: string; capReached?: boolean } = {};
       try { j = await r.json(); } catch { /* non-JSON */ }
+      if (j.capReached) { setConv(false); stopSpeaking(); stopListenHard(); setModeS("idle"); setVoiceBlocked(true); return; }
       if (!r.ok) { const msg = j.error || (r.status === 413 ? "Opname te groot." : r.status === 503 ? "Spraak staat nog niet aan op de server." : r.status === 401 ? "Je bent uitgelogd — log opnieuw in." : `Transcriptie mislukt (fout ${r.status}).`); flash(msg, 5000); if (!taskActiveRef.current) setConv(false); backToWait(); return; }
       const text = String(j.text || "").trim();
       if (!text) { backToWait(); return; }
@@ -442,6 +468,21 @@ export default function Assistant() {
           <h1 className="mt-4 text-2xl font-serif font-semibold tracking-tight">Spraakassistent</h1>
           <p className="mt-2 text-sm text-muted-foreground leading-relaxed">De spraakassistent hoort bij <span className="font-semibold text-foreground">Premium</span> — €140 per maand. Daarmee praat je met Claude en pas je je hele website met je stem aan.</p>
           <a href="/" className="mt-6 inline-block w-full rounded-full bg-foreground text-background font-semibold py-3">Upgraden naar Premium</a>
+          <button onClick={logout} className="mt-3 w-full text-[13px] text-muted-foreground">Uitloggen</button>
+        </div>
+      </div>
+    );
+  }
+
+  if (voiceBlocked) {
+    return (
+      <div className="light grid place-items-center px-6 text-foreground text-center" style={{ minHeight: "100dvh", paddingTop: "env(safe-area-inset-top)", paddingBottom: "env(safe-area-inset-bottom)" }}>
+        {bgLayer}
+        <div className="w-full max-w-sm rounded-3xl border border-border bg-card/85 backdrop-blur-xl shadow-xl p-8">
+          <img src={logoUrl} alt="Nebula" className="h-14 w-auto mx-auto" />
+          <h1 className="mt-4 text-2xl font-serif font-semibold tracking-tight">Spraak-tegoed op</h1>
+          <p className="mt-2 text-sm text-muted-foreground leading-relaxed">Je hebt je spraak-tegoed voor deze maand gebruikt. Koop <span className="font-semibold text-foreground">€10</span> bij en je kunt er deze maand weer op los praten.</p>
+          <button onClick={doTopup} disabled={topupBusy} className="mt-6 w-full inline-flex items-center justify-center gap-2 rounded-full bg-foreground text-background font-semibold py-3 disabled:opacity-50">{topupBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : null} €10 bijkopen</button>
           <button onClick={logout} className="mt-3 w-full text-[13px] text-muted-foreground">Uitloggen</button>
         </div>
       </div>
@@ -518,6 +559,13 @@ export default function Assistant() {
                 ))}
               </div>
             )}
+            <div className="px-4 py-3 border-t border-border">
+              <div className="text-[11px] uppercase tracking-wide text-muted-foreground mb-2">Stem van Claude</div>
+              <div className="flex gap-2">
+                <button onClick={() => setTtsVoice("nl")} className={`flex-1 rounded-lg border px-3 py-2 text-[13px] ${ttsVoice === "nl" ? "border-foreground bg-foreground text-background font-medium" : "border-border text-foreground/70"}`}>Nederlands</button>
+                <button onClick={() => setTtsVoice("openai")} className={`flex-1 rounded-lg border px-3 py-2 text-[13px] ${ttsVoice === "openai" ? "border-foreground bg-foreground text-background font-medium" : "border-border text-foreground/70"}`}>Natuurlijk (licht accent)</button>
+              </div>
+            </div>
             <div className="p-3 flex flex-col gap-1 border-t border-border">
               <a href="/" className="flex items-center gap-2 px-3 py-2.5 text-sm text-foreground/80 rounded-lg hover:bg-muted"><ExternalLink className="h-4 w-4" /> Naar nebulabookings.com</a>
               <button onClick={logout} className="flex items-center gap-2 px-3 py-2.5 text-sm text-rose-600 rounded-lg hover:bg-rose-50 text-left"><LogOut className="h-4 w-4" /> Uitloggen</button>

@@ -12,7 +12,46 @@ import { buildVoiceTools } from "../lib/voice-tools.js";
 import { getSubdomain, listDomains, PLATFORM_HOST } from "../lib/domains.js";
 import { publishSite, isPublished } from "../lib/site-publish.js";
 import { userFeatureLevel } from "../lib/billing.js";
-import { db, projects } from "@workspace/db";
+import { db, projects, platformAiUsage } from "@workspace/db";
+import { sql, and, gte } from "drizzle-orm";
+
+// ── Voice OpenAI cost cap ────────────────────────────────────────────────────────────────────────
+// Whisper + TTS run on the PLATFORM's OpenAI key, so we cap what one customer can cost per month.
+// Hit the cap → the app offers a €10 top-up that grants €5 more (the rest is the platform's margin).
+export const VOICE_CAP_EUR = 5;
+export const VOICE_TOPUP_PRICE_EUR = 10;
+export const VOICE_TOPUP_GRANT_EUR = 5;
+function monthStart(): Date { const d = new Date(); d.setUTCDate(1); d.setUTCHours(0, 0, 0, 0); return d; }
+// Rough cost estimates (generous cap, so precision isn't critical): Whisper ~€0.0055/min, TTS ~€14/1M chars.
+function whisperCostEur(audioBytes: number): number { const secs = audioBytes / 2400; return Math.max(0, (secs / 60) * 0.0055); }
+function ttsCostEur(chars: number): number { return Math.max(0, chars * 0.000014); }
+
+async function voiceUsedThisMonth(userId: number): Promise<number> {
+  try {
+    const [r] = await db.select({ c: sql<number>`coalesce(sum(${platformAiUsage.costEur}), 0)::float8` })
+      .from(platformAiUsage).where(and(eq(platformAiUsage.userId, userId), gte(platformAiUsage.createdAt, monthStart()), sql`${platformAiUsage.summary} like 'voice:%'`));
+    return r?.c || 0;
+  } catch { return 0; }
+}
+async function voiceTopupsThisMonth(userId: number): Promise<number> {
+  try {
+    const [r] = await db.select({ n: sql<number>`count(*)::int` })
+      .from(platformAiUsage).where(and(eq(platformAiUsage.userId, userId), gte(platformAiUsage.createdAt, monthStart()), eq(platformAiUsage.summary, "voice-topup")));
+    return r?.n || 0;
+  } catch { return 0; }
+}
+async function voiceStatus(userId: number): Promise<{ used: number; cap: number; blocked: boolean }> {
+  const used = await voiceUsedThisMonth(userId);
+  const cap = VOICE_CAP_EUR + (await voiceTopupsThisMonth(userId)) * VOICE_TOPUP_GRANT_EUR;
+  return { used: Math.round(used * 100) / 100, cap, blocked: used >= cap };
+}
+async function logVoiceUse(userId: number, projectId: number | null, kind: string, costEur: number): Promise<void> {
+  try { await db.insert(platformAiUsage).values({ userId, projectId: projectId ?? null, summary: `voice:${kind}`, costEur }); } catch { /* best-effort */ }
+}
+/** Called from the Stripe webhook when a €10 voice top-up is paid: grants €5 more this month. */
+export async function grantVoiceTopup(userId: number): Promise<void> {
+  try { await db.insert(platformAiUsage).values({ userId, projectId: null, summary: "voice-topup", costEur: 0 }); } catch { /* ignore */ }
+}
 
 // The voice assistant is a Premium (€140) feature. Owner is always level 3.
 const PREMIUM_MSG = "De spraakassistent zit in het Premium-abonnement (€140/maand). Upgrade in je profiel om 'm te gebruiken.";
@@ -142,6 +181,7 @@ router.post("/voice/transcribe", express.json({ limit: "30mb" }), async (req, re
   const u = await getSessionUser(tokenFrom(req as any));
   if (!u) { res.status(401).json({ error: "Niet ingelogd." }); return; }
   if (!isPremium(u)) { res.status(402).json({ error: PREMIUM_MSG }); return; }
+  if ((await voiceStatus(u.id)).blocked) { res.status(402).json({ error: "Je spraak-tegoed voor deze maand is op.", capReached: true }); return; }
   if (!OPENAI_KEY) {
     res.status(503).json({ error: "Spraak-naar-tekst staat nog niet aan op de server (OPENAI-sleutel ontbreekt)." });
     return;
@@ -181,6 +221,7 @@ router.post("/voice/transcribe", express.json({ limit: "30mb" }), async (req, re
       return;
     }
     const j = (await r.json()) as { text?: string };
+    void logVoiceUse(u.id, null, "whisper", whisperCostEur(buf.length));
     res.json({ text: String(j.text || "").trim() });
   } catch (err) {
     logger.error({ err }, "[voice] transcribe error");
@@ -195,6 +236,7 @@ router.post("/voice/speak", express.json({ limit: "256kb" }), async (req, res) =
   const u = await getSessionUser(tokenFrom(req as any));
   if (!u) { res.status(401).json({ error: "Niet ingelogd." }); return; }
   if (!isPremium(u)) { res.status(402).json({ error: PREMIUM_MSG }); return; }
+  if ((await voiceStatus(u.id)).blocked) { res.status(402).json({ error: "Je spraak-tegoed voor deze maand is op.", capReached: true }); return; }
   if (!OPENAI_KEY) { res.status(503).json({ error: "Stem staat nog niet aan op de server." }); return; }
   const text = String(req.body?.text || "").trim().slice(0, 1200);
   if (!text) { res.status(400).json({ error: "Geen tekst." }); return; }
@@ -207,6 +249,7 @@ router.post("/voice/speak", express.json({ limit: "256kb" }), async (req, res) =
     });
     if (!r.ok) { const t = await r.text().catch(() => ""); logger.error({ status: r.status, body: t.slice(0, 300) }, "[voice] tts failed"); res.status(502).json({ error: "Stem mislukt." }); return; }
     const buf = Buffer.from(await r.arrayBuffer());
+    void logVoiceUse(u.id, null, "tts", ttsCostEur(text.length));
     res.setHeader("Content-Type", "audio/mpeg");
     res.setHeader("Cache-Control", "no-store");
     res.send(buf);
@@ -327,7 +370,9 @@ router.get("/voice/publish-status", async (req, res) => {
 router.get("/voice/access", async (req, res) => {
   const u = await getSessionUser(tokenFrom(req as any));
   if (!u) { res.status(401).json({ error: "Niet ingelogd." }); return; }
-  res.json({ premium: isPremium(u) });
+  const premium = isPremium(u);
+  const vs = premium ? await voiceStatus(u.id) : { used: 0, cap: VOICE_CAP_EUR, blocked: false };
+  res.json({ premium, used: vs.used, cap: vs.cap, blocked: vs.blocked, topupPrice: VOICE_TOPUP_PRICE_EUR });
 });
 
 export default router;
