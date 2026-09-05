@@ -307,7 +307,12 @@ async function executeTask(userId: number, projectId: number, message: string): 
   // or its existing Nebula subdomain). We never CREATE a Nebula subdomain here.
   const edited = r.changed.length + r.created.length + r.deleted.length;
   let published = false;
-  if (edited > 0) { try { if (await isPublished(projectId)) { await publishSite(projectId); published = true; } } catch (err) { logger.warn({ err, projectId }, "[voice] auto-republish failed"); } }
+  // ALWAYS republish after an edit so the change actually goes live (publishSite snapshots the draft to
+  // the live site + the connected domain; it never creates a Nebula subdomain).
+  if (edited > 0) {
+    try { await publishSite(projectId); published = true; }
+    catch (err) { logger.warn({ err: (err as Error)?.message, projectId }, "[voice] auto-republish failed"); }
+  }
   const domain = await liveDomain(projectId);
   let text = stripForSpeech((r.finalText || "").trim()) || (edited > 0 ? "Klaar, ik heb het aangepast." : "Oké!");
   if (published && domain) text += ` Het staat nu live op ${domain}.`;   // tell the user it's actually live
@@ -364,6 +369,17 @@ router.get("/voice/publish-status", async (req, res) => {
   const projectId = Number(req.query.projectId) || 0;
   if (!(await ownsProject(u.id, projectId))) { res.status(403).json({ error: "Geen toegang." }); return; }
   res.json({ domain: await liveDomain(projectId) });
+});
+
+// Live status of the running task — the app speaks this instantly when you tap while it's working
+// ("hoe gaat het?"), so it never depends on capturing/transcribing the question.
+router.get("/voice/progress", async (req, res) => {
+  const u = await getSessionUser(tokenFrom(req as any));
+  if (!u) { res.status(401).json({ error: "Niet ingelogd." }); return; }
+  const projectId = Number(req.query.projectId) || 0;
+  const key = `${u.id}:${projectId}`;
+  const running = !!tasks.get(key)?.running;
+  res.json({ running, text: running ? statusReply(key) : "" });
 });
 
 // Does the logged-in user have the voice assistant (Premium)? Used by the app to show the upgrade screen.

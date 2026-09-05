@@ -394,9 +394,15 @@ export default function Assistant() {
 
   function toggleConversation() {
     primeTTS();
-    // Working in the background → a tap = ask a mid-task question ("hoe gaat het?"), no matter what it's
-    // currently doing (even while it's speaking an ack/status). Never lose the running task.
-    if (taskActiveRef.current) { setConv(true); stopSpeaking(); stopListenHard(); startListen(); return; }
+    // Working in the background → a tap = "hoe gaat het?": speak the live status INSTANTLY (no need to
+    // capture/transcribe the question, which was unreliable). The running task keeps going.
+    if (taskActiveRef.current) {
+      stopSpeaking();
+      fetch(`/api/voice/progress?projectId=${projectRef.current}`).then((r) => (r.ok ? r.json() : null))
+        .then((d) => enqueueSpeak(String(d?.text || "Ik ben er nog mee bezig, momentje.").trim(), false))
+        .catch(() => enqueueSpeak("Ik ben er nog mee bezig, momentje.", false));
+      return;
+    }
     // Active OR stuck (listening/speaking) → stop everything cleanly, so a tap always recovers.
     if (convRef.current || modeRef.current === "listening" || modeRef.current === "speaking") {
       reqRef.current++; setConv(false); stopSpeaking(); stopListenHard(); stopPolling(); releaseMic(); setModeS("idle"); return;

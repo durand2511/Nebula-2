@@ -37,6 +37,22 @@ app.use(
   }),
 );
 app.use(cors());
+
+// 🖕 Honeypot: bots constantly scan for classic exploit paths (WordPress, .env, .git, phpMyAdmin, …)
+// that no real Nebula visitor ever hits. Greet them with a middle finger instead of a boring 404.
+const HONEYPOT = /^\/(?:\.env|\.git(?:\/|$)|\.svn|\.aws|\.ssh|\.htpasswd|wp-admin|wp-login\.php|wp-content|wordpress|xmlrpc\.php|phpmyadmin|phpMyAdmin|pma(?:\/|$)|adminer(?:\.php)?|administrator(?:\/|$)|config\.php|configuration\.php|backup\.sql|dump\.sql|database\.sql|db\.sql|shell\.php|eval-stdin\.php|vendor\/phpunit|cgi-bin|boaform|actuator|solr(?:\/|$))/i;
+app.use((req, res, next) => {
+  if (req.method !== "GET" && req.method !== "POST") return next();
+  if (!HONEYPOT.test(req.path)) return next();
+  res.status(418).type("html").send(`<!doctype html><html lang="nl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>🖕</title><style>html,body{height:100%;margin:0}body{display:grid;place-items:center;background:#0f0e14;color:#e8e6f0;font-family:ui-monospace,Menlo,monospace;text-align:center;padding:24px}pre{color:#ff6b6b;font-size:14px;line-height:1.2}h1{font-size:20px;margin:18px 0 6px}p{color:#9a95b5;max-width:34rem}</style></head><body><div><pre>
+        ________
+       /  🖕    \\
+      |  NICE    |
+      |  TRY     |
+       \\________/
+</pre><h1>Nice try, hacker.</h1><p>Er valt hier niks te stelen. Deze site draait op Claude, niet op WordPress. Groetjes van Nebula — en veel plezier met je scanner. 🖕</p></div></body></html>`);
+});
+
 // Modest default body limit for the general API surface. The chat stream route
 // needs a much larger ceiling for base64 reference images, so it opts in to its
 // own parser (see routes/projects.ts) and is skipped here — keeping the larger
