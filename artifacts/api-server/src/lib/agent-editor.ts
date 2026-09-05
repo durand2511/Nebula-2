@@ -122,9 +122,18 @@ export async function runAgentEdit(opts: {
   images?: string[];
   emit: (event: AgentEvent) => void;
   abortController?: AbortController;
+  /** Run on the customer's coupled Claude subscription instead of the platform API key. When set, this
+   *  env (HOME/CLAUDE_CONFIG_DIR pointing at their restored login, NO ANTHROPIC_API_KEY) is used as-is
+   *  and no throwaway agent-home is created. See prepareUserClaudeEnv in claude-terminal.ts. */
+  subprocessEnv?: Record<string, string | undefined>;
+  /** Override the model (voice on a subscription omits it → account default). null = don't set a model. */
+  model?: string | null;
+  /** Override the system prompt (the voice assistant is conversational, not just an editor). */
+  systemPromptOverride?: string;
 }): Promise<AgentEditResult> {
   const { projectId, prompt, images = [], emit } = opts;
   const abortController = opts.abortController ?? new AbortController();
+  const ownCredsEnv = opts.subprocessEnv; // when present, use the customer's subscription
 
   const rows: FileRow[] = await db
     .select({ id: projectFiles.id, path: projectFiles.path, content: projectFiles.content })
@@ -140,12 +149,13 @@ export async function runAgentEdit(opts: {
   // ~/.claude/ and XDG state. In the Render container HOME isn't writable, so the CLI exited
   // with code 1 ("Claude Code process exited with code 1"). Give it a private writable home,
   // kept OUTSIDE tmpRoot so its config files never get diffed back into projectFiles.
-  const agentHome = await fs.mkdtemp(path.join(os.tmpdir(), `nebula-agent-home-${projectId}-`));
-  const agentConfigDir = path.join(agentHome, ".claude");
-  const subprocessEnv: Record<string, string | undefined> = {
+  // Own-subscription runs (voice) bring their own env with the customer's login. API-key runs (the
+  // editor) get a throwaway writable home so the CLI can write ~/.claude.json / XDG state.
+  const agentHome = ownCredsEnv ? "" : await fs.mkdtemp(path.join(os.tmpdir(), `nebula-agent-home-${projectId}-`));
+  const subprocessEnv: Record<string, string | undefined> = ownCredsEnv ?? {
     ...process.env,
     HOME: agentHome,
-    CLAUDE_CONFIG_DIR: agentConfigDir,
+    CLAUDE_CONFIG_DIR: path.join(agentHome, ".claude"),
     XDG_CONFIG_HOME: path.join(agentHome, ".config"),
     XDG_CACHE_HOME: path.join(agentHome, ".cache"),
     XDG_DATA_HOME: path.join(agentHome, ".local", "share"),
@@ -153,11 +163,14 @@ export async function runAgentEdit(opts: {
   };
 
   try {
-    // Pre-create the writable dirs so the CLI never trips on a missing nested path.
-    await Promise.all(
-      [agentConfigDir, subprocessEnv.XDG_CONFIG_HOME, subprocessEnv.XDG_CACHE_HOME, subprocessEnv.XDG_DATA_HOME, subprocessEnv.XDG_STATE_HOME]
-        .map((p) => fs.mkdir(p as string, { recursive: true })),
-    );
+    // Pre-create the writable dirs so the CLI never trips on a missing nested path (API-key runs only —
+    // the own-creds env's dirs were already created by prepareUserClaudeEnv).
+    if (!ownCredsEnv) {
+      await Promise.all(
+        [subprocessEnv.CLAUDE_CONFIG_DIR, subprocessEnv.XDG_CONFIG_HOME, subprocessEnv.XDG_CACHE_HOME, subprocessEnv.XDG_DATA_HOME, subprocessEnv.XDG_STATE_HOME]
+          .map((p) => fs.mkdir(p as string, { recursive: true })),
+      );
+    }
     emit({ type: "status", message: "Project laden…" });
     for (const row of rows) {
       const dest = safeJoin(tmpRoot, row.path);
@@ -197,12 +210,14 @@ export async function runAgentEdit(opts: {
     // it in the logs if the run throws.
     let stderrBuf = "";
 
+    // model: undefined → default (AGENT_MODEL); null → don't set one (subscription's account default).
+    const modelOpt = opts.model === undefined ? AGENT_MODEL : opts.model;
     const q = query({
       prompt: userPrompt,
       options: {
         cwd: tmpRoot,
-        model: AGENT_MODEL,
-        systemPrompt: systemPrompt(),
+        ...(modelOpt ? { model: modelOpt } : {}),
+        systemPrompt: opts.systemPromptOverride ?? systemPrompt(),
         allowedTools: ["Read", "Write", "Edit", "Glob", "Grep"],
         // Use acceptEdits, NOT bypassPermissions: the Render container runs as root, and the
         // CLI refuses "--dangerously-skip-permissions cannot be used with root/sudo privileges"
@@ -281,7 +296,7 @@ export async function runAgentEdit(opts: {
     return { ok, changed, created, deleted, finalText };
   } finally {
     await fs.rm(tmpRoot, { recursive: true, force: true }).catch(() => {});
-    await fs.rm(agentHome, { recursive: true, force: true }).catch(() => {});
+    if (agentHome) await fs.rm(agentHome, { recursive: true, force: true }).catch(() => {});
   }
 }
 

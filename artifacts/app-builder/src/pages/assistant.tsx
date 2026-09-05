@@ -1,17 +1,16 @@
 /**
- * Nebula Assistent — mobile PWA voice front-end for Claude Code, in the platform's light look.
+ * Nebula Assistent — mobile PWA voice assistant.
  *
  * Pure voice: tap the big Nebula logo → it rotates + breathes while listening → you talk → it auto-stops
- * on silence → Whisper transcribes → the text is fired into your live server-side Claude Code session →
- * Claude edits your site and SPEAKS its reply back. No transcript, no typing — just the logo and Claude's
- * voice. The terminal itself runs invisibly as the engine and auto-restarts if it drops.
+ * on silence → Whisper transcribes → the text goes to /api/voice/ask, which runs the Claude Agent SDK
+ * (on the customer's own coupled Claude subscription) against the site and returns a clean, natural
+ * reply → Claude SPEAKS it back with a warm voice. No terminal, no scraping — reliable request→answer.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ClaudeTerminal, type ClaudeTerminalHandle } from "@/components/claude-terminal";
-import { getToken, setToken } from "@/lib/session";
+import { getToken, setToken, clearToken } from "@/lib/session";
 import { bgUrl } from "@/lib/background";
 import logoUrl from "../assets/nebula-logo.png";
-import { Volume2, VolumeX, Loader2, ChevronDown, X } from "lucide-react";
+import { Volume2, VolumeX, Loader2, ChevronDown, X, LogOut, ExternalLink } from "lucide-react";
 
 type Project = { id: number; name: string };
 type Mode = "idle" | "listening" | "processing" | "speaking";
@@ -29,14 +28,8 @@ export default function Assistant() {
   const [showForm, setShowForm] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectId, setProjectId] = useState<number>(0);
+  const projectRef = useRef(0); projectRef.current = projectId;
   const [pickerOpen, setPickerOpen] = useState(false);
-
-  const termRef = useRef<ClaudeTerminalHandle>(null);
-  const [termKey, setTermKey] = useState(0);          // bump to force a fresh Claude session
-  const everConnRef = useRef(false);
-  const [connected, setConnected] = useState(false);
-  const [restarting, setRestarting] = useState(false);
-  const [down, setDown] = useState(false);
 
   const [mode, setMode] = useState<Mode>("idle");
   const modeRef = useRef<Mode>("idle");
@@ -44,6 +37,7 @@ export default function Assistant() {
   const convRef = useRef(false);
   const [, force] = useState(0);
   const setConv = (v: boolean) => { convRef.current = v; force((n) => n + 1); };
+  const reqRef = useRef(0); // guards against a stale answer speaking after you stopped
 
   const [ttsOn, setTtsOn] = useState(true);
   const ttsRef = useRef(true); ttsRef.current = ttsOn;
@@ -55,7 +49,7 @@ export default function Assistant() {
   const mimeRef = useRef<string>("");
   const audioCtxRef = useRef<AudioContext | null>(null);
   const vadTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const replyFallbackRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const ttsSourceRef = useRef<AudioBufferSourceNode | null>(null);
 
   const flash = (m: string, ms = 4000) => { setNotice(m); window.setTimeout(() => setNotice((n) => (n === m ? "" : n)), ms); };
 
@@ -84,7 +78,7 @@ export default function Assistant() {
 
   useEffect(() => { if (projectId) { try { localStorage.setItem(LAST_KEY, String(projectId)); } catch { /* ignore */ } } }, [projectId]);
   useEffect(() => { try { window.speechSynthesis?.getVoices(); } catch { /* ignore */ } }, []);
-  useEffect(() => () => { releaseMic(); stopSpeaking(); if (replyFallbackRef.current) clearTimeout(replyFallbackRef.current); }, []);
+  useEffect(() => () => { releaseMic(); stopSpeaking(); }, []);
 
   async function doLogin(e: React.FormEvent) {
     e.preventDefault();
@@ -99,25 +93,23 @@ export default function Assistant() {
     finally { setLoginBusy(false); }
   }
 
+  function logout() {
+    setConv(false); releaseMic(); stopSpeaking(); setModeS("idle");
+    clearToken(); setProjects([]); setProjectId(0); setPickerOpen(false); setShowForm(false); setAuthState("out");
+  }
+
   const currentName = useMemo(() => projects.find((p) => p.id === projectId)?.name || "website", [projects, projectId]);
 
-  // ---- speech OUT ----
-  const ttsSourceRef = useRef<AudioBufferSourceNode | null>(null);
+  // ---- speech OUT (natural voice) ----
   const afterSpeak = () => { if (convRef.current) startListen(); else setModeS("idle"); };
 
   async function speak(text: string) {
     if (!ttsRef.current || !text) { afterSpeak(); return; }
     setModeS("speaking");
-    // Natural voice via OpenAI TTS, played through the (already user-unlocked) mic AudioContext so iOS
-    // doesn't block it. Falls back to the built-in phone voice if the server voice isn't available.
     try {
       const r = await fetch("/api/voice/speak", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, voice: "nova" }) });
-      if (r.ok) {
-        const buf = await r.arrayBuffer();
-        const played = await playViaContext(buf);
-        if (played) { afterSpeak(); return; }
-      }
-    } catch { /* fall through to the browser voice */ }
+      if (r.ok) { const buf = await r.arrayBuffer(); if (await playViaContext(buf)) { afterSpeak(); return; } }
+    } catch { /* fall through to browser voice */ }
     speakBrowser(text);
   }
 
@@ -125,67 +117,56 @@ export default function Assistant() {
     return new Promise((resolve) => {
       const ac = audioCtxRef.current;
       if (!ac || ac.state === "closed") { resolve(false); return; }
-      const finish = (ok: boolean) => resolve(ok);
       ac.decodeAudioData(buf.slice(0)).then((audioBuf) => {
         try {
-          const src = ac.createBufferSource();
-          src.buffer = audioBuf; src.connect(ac.destination);
+          const src = ac.createBufferSource(); src.buffer = audioBuf; src.connect(ac.destination);
           ttsSourceRef.current = src;
-          src.onended = () => { if (ttsSourceRef.current === src) ttsSourceRef.current = null; finish(true); };
+          src.onended = () => { if (ttsSourceRef.current === src) ttsSourceRef.current = null; resolve(true); };
           if (ac.state === "suspended") ac.resume().catch(() => {});
           src.start();
-        } catch { finish(false); }
-      }).catch(() => finish(false));
+        } catch { resolve(false); }
+      }).catch(() => resolve(false));
     });
   }
 
   function speakBrowser(text: string) {
     if (typeof window === "undefined" || !("speechSynthesis" in window)) { afterSpeak(); return; }
     try {
-      const u = new SpeechSynthesisUtterance(text);
-      u.lang = "nl-NL"; u.rate = 1.0; u.pitch = 1.0;
+      const u = new SpeechSynthesisUtterance(text); u.lang = "nl-NL";
       const voices = window.speechSynthesis.getVoices();
-      const nl = voices.find((v) => /^nl/i.test(v.lang) && /google|enhanced|premium|natural|siri/i.test(v.name))
-        || voices.find((v) => /^nl/i.test(v.lang) && !v.localService)
-        || voices.find((v) => /^nl/i.test(v.lang));
+      const nl = voices.find((v) => /^nl/i.test(v.lang) && /google|enhanced|premium|natural|siri/i.test(v.name)) || voices.find((v) => /^nl/i.test(v.lang) && !v.localService) || voices.find((v) => /^nl/i.test(v.lang));
       if (nl) u.voice = nl;
       u.onend = afterSpeak; u.onerror = afterSpeak;
-      window.speechSynthesis.cancel();
-      window.speechSynthesis.speak(u);
+      window.speechSynthesis.cancel(); window.speechSynthesis.speak(u);
     } catch { afterSpeak(); }
   }
 
-  function stopSpeaking() {
-    try { window.speechSynthesis?.cancel(); } catch { /* ignore */ }
-    try { ttsSourceRef.current?.stop(); } catch { /* ignore */ }
-    ttsSourceRef.current = null;
-  }
+  function stopSpeaking() { try { window.speechSynthesis?.cancel(); } catch { /* ignore */ } try { ttsSourceRef.current?.stop(); } catch { /* ignore */ } ttsSourceRef.current = null; }
 
-  function onClaudeReply(text: string) {
-    if (replyFallbackRef.current) { clearTimeout(replyFallbackRef.current); replyFallbackRef.current = null; }
-    speak(text);
-  }
-
-  function sendToClaude(text: string) {
+  // ---- ask Claude (reliable Agent SDK round-trip) ----
+  async function askClaude(text: string) {
     const clean = text.trim();
     if (!clean) return;
-    // Voice mode: keep Claude conversational and quick — a short reply that gets read aloud, and no
-    // needless file-digging when the user is just chatting or greeting.
-    const msg = `[Spraakmodus: antwoord kort en vriendelijk in het Nederlands (1–2 zinnen), dit wordt voorgelezen. Voer alleen wijzigingen uit als ik daar duidelijk om vraag.] ${clean}`;
-    const ok = termRef.current?.send(msg + "\r");
-    if (!ok) { flash("Nog niet verbonden — momentje…", 2500); if (convRef.current) window.setTimeout(() => sendToClaude(clean), 1500); return; }
+    const myReq = ++reqRef.current;
     setModeS("processing");
-    if (replyFallbackRef.current) clearTimeout(replyFallbackRef.current);
-    replyFallbackRef.current = setTimeout(() => { if (convRef.current && modeRef.current === "processing") startListen(); else if (modeRef.current === "processing") setModeS("idle"); }, 45000);
+    try {
+      const r = await fetch("/api/voice/ask", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ projectId: projectRef.current, message: clean }) });
+      let j: { text?: string; error?: string } = {};
+      try { j = await r.json(); } catch { /* non-JSON */ }
+      if (myReq !== reqRef.current) return; // user stopped / asked again → drop this answer
+      if (!r.ok) { flash(j.error || (r.status === 401 ? "Je bent uitgelogd — log opnieuw in." : "Er ging iets mis."), 5000); afterSpeak(); return; }
+      speak(String(j.text || "").trim() || "Oké!");
+    } catch {
+      if (myReq !== reqRef.current) return;
+      flash("Geen verbinding met de server.", 3500); afterSpeak();
+    }
   }
 
   // ---- speech IN (hands-free) ----
   async function ensureStream(): Promise<MediaStream | null> {
     if (streamRef.current) return streamRef.current;
-    try {
-      const s = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
-      streamRef.current = s; return s;
-    } catch { flash("Geen toegang tot de microfoon. Sta het toe in je instellingen.", 5000); setConv(false); setModeS("idle"); return null; }
+    try { const s = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } }); streamRef.current = s; return s; }
+    catch { flash("Geen toegang tot de microfoon. Sta het toe in je instellingen.", 5000); setConv(false); setModeS("idle"); return null; }
   }
 
   async function startListen() {
@@ -229,8 +210,6 @@ export default function Assistant() {
   function stopListenHard() { if (vadTimerRef.current) { clearInterval(vadTimerRef.current); vadTimerRef.current = null; } try { if (recorderRef.current && recorderRef.current.state !== "inactive") recorderRef.current.stop(); } catch { /* ignore */ } }
   function releaseMic() { stopListenHard(); try { streamRef.current?.getTracks().forEach((t) => t.stop()); } catch { /* ignore */ } streamRef.current = null; try { audioCtxRef.current?.close(); } catch { /* ignore */ } audioCtxRef.current = null; }
 
-  // iOS Safari only lets speechSynthesis start from inside a user gesture. Prime it (speak a blank
-  // utterance) on the tap so later replies — which fire after an async fetch — are allowed to speak.
   const ttsPrimedRef = useRef(false);
   function primeTTS() {
     if (ttsPrimedRef.current || typeof window === "undefined" || !("speechSynthesis" in window)) return;
@@ -239,8 +218,7 @@ export default function Assistant() {
 
   function toggleConversation() {
     primeTTS();
-    if (down) { setDown(false); setRestarting(true); setTermKey((k) => k + 1); setConv(true); return; } // remount → fresh Claude, then listen on connect
-    if (convRef.current) { setConv(false); stopSpeaking(); stopListenHard(); releaseMic(); setModeS("idle"); }
+    if (convRef.current) { reqRef.current++; setConv(false); stopSpeaking(); stopListenHard(); releaseMic(); setModeS("idle"); }
     else { setConv(true); startListen(); }
   }
 
@@ -252,24 +230,12 @@ export default function Assistant() {
       const r = await fetch("/api/voice/transcribe", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ audio: dataUrl }) });
       let j: { text?: string; error?: string } = {};
       try { j = await r.json(); } catch { /* non-JSON */ }
-      if (!r.ok) {
-        const msg = j.error || (r.status === 413 ? "Opname te groot." : r.status === 503 ? "Spraak staat nog niet aan op de server." : r.status === 401 ? "Je bent uitgelogd — log opnieuw in." : `Transcriptie mislukt (fout ${r.status}).`);
-        flash(msg, 5000); setConv(false); setModeS("idle"); return;
-      }
+      if (!r.ok) { const msg = j.error || (r.status === 413 ? "Opname te groot." : r.status === 503 ? "Spraak staat nog niet aan op de server." : r.status === 401 ? "Je bent uitgelogd — log opnieuw in." : `Transcriptie mislukt (fout ${r.status}).`); flash(msg, 5000); setConv(false); setModeS("idle"); return; }
       const text = String(j.text || "").trim();
       if (!text) { if (convRef.current) startListen(); else setModeS("idle"); return; }
-      sendToClaude(text);
+      askClaude(text);
     } catch { flash("Geen verbinding met de server.", 3500); setModeS("idle"); }
   }
-
-  // ---- terminal lifecycle ----
-  function onTermStatus(s: string) { if (s === "open") { everConnRef.current = true; setConnected(true); setRestarting(false); setDown(false); } else if (!everConnRef.current) setConnected(false); }
-  function onTermExit(_code: number, willRestart: boolean) {
-    stopListenHard();
-    if (willRestart) { setRestarting(true); }
-    else { setDown(true); setConv(false); setModeS("idle"); setRestarting(false); if (ttsRef.current) speakOnce("Claude is even gestopt. Tik op het logo om opnieuw te starten."); }
-  }
-  function speakOnce(text: string) { try { const u = new SpeechSynthesisUtterance(text); u.lang = "nl-NL"; const nl = window.speechSynthesis.getVoices().find((v) => v.lang?.toLowerCase().startsWith("nl")); if (nl) u.voice = nl; window.speechSynthesis.cancel(); window.speechSynthesis.speak(u); } catch { /* ignore */ } }
 
   // ================= RENDER =================
   const bgLayer = (
@@ -302,6 +268,7 @@ export default function Assistant() {
               <input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Wachtwoord" className="w-full rounded-xl border border-border bg-background px-4 py-3 text-[15px] focus:outline-none focus:ring-2 focus:ring-ring/40" />
               {loginErr && <p className="mt-3 text-[13px] text-rose-600">{loginErr}</p>}
               <button type="submit" disabled={loginBusy} className="mt-5 w-full inline-flex items-center justify-center gap-2 rounded-full bg-foreground text-background font-semibold py-3 disabled:opacity-50">{loginBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : null} Inloggen</button>
+              <button type="button" onClick={() => setShowForm(false)} className="mt-3 w-full text-[13px] text-muted-foreground">Terug</button>
             </form>
           )}
         </div>
@@ -312,12 +279,7 @@ export default function Assistant() {
   const conversation = convRef.current;
   const listening = mode === "listening";
   const active = listening || conversation;
-  const statusLabel = down ? "Claude is gestopt — tik om opnieuw te starten"
-    : restarting ? "Claude start opnieuw…"
-    : mode === "listening" ? "Ik luister…"
-    : mode === "processing" ? "Claude is bezig…"
-    : mode === "speaking" ? "Claude praat…"
-    : conversation ? "Even stil…" : "Tik op het logo en praat";
+  const statusLabel = mode === "listening" ? "Ik luister…" : mode === "processing" ? "Claude is bezig…" : mode === "speaking" ? "Claude praat…" : conversation ? "Even stil…" : "Tik op het logo en praat";
 
   return (
     <div className="light flex flex-col text-foreground" style={{ height: "100dvh", paddingTop: "env(safe-area-inset-top)", paddingBottom: "env(safe-area-inset-bottom)" }}>
@@ -327,44 +289,25 @@ export default function Assistant() {
         @keyframes nebulaBreath { 0%,100%{transform:scale(1)} 50%{transform:scale(1.07)} }
       `}</style>
 
-      {/* Minimal header */}
       <header className="shrink-0 px-4 pt-3 pb-2 flex items-center justify-between gap-3">
         <button onClick={() => setPickerOpen(true)} className="flex items-center gap-1.5 min-w-0">
           <img src={logoUrl} alt="" className="h-6 w-auto" />
-          <span className="truncate text-[13px] font-medium text-foreground/70 max-w-[46vw]">{currentName}</span>
+          <span className="truncate text-[13px] font-medium text-foreground/70 max-w-[52vw]">{currentName}</span>
           <ChevronDown className="h-3.5 w-3.5 shrink-0 text-foreground/40" />
         </button>
-        <div className="flex items-center gap-2 shrink-0">
-          <span className={`inline-flex items-center gap-1.5 text-[11px] px-2.5 py-1 rounded-full border ${down ? "border-rose-300 text-rose-600 bg-rose-50" : restarting ? "border-amber-300 text-amber-700 bg-amber-50" : connected ? "border-emerald-500/30 text-emerald-700 bg-emerald-500/10" : "border-border text-muted-foreground bg-card/70"}`}>
-            <span className={`h-1.5 w-1.5 rounded-full ${down ? "bg-rose-500" : restarting ? "bg-amber-500" : connected ? "bg-emerald-500" : "bg-muted-foreground/50"}`} />
-            {down ? "gestopt" : restarting ? "herstarten" : connected ? "verbonden" : "verbinden…"}
-          </span>
-          <button onClick={() => { const n = !ttsOn; setTtsOn(n); if (!n) stopSpeaking(); }} className={`h-9 w-9 grid place-items-center rounded-full border ${ttsOn ? "border-border bg-card/70 text-foreground" : "border-border bg-card/40 text-muted-foreground"}`} aria-label="Stem aan/uit">
-            {ttsOn ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
-          </button>
-        </div>
+        <button onClick={() => { const n = !ttsOn; setTtsOn(n); if (!n) stopSpeaking(); }} className={`h-9 w-9 grid place-items-center rounded-full border ${ttsOn ? "border-border bg-card/70 text-foreground" : "border-border bg-card/40 text-muted-foreground"}`} aria-label="Stem aan/uit">
+          {ttsOn ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
+        </button>
       </header>
 
-      {/* The one control: a big Nebula logo */}
       <div className="flex-1 min-h-0 flex flex-col items-center justify-center gap-8 px-6">
-        <button
-          onClick={toggleConversation}
-          disabled={!projectId}
-          className="relative grid place-items-center rounded-full disabled:opacity-40"
-          style={{ width: "min(74vw, 340px)", height: "min(74vw, 340px)" }}
-          aria-label={conversation ? "Stop" : "Start praten"}
-        >
+        <button onClick={toggleConversation} disabled={!projectId} className="relative grid place-items-center rounded-full disabled:opacity-40" style={{ width: "min(74vw, 340px)", height: "min(74vw, 340px)" }} aria-label={conversation ? "Stop" : "Start praten"}>
           {listening && <span className="absolute inset-0 rounded-full bg-sky-400/25 animate-ping" />}
-          {(mode === "processing" || restarting) && <span className="absolute inset-2 rounded-full border-[3px] border-sky-400/50 border-t-transparent animate-spin" />}
-          <span className={`relative grid place-items-center rounded-full shadow-2xl transition-colors ${active ? "bg-sky-500" : down ? "bg-card border border-rose-200" : "bg-card border border-border"}`} style={{ width: "82%", height: "82%" }}>
-            <img
-              src={logoUrl}
-              alt="Nebula"
-              style={{ width: "62%", height: "auto", animation: listening ? "nebulaSpin 3s ease-in-out infinite" : (mode === "speaking" ? "nebulaBreath 1.6s ease-in-out infinite" : "none"), filter: active ? "brightness(0) invert(1)" : "none" }}
-            />
+          {mode === "processing" && <span className="absolute inset-2 rounded-full border-[3px] border-sky-400/50 border-t-transparent animate-spin" />}
+          <span className={`relative grid place-items-center rounded-full shadow-2xl transition-colors ${active ? "bg-sky-500" : "bg-card border border-border"}`} style={{ width: "82%", height: "82%" }}>
+            <img src={logoUrl} alt="Nebula" style={{ width: "62%", height: "auto", animation: listening ? "nebulaSpin 3s ease-in-out infinite" : (mode === "speaking" ? "nebulaBreath 1.6s ease-in-out infinite" : "none"), filter: active ? "brightness(0) invert(1)" : "none" }} />
           </span>
         </button>
-
         <div className="h-6 flex items-center gap-2 text-[15px] text-foreground/70 text-center px-4">
           {mode === "processing" && <Loader2 className="h-4 w-4 animate-spin" />}
           <span>{statusLabel}</span>
@@ -373,38 +316,23 @@ export default function Assistant() {
 
       {notice && <div className="shrink-0 mx-4 mb-4 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-[12px] px-3 py-2 text-center">{notice}</div>}
 
-      {/* Project picker */}
       {pickerOpen && (
         <div className="fixed inset-0 z-30 bg-black/30" onClick={() => setPickerOpen(false)}>
-          <div className="absolute left-3 right-3 top-3 rounded-2xl border border-border bg-card shadow-2xl max-h-[70vh] overflow-y-auto" onClick={(e) => e.stopPropagation()} style={{ marginTop: "env(safe-area-inset-top)" }}>
+          <div className="absolute left-3 right-3 top-3 rounded-2xl border border-border bg-card shadow-2xl max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()} style={{ marginTop: "env(safe-area-inset-top)" }}>
             <div className="flex items-center justify-between px-4 py-3 border-b border-border">
               <span className="text-[12px] uppercase tracking-wide text-muted-foreground">Kies een website</span>
               <button onClick={() => setPickerOpen(false)} className="text-muted-foreground"><X className="h-4 w-4" /></button>
             </div>
             {projects.length === 0 && <div className="px-4 py-4 text-sm text-muted-foreground">Nog geen projecten.</div>}
             {projects.map((p) => (
-              <button key={p.id} onClick={() => { if (p.id !== projectId) { setConv(false); releaseMic(); stopSpeaking(); setModeS("idle"); setDown(false); everConnRef.current = false; setConnected(false); } setProjectId(p.id); setPickerOpen(false); }}
+              <button key={p.id} onClick={() => { if (p.id !== projectId) { setConv(false); releaseMic(); stopSpeaking(); setModeS("idle"); reqRef.current++; } setProjectId(p.id); setPickerOpen(false); }}
                 className={`w-full text-left px-4 py-3 text-sm border-b border-border/60 ${p.id === projectId ? "font-medium bg-muted/50" : "text-foreground/80"}`}>{p.name}</button>
             ))}
+            <div className="p-3 flex flex-col gap-1">
+              <a href="/" className="flex items-center gap-2 px-3 py-2.5 text-sm text-foreground/80 rounded-lg hover:bg-muted"><ExternalLink className="h-4 w-4" /> Naar nebulabookings.com</a>
+              <button onClick={logout} className="flex items-center gap-2 px-3 py-2.5 text-sm text-rose-600 rounded-lg hover:bg-rose-50 text-left"><LogOut className="h-4 w-4" /> Uitloggen</button>
+            </div>
           </div>
-        </div>
-      )}
-
-      {/* Hidden engine: the real Claude Code terminal, off-screen but full-size so the socket, send() and
-          reply extraction all work. Auto-restarts if Claude drops. */}
-      {projectId > 0 && (
-        <div aria-hidden="true" style={{ position: "fixed", left: -99999, top: 0, width: 820, height: 560, opacity: 0, pointerEvents: "none", zIndex: -1, overflow: "hidden" }}>
-          <ClaudeTerminal
-            key={`${projectId}:${termKey}`}
-            ref={termRef}
-            projectId={projectId}
-            className="absolute inset-0"
-            autoRestart
-            onStatus={onTermStatus}
-            onConnected={(c) => { if (c) { everConnRef.current = true; setConnected(true); } }}
-            onExit={onTermExit}
-            onAssistantText={(text) => onClaudeReply(text)}
-          />
         </div>
       )}
     </div>

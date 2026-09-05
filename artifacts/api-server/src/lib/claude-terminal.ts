@@ -281,6 +281,36 @@ export async function isClaudeConnected(userId: number): Promise<boolean> {
   try { return blobConnected(JSON.parse(decryptSecret(u.claudeAuth))); } catch { return false; }
 }
 
+/**
+ * Prepare a user's coupled Claude login for a HEADLESS run (the voice assistant's Agent SDK subprocess):
+ * restore their OAuth credentials to a private writable home, pre-answer onboarding, and return an env
+ * that points the CLI at that home — WITHOUT any ANTHROPIC_API_KEY — so it bills the customer's own
+ * Claude subscription, not the platform. Returns connected=false if they haven't coupled a login yet.
+ */
+export async function prepareUserClaudeEnv(userId: number): Promise<{ env: Record<string, string>; connected: boolean; home: string }> {
+  const { home, configDir } = userDirs(userId);
+  for (const d of [home, configDir, path.join(home, ".config"), path.join(home, ".cache"), path.join(home, ".local", "share"), path.join(home, ".local", "state")]) {
+    await fs.mkdir(d, { recursive: true });
+  }
+  await restoreCreds(userId);
+  await seedOnboarding(userId, home); // hasCompletedOnboarding / trust / bypass pre-accepted (no prompts)
+  const connected = blobConnected(await readCredBlob(userId));
+  const env: Record<string, string> = {
+    PATH: process.env.PATH || "/usr/local/bin:/usr/bin:/bin",
+    HOME: home,
+    CLAUDE_CONFIG_DIR: configDir,
+    XDG_CONFIG_HOME: path.join(home, ".config"),
+    XDG_CACHE_HOME: path.join(home, ".cache"),
+    XDG_DATA_HOME: path.join(home, ".local", "share"),
+    XDG_STATE_HOME: path.join(home, ".local", "state"),
+    DISABLE_AUTOUPDATER: "1",
+    DISABLE_TELEMETRY: "1",
+    DISABLE_ERROR_REPORTING: "1",
+    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
+  };
+  return { env, connected, home };
+}
+
 export async function disconnectClaude(userId: number): Promise<void> {
   for (const s of [...sessions.values()]) if (s.userId === userId) await destroySession(s);
   for (const abs of Object.values(credPaths(userId))) await fs.rm(abs, { force: true }).catch(() => {});
