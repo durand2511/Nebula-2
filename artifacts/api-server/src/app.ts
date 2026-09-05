@@ -54,7 +54,7 @@ const beanPage = () => troll(200, "Nice try. 🖕", "Er valt hier niks te halen.
 // Serve the honeypot GIFs for EVERY host (before the customer-site routing) so they load on any domain.
 const HONEYPOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "app-builder", "dist", "public");
 app.use((req, res, next) => {
-  if (!/^\/honeypot-(dance|hacker|chihuahua|alert|llama)\.gif$/.test(req.path)) return next();
+  if (!/^\/honeypot-(dance|hacker|chihuahua|alert|llama|pathetic)\.gif$/.test(req.path)) return next();
   res.sendFile(path.join(HONEYPOT_DIR, req.path.slice(1)), (err) => { if (err && !res.headersSent) res.status(404).end(); });
 });
 
@@ -82,18 +82,37 @@ app.use((req, res, next) => {
 const ATTACK = /(?:\.\.[/\\]|\/etc\/(?:passwd|shadow)|\/proc\/self|\bwin\.ini\b|union\s+select|information_schema|\bsleep\(|\bbenchmark\(|\bor\b\s*['"]?1['"]?\s*=\s*['"]?1|php:\/\/|data:\/\/|file:\/\/|\$\{jndi:|\bexec\(|\bsystem\(|\bpassthru\(|;\s*(?:cat|ls|id|whoami|wget|curl)\b|\|\s*(?:nc|bash|sh)\b)/i;
 const EXPLOIT = /^\/(?:admin\.php|wp-config\.php|wp-login\.php|shell\.php|c99\.php|r57\.php|backup\.sql|dump\.sql|database\.sql|db\.sql|eval-stdin\.php|config\.php|configuration\.php|vendor\/phpunit)/i;
 const RECON = /^\/(?:\.env|\.git(?:\/|$)|\.svn|\.aws|\.ssh|\.htpasswd|wp-admin|wp-content|wordpress|xmlrpc\.php|phpmyadmin|phpMyAdmin|pma(?:\/|$)|adminer(?:\.php)?|administrator(?:\/|$)|cgi-bin|boaform|actuator|solr(?:\/|$))/i;
+// Persistent-attacker counter: keep probing after all the trolls and you eventually get the ultimate
+// disdain — Ian McShane calling you pathetic.
+const HITS = new Map<string, { count: number; start: number }>();
+const HITS_WINDOW_MS = 60 * 60 * 1000, PATHETIC_AT = 12;
+function bumpHits(ip: string): number {
+  const now = Date.now();
+  let e = HITS.get(ip);
+  if (!e || now - e.start > HITS_WINDOW_MS) { e = { count: 0, start: now }; HITS.set(ip, e); }
+  e.count++;
+  if (HITS.size > 20_000) { for (const [k, v] of HITS) if (now - v.start > HITS_WINDOW_MS) HITS.delete(k); }
+  return e.count;
+}
 app.use((req, res, next) => {
   if (req.method !== "GET" && req.method !== "POST") return next();
   let full = req.originalUrl || req.url;
   try { full = decodeURIComponent(full); } catch { /* keep raw if it won't decode */ }
-  if (ATTACK.test(full)) {
-    // Last layer: the red alarm + a deadpan staring llama.
-    res.status(403).type("html").send(troll(403, "🚨 ALARM — TOEGANG GEWEIGERD 🚨", "Aanvalspoging gedetecteerd en gelogd. Dit was de laatste deur, en die zit dicht. Dag. 🖕", "honeypot-alert.gif").replace('src="/honeypot-alert.gif"', 'src="/honeypot-alert.gif"><img src="/honeypot-llama.gif"'));
+  const attack = ATTACK.test(full), exploit = EXPLOIT.test(req.path), recon = RECON.test(req.path);
+  if (!attack && !exploit && !recon) return next();
+
+  // Still probing after everything? → PATHETIC.
+  if (bumpHits(realIp(req)) > PATHETIC_AT) {
+    res.status(403).type("html").send(troll(403, "PATHETIC.", "Nog steeds bezig? Na dit alles? Ga wat nuttigs doen. 🖕", "honeypot-pathetic.gif"));
     return;
   }
-  if (EXPLOIT.test(req.path)) { res.status(200).type("html").send(chihuahuaPage("Ohh, dus je wilde écht inbreken? 🖕", "Foute boel. Deze deur bestaat niet eens. Dag hackertje.")); return; }
-  if (RECON.test(req.path)) { res.status(200).type("html").send(beanPage()); return; }
-  next();
+  if (attack) {
+    // Deep-attack layer: the red alarm + a deadpan staring llama.
+    res.status(403).type("html").send(troll(403, "🚨 ALARM — TOEGANG GEWEIGERD 🚨", "Aanvalspoging gedetecteerd en gelogd. 🖕", "honeypot-alert.gif").replace('src="/honeypot-alert.gif"', 'src="/honeypot-alert.gif"><img src="/honeypot-llama.gif"'));
+    return;
+  }
+  if (exploit) { res.status(200).type("html").send(chihuahuaPage("Ohh, dus je wilde écht inbreken? 🖕", "Foute boel. Deze deur bestaat niet eens. Dag hackertje.")); return; }
+  res.status(200).type("html").send(beanPage());
 });
 
 // Modest default body limit for the general API surface. The chat stream route
