@@ -134,6 +134,7 @@ export default function Assistant() {
   const speakQ = useRef<{ text: string; final: boolean }[]>([]);
   const speakingRef = useRef(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const ackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const taskActiveRef = useRef(false);
   const dropRecordingRef = useRef(false);
   const audioElRef = useRef<HTMLAudioElement | null>(null); // real <audio> so speech keeps playing with the screen off
@@ -234,7 +235,7 @@ export default function Assistant() {
   function stopSpeaking() { speakQ.current = []; speakingRef.current = false; try { window.speechSynthesis?.cancel(); } catch { /* ignore */ } try { const el = audioElRef.current; if (el) { el.pause(); el.onended = null; el.onerror = null; } } catch { /* ignore */ } try { ttsSourceRef.current?.stop(); } catch { /* ignore */ } ttsSourceRef.current = null; }
 
   // ---- ask Claude: start a background task, get an INSTANT ack, poll for the real answer ----
-  function stopPolling() { if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; } taskActiveRef.current = false; }
+  function stopPolling() { if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; } if (ackTimerRef.current) { clearTimeout(ackTimerRef.current); ackTimerRef.current = null; } taskActiveRef.current = false; }
 
   function startPolling() {
     setModeS("processing");
@@ -266,7 +267,14 @@ export default function Assistant() {
       try { j = await r.json(); } catch { /* non-JSON */ }
       if (!r.ok) { flash(j.error || (r.status === 401 ? "Je bent uitgelogd — log opnieuw in." : "Er ging iets mis."), 5000); if (convRef.current) startListen(); else setModeS("idle"); return; }
       if (j.busy) { enqueueSpeak(String(j.text || "").trim(), false); return; }   // interjection → instant status
-      if (j.started) { taskActiveRef.current = true; startPolling(); if (j.ack) enqueueSpeak(j.ack, false); return; } // instant ack, work in bg
+      if (j.started) {
+        taskActiveRef.current = true;
+        startPolling();
+        // Only speak the ack if the answer is SLOW (>3s). A quick chat/question just gets its natural
+        // answer, no "Oké, ik hoorde…" ceremony.
+        if (j.ack) { ackTimerRef.current = setTimeout(() => { ackTimerRef.current = null; if (taskActiveRef.current) enqueueSpeak(j.ack!, false); }, 5000); }
+        return;
+      }
     } catch {
       flash("Geen verbinding met de server.", 3500);
       if (convRef.current) startListen(); else setModeS("idle");
