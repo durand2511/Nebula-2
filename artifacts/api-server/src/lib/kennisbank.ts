@@ -307,7 +307,7 @@ ${opts.jsonLd.map((o) => `<script type="application/ld+json">${JSON.stringify(o)
 <script>try{localStorage.setItem("nebula_lang","${lang}")}catch(e){}</script>
 <div class="bg" aria-hidden="true"></div><div class="haze" aria-hidden="true"></div>
 <div class="nav-wrap"><nav class="nav">
-  <a href="/">Home</a><a href="/ai-editor">Nebula</a><a href="/help">${lang === "en" ? "Guide" : "Uitleg"}</a><a class="on" href="${lang === "en" ? "/en/kennisbank" : "/kennisbank"}">${lang === "en" ? "Knowledge base" : "Kennisbank"}</a>${opts.altPath ? `<a href="${esc(opts.altPath)}" title="${lang === "en" ? "Nederlands" : "English"}">${lang === "en" ? "🇳🇱" : "🇬🇧"}</a>` : ""}
+  <a href="/">Home</a><a href="/ai-editor">Nebula</a><a href="/app">Nebula app</a><a href="/help">${lang === "en" ? "Guide" : "Uitleg"}</a><a class="on" href="${lang === "en" ? "/en/kennisbank" : "/kennisbank"}">${lang === "en" ? "Knowledge base" : "Kennisbank"}</a>${opts.altPath ? `<a href="${esc(opts.altPath)}" title="${lang === "en" ? "Nederlands" : "English"}">${lang === "en" ? "🇳🇱" : "🇬🇧"}</a>` : ""}
 </nav></div>
 <main>${opts.body}</main>
 <footer>
