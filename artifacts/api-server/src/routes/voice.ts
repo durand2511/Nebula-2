@@ -10,6 +10,7 @@ import { runAgentEdit } from "../lib/agent-editor.js";
 import { isClaudeConnected, prepareUserClaudeEnv } from "../lib/claude-terminal.js";
 import { buildVoiceTools } from "../lib/voice-tools.js";
 import { getSubdomain, listDomains, PLATFORM_HOST } from "../lib/domains.js";
+import { publishSite, isPublished } from "../lib/site-publish.js";
 import { db, projects } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { logger } from "../lib/logger";
@@ -85,6 +86,18 @@ function stripForSpeech(s: string): string {
     .replace(/\s+([,.!?])/g, "$1")
     .trim();
 }
+
+// When a user's own-subscription run fails, skip it for a while so requests don't keep eating a slow
+// fallback — use the fast, proven platform key instead.
+const ownSubBroken = new Map<number, number>();
+const OWN_SUB_COOLDOWN = 10 * 60 * 1000;
+function ownSubBrokenUntil(userId: number): boolean {
+  const t = ownSubBroken.get(userId);
+  if (!t) return false;
+  if (Date.now() > t) { ownSubBroken.delete(userId); return false; }
+  return true;
+}
+function markOwnSubBroken(userId: number): void { ownSubBroken.set(userId, Date.now() + OWN_SUB_COOLDOWN); }
 
 async function ownsProject(userId: number, projectId: number): Promise<boolean> {
   if (!projectId) return false;
@@ -197,21 +210,36 @@ router.post("/voice/ask", express.json({ limit: "256kb" }), async (req, res) => 
   const prompt = `${historyText}NIEUWE VRAAG: ${message}`;
 
   const base = { projectId, prompt, emit: () => { /* no stream */ }, systemPromptOverride: sys, mcpServers: tools.mcpServers, extraAllowedTools: tools.allowedTools, model: "claude-haiku-4-5-20251001", maxTurns: 20 } as const;
+
+  // Always time-bound a run so a hung subprocess (e.g. a token race on the customer's login) can never
+  // leave the phone waiting forever with "server not reachable".
+  async function runOnce(extra: Record<string, unknown>, ms: number) {
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), ms);
+    try { return await runAgentEdit({ ...base, ...extra, abortController: ac }); }
+    finally { clearTimeout(timer); }
+  }
   async function run() {
-    if (await isClaudeConnected(u!.id)) {
+    // Try the customer's own subscription, but only if it hasn't just failed — otherwise skip straight
+    // to the (fast, proven) platform key so every request doesn't eat a slow fallback.
+    if (!ownSubBrokenUntil(u!.id) && await isClaudeConnected(u!.id)) {
       const own = await prepareUserClaudeEnv(u!.id);
       if (own.connected) {
-        try { return await runAgentEdit({ ...base, subprocessEnv: own.env }); }
-        catch (err) { logger.warn({ err, projectId }, "[voice] own-subscription run failed — falling back to platform key"); }
+        try { return await runOnce({ subprocessEnv: own.env }, 40000); }
+        catch (err) { markOwnSubBroken(u!.id); logger.warn({ err, projectId }, "[voice] own-subscription run failed/timed out — using platform key for a while"); }
       }
     }
-    return await runAgentEdit({ ...base });
+    return await runOnce({}, 55000);
   }
   try {
     const r = await run();
     const edited = r.changed.length + r.created.length + r.deleted.length;
-    // Publishing/deploying is done by the agent via the publiceer_site tool (so "nog niet" is respected
-    // naturally). We just report the current live domain so the app header stays in sync.
+    // Auto-republish: if the site is ALREADY live, push the edit live too (keep it in sync). An
+    // unpublished site stays in draft until the user explicitly asks to publish (publiceer_site tool).
+    if (edited > 0) {
+      try { if (await isPublished(projectId)) await publishSite(projectId); }
+      catch (err) { logger.warn({ err, projectId }, "[voice] auto-republish failed"); }
+    }
     const domain = await liveDomain(projectId);
     const text = stripForSpeech((r.finalText || "").trim()) || (edited > 0 ? "Klaar, ik heb het aangepast." : "Oké!");
     remember(convoKey, message, text);
