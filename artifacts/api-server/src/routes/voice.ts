@@ -78,6 +78,20 @@ function remember(key: string, user: string, assistant: string): void {
   if (convo.size > 500) { const oldest = [...convo.entries()].sort((a, b) => a[1].at - b[1].at)[0]; if (oldest) convo.delete(oldest[0]); }
 }
 
+// ── Live progress ────────────────────────────────────────────────────────────────────────────────
+// While the agent works, the app can poll /voice/progress to show "waar is Claude nu mee bezig".
+const progress = new Map<string, { activity: string; at: number }>();
+function setProgress(key: string, activity: string): void { progress.set(key, { activity, at: Date.now() }); }
+function progressText(e: Record<string, unknown>): string | null {
+  if (e.type === "status" && e.message) return String(e.message).slice(0, 120);
+  if (e.type === "agent") {
+    const p = e.path ? ` ${String(e.path)}` : "";
+    if (e.event === "file_read") return `Bekijkt${p}`;
+    if (e.event === "patch_applied" || e.event === "file_saved") return `Past${p} aan`;
+  }
+  return null;
+}
+
 // Strip emoji + pictographs so the text-to-speech voice doesn't read them out (or trip over them).
 function stripForSpeech(s: string): string {
   return s
@@ -184,35 +198,32 @@ router.post("/voice/speak", express.json({ limit: "256kb" }), async (req, res) =
   }
 });
 
-// Voice assistant brain: one question → one clean answer. Runs the Claude Agent SDK (same engine as
-// the AI editor) against the project — it reads/edits the site files and returns a plain-language reply,
-// so there is NO terminal to scrape and the answer is always structured and reliable. Edits are written
-// straight back to the DB, so the site changes live.
-router.post("/voice/ask", express.json({ limit: "256kb" }), async (req, res) => {
-  const u = await getSessionUser(tokenFrom(req as any));
-  if (!u) { res.status(401).json({ error: "Niet ingelogd." }); return; }
-  const projectId = Number(req.body?.projectId) || 0;
-  const message = String(req.body?.message || "").trim().slice(0, 2000);
-  if (!message) { res.status(400).json({ error: "Geen bericht." }); return; }
-  if (!(await ownsProject(u.id, projectId))) { res.status(403).json({ error: "Geen toegang tot dit project." }); return; }
+// Background tasks so the user can ask "hoe gaat het?" WHILE the agent keeps working. A task runs in
+// the background; the app polls /voice/result for the answer. A new message while a task runs is treated
+// as an interjection and answered with the live status, without disturbing the running task.
+type TaskState = { running: boolean; result: { ok: boolean; text: string; domain: string | null } | null; at: number };
+const tasks = new Map<string, TaskState>();
+// Short, varied spoken acknowledgements so a command gets an INSTANT reply before the work is done.
+const ACKS = ["Oké, ik pak het op!", "Doe ik, momentje.", "Ja hoor, komt goed.", "Oké, ik ga ermee aan de slag.", "Prima, ik regel het even.", "Komt in orde, momentje.", "Top, ik ga het doen.", "Oké, ik kijk er even naar."];
+function statusReply(key: string): string {
+  const a = progress.get(key)?.activity || "";
+  const nice = a && a !== "Aan het werk…" ? ` Ik ben nu bezig met ${a.toLowerCase()}.` : "";
+  return `Ik ben er nog mee bezig.${nice} Momentje, ik laat het weten zodra ik klaar ben.`;
+}
 
-  // Prefer the customer's own coupled Claude subscription (no platform API cost); fall back to the
-  // platform API key if they haven't coupled a login or the subscription run fails. Sonnet for speed.
+// Run one voice task end to end (agent → auto-republish → reply). Same reliable engine as the editor.
+async function executeTask(userId: number, projectId: number, message: string): Promise<{ ok: boolean; text: string; domain: string | null }> {
   const tools = buildVoiceTools(projectId);
-  // Haiku for snappy voice replies. Today's date lets the agent compute "volgende maandag" for the agenda.
   const vandaag = new Date().toLocaleDateString("nl-NL", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
   const sys = `${VOICE_SYSTEM_PROMPT}\n\nVandaag is ${vandaag}. Gebruik dit om data uit te rekenen (bijvoorbeeld 'volgende maandag' → de juiste datum in jaar-maand-dag).`;
-
-  // Short-term memory: give the agent the recent exchange as context, but only execute the new question.
-  const convoKey = `${u.id}:${projectId}`;
+  const convoKey = `${userId}:${projectId}`;
   const history = historyFor(convoKey);
   const historyText = history.length ? "RECENT GESPREK (alleen als context, NIET opnieuw uitvoeren):\n" + history.map((t) => `${t.role === "user" ? "Gebruiker" : "Jij"}: ${t.text}`).join("\n") + "\n\n" : "";
   const prompt = `${historyText}NIEUWE VRAAG: ${message}`;
+  setProgress(convoKey, "Aan het werk…");
+  const emit = (e: Record<string, unknown>) => { const t = progressText(e); if (t) setProgress(convoKey, t); };
+  const base = { projectId, prompt, emit, systemPromptOverride: sys, mcpServers: tools.mcpServers, extraAllowedTools: tools.allowedTools, model: "claude-haiku-4-5-20251001", maxTurns: 40 } as const;
 
-  const base = { projectId, prompt, emit: () => { /* no stream */ }, systemPromptOverride: sys, mcpServers: tools.mcpServers, extraAllowedTools: tools.allowedTools, model: "claude-haiku-4-5-20251001", maxTurns: 40 } as const;
-
-  // Time-bound a run (generous — a real edit on a big site legitimately takes a while) so only a truly
-  // HUNG subprocess is cut off, never a normal slow run.
   async function runOnce(extra: Record<string, unknown>, ms: number) {
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), ms);
@@ -220,36 +231,57 @@ router.post("/voice/ask", express.json({ limit: "256kb" }), async (req, res) => 
     finally { clearTimeout(timer); }
   }
   async function run() {
-    // 1) Customer's own subscription — on the account's default model (forcing a model the subscription
-    //    doesn't recognise is what broke it). Skipped if it recently failed (cooldown).
-    if (!ownSubBrokenUntil(u!.id) && await isClaudeConnected(u!.id)) {
-      const own = await prepareUserClaudeEnv(u!.id);
+    if (!ownSubBrokenUntil(userId) && await isClaudeConnected(userId)) {
+      const own = await prepareUserClaudeEnv(userId);
       if (own.connected) {
         try { return await runOnce({ subprocessEnv: own.env, model: null }, 90000); }
-        catch (err) { markOwnSubBroken(u!.id); logger.warn({ err, projectId }, "[voice] own-subscription run failed — using platform key for a while"); }
+        catch (err) { markOwnSubBroken(userId); logger.warn({ err, projectId }, "[voice] own-subscription run failed — using platform key for a while"); }
       }
     }
-    // 2) Platform key on Haiku (fast); if that model isn't available, fall back to Sonnet (proven).
     try { return await runOnce({}, 120000); }
     catch (err) { logger.warn({ err, projectId }, "[voice] platform Haiku run failed — retrying on Sonnet"); return await runOnce({ model: "claude-sonnet-4-5" }, 120000); }
   }
-  try {
-    const r = await run();
-    const edited = r.changed.length + r.created.length + r.deleted.length;
-    // Auto-republish: if the site is ALREADY live, push the edit live too (keep it in sync). An
-    // unpublished site stays in draft until the user explicitly asks to publish (publiceer_site tool).
-    if (edited > 0) {
-      try { if (await isPublished(projectId)) await publishSite(projectId); }
-      catch (err) { logger.warn({ err, projectId }, "[voice] auto-republish failed"); }
-    }
-    const domain = await liveDomain(projectId);
-    const text = stripForSpeech((r.finalText || "").trim()) || (edited > 0 ? "Klaar, ik heb het aangepast." : "Oké!");
-    remember(convoKey, message, text);
-    res.json({ ok: r.ok, text, changed: r.changed, created: r.created, deleted: r.deleted, domain });
-  } catch (err) {
-    logger.error({ err, projectId }, "[voice] ask failed");
-    res.status(502).json({ error: "Ik kon dit even niet uitvoeren. Probeer het opnieuw." });
-  }
+  const r = await run();
+  const edited = r.changed.length + r.created.length + r.deleted.length;
+  if (edited > 0) { try { if (await isPublished(projectId)) await publishSite(projectId); } catch (err) { logger.warn({ err, projectId }, "[voice] auto-republish failed"); } }
+  const domain = await liveDomain(projectId);
+  const text = stripForSpeech((r.finalText || "").trim()) || (edited > 0 ? "Klaar, ik heb het aangepast." : "Oké!");
+  remember(convoKey, message, text);
+  return { ok: r.ok, text, domain };
+}
+
+router.post("/voice/ask", express.json({ limit: "256kb" }), async (req, res) => {
+  const u = await getSessionUser(tokenFrom(req as any));
+  if (!u) { res.status(401).json({ error: "Niet ingelogd." }); return; }
+  const projectId = Number(req.body?.projectId) || 0;
+  const message = String(req.body?.message || "").trim().slice(0, 2000);
+  if (!message) { res.status(400).json({ error: "Geen bericht." }); return; }
+  if (!(await ownsProject(u.id, projectId))) { res.status(403).json({ error: "Geen toegang tot dit project." }); return; }
+  const key = `${u.id}:${projectId}`;
+  // Already working? Answer the interjection with the live status; leave the running task alone.
+  if (tasks.get(key)?.running) { res.json({ busy: true, text: statusReply(key) }); return; }
+  // Otherwise start the task in the background and return IMMEDIATELY with a short spoken ack (varied),
+  // so the user hears "oké, ik pak het op" right away instead of waiting/loading. The app then polls
+  // /voice/result for the real answer.
+  tasks.set(key, { running: true, result: null, at: Date.now() });
+  executeTask(u.id, projectId, message)
+    .then((result) => tasks.set(key, { running: false, result, at: Date.now() }))
+    .catch((err) => { logger.error({ err, projectId }, "[voice] task failed"); tasks.set(key, { running: false, result: { ok: false, text: "Ik kon dit even niet uitvoeren. Probeer het opnieuw.", domain: null }, at: Date.now() }); progress.delete(key); });
+  const ack = ACKS[Math.floor(Math.random() * ACKS.length)];
+  res.json({ busy: false, started: true, ack });
+});
+
+// The app polls this for the final answer while the task runs in the background.
+router.get("/voice/result", async (req, res) => {
+  const u = await getSessionUser(tokenFrom(req as any));
+  if (!u) { res.status(401).json({ error: "Niet ingelogd." }); return; }
+  const projectId = Number(req.query.projectId) || 0;
+  const key = `${u.id}:${projectId}`;
+  const t = tasks.get(key);
+  if (!t) { res.json({ running: false, done: false }); return; }
+  if (t.running) { res.json({ running: true, activity: progress.get(key)?.activity || "" }); return; }
+  tasks.delete(key); progress.delete(key);
+  res.json({ running: false, done: true, text: t.result?.text || "Oké!", domain: t.result?.domain ?? null });
 });
 
 // Publish status for the app header: the live domain (custom > Nebula subdomain), or null.

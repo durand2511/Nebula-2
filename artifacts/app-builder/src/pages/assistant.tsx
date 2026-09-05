@@ -83,7 +83,7 @@ export default function Assistant() {
     fetch(`/api/voice/publish-status?projectId=${projectId}`).then((r) => (r.ok ? r.json() : null)).then((d) => setPublishDomain(d?.domain || null)).catch(() => {});
   }, [projectId]);
   useEffect(() => { try { window.speechSynthesis?.getVoices(); } catch { /* ignore */ } }, []);
-  useEffect(() => () => { releaseMic(); stopSpeaking(); }, []);
+  useEffect(() => () => { releaseMic(); stopSpeaking(); stopPolling(); }, []);
 
   async function doLogin(e: React.FormEvent) {
     e.preventDefault();
@@ -99,23 +99,51 @@ export default function Assistant() {
   }
 
   function logout() {
-    setConv(false); releaseMic(); stopSpeaking(); setModeS("idle");
+    setConv(false); releaseMic(); stopSpeaking(); stopPolling(); setModeS("idle");
     clearToken(); setProjects([]); setProjectId(0); setPickerOpen(false); setShowForm(false); setAuthState("out");
   }
 
   const currentName = useMemo(() => projects.find((p) => p.id === projectId)?.name || "website", [projects, projectId]);
 
-  // ---- speech OUT (natural voice) ----
-  const afterSpeak = () => { if (convRef.current) startListen(); else setModeS("idle"); };
+  // ---- speech OUT (queued so the instant ack and the final answer never overlap) ----
+  const speakQ = useRef<{ text: string; final: boolean }[]>([]);
+  const speakingRef = useRef(false);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const taskActiveRef = useRef(false);
+  const dropRecordingRef = useRef(false);
 
-  async function speak(text: string) {
-    if (!ttsRef.current || !text) { afterSpeak(); return; }
+  function afterResult() { if (convRef.current) startListen(); else setModeS("idle"); }
+
+  function enqueueSpeak(text: string, final: boolean) {
+    if (!ttsRef.current || !text) { if (final) afterResult(); return; }
+    speakQ.current.push({ text, final });
+    if (!speakingRef.current) void drainSpeak();
+  }
+
+  async function drainSpeak() {
+    speakingRef.current = true;
     setModeS("speaking");
-    try {
-      const r = await fetch("/api/voice/speak", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, voice: "nova" }) });
-      if (r.ok) { const buf = await r.arrayBuffer(); if (await playViaContext(buf)) { afterSpeak(); return; } }
-    } catch { /* fall through to browser voice */ }
-    speakBrowser(text);
+    while (speakQ.current.length) {
+      const item = speakQ.current.shift()!;
+      await speakOne(item.text);
+      if (item.final) { speakingRef.current = false; afterResult(); return; }
+    }
+    speakingRef.current = false;
+    if (taskActiveRef.current) setModeS("processing");   // asides done, task still running
+    else if (convRef.current) startListen();
+    else setModeS("idle");
+  }
+
+  function speakOne(text: string): Promise<void> {
+    return new Promise((resolve) => {
+      void (async () => {
+        try {
+          const r = await fetch("/api/voice/speak", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, voice: "nova" }) });
+          if (r.ok) { const buf = await r.arrayBuffer(); if (await playViaContext(buf)) { resolve(); return; } }
+        } catch { /* fall through to the browser voice */ }
+        speakBrowserOnce(text, resolve);
+      })();
+    });
   }
 
   function playViaContext(buf: ArrayBuffer): Promise<boolean> {
@@ -134,37 +162,57 @@ export default function Assistant() {
     });
   }
 
-  function speakBrowser(text: string) {
-    if (typeof window === "undefined" || !("speechSynthesis" in window)) { afterSpeak(); return; }
+  function speakBrowserOnce(text: string, done: () => void) {
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) { done(); return; }
     try {
       const u = new SpeechSynthesisUtterance(text); u.lang = "nl-NL";
       const voices = window.speechSynthesis.getVoices();
       const nl = voices.find((v) => /^nl/i.test(v.lang) && /google|enhanced|premium|natural|siri/i.test(v.name)) || voices.find((v) => /^nl/i.test(v.lang) && !v.localService) || voices.find((v) => /^nl/i.test(v.lang));
       if (nl) u.voice = nl;
-      u.onend = afterSpeak; u.onerror = afterSpeak;
+      u.onend = () => done(); u.onerror = () => done();
       window.speechSynthesis.cancel(); window.speechSynthesis.speak(u);
-    } catch { afterSpeak(); }
+    } catch { done(); }
   }
 
-  function stopSpeaking() { try { window.speechSynthesis?.cancel(); } catch { /* ignore */ } try { ttsSourceRef.current?.stop(); } catch { /* ignore */ } ttsSourceRef.current = null; }
+  function stopSpeaking() { speakQ.current = []; speakingRef.current = false; try { window.speechSynthesis?.cancel(); } catch { /* ignore */ } try { ttsSourceRef.current?.stop(); } catch { /* ignore */ } ttsSourceRef.current = null; }
 
-  // ---- ask Claude (reliable Agent SDK round-trip) ----
+  // ---- ask Claude: start a background task, get an INSTANT ack, poll for the real answer ----
+  function stopPolling() { if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; } taskActiveRef.current = false; }
+
+  function startPolling() {
+    setModeS("processing");
+    if (pollRef.current) clearInterval(pollRef.current);
+    const poll = async () => {
+      try {
+        const r = await fetch(`/api/voice/result?projectId=${projectRef.current}`);
+        const j = await r.json();
+        if (j.running) return;              // still working in the background
+        stopPolling();
+        if (j.done) {
+          if (j.domain !== undefined) setPublishDomain(j.domain || null);
+          if (modeRef.current === "listening") { dropRecordingRef.current = true; stopListenHard(); } // don't record the answer
+          enqueueSpeak(String(j.text || "").trim() || "Klaar.", true);
+        }
+      } catch { /* keep polling */ }
+    };
+    pollRef.current = setInterval(poll, 2000);
+    poll();
+  }
+
   async function askClaude(text: string) {
     const clean = text.trim();
     if (!clean) return;
-    const myReq = ++reqRef.current;
     setModeS("processing");
     try {
       const r = await fetch("/api/voice/ask", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ projectId: projectRef.current, message: clean }) });
-      let j: { text?: string; error?: string; domain?: string | null } = {};
+      let j: { started?: boolean; busy?: boolean; ack?: string; text?: string; error?: string } = {};
       try { j = await r.json(); } catch { /* non-JSON */ }
-      if (myReq !== reqRef.current) return; // user stopped / asked again → drop this answer
-      if (!r.ok) { flash(j.error || (r.status === 401 ? "Je bent uitgelogd — log opnieuw in." : "Er ging iets mis."), 5000); afterSpeak(); return; }
-      if (j.domain !== undefined) setPublishDomain(j.domain || null);
-      speak(String(j.text || "").trim() || "Oké!");
+      if (!r.ok) { flash(j.error || (r.status === 401 ? "Je bent uitgelogd — log opnieuw in." : "Er ging iets mis."), 5000); if (convRef.current) startListen(); else setModeS("idle"); return; }
+      if (j.busy) { enqueueSpeak(String(j.text || "").trim(), false); return; }   // interjection → instant status
+      if (j.started) { taskActiveRef.current = true; startPolling(); if (j.ack) enqueueSpeak(j.ack, false); return; } // instant ack, work in bg
     } catch {
-      if (myReq !== reqRef.current) return;
-      flash("Geen verbinding met de server.", 3500); afterSpeak();
+      flash("Geen verbinding met de server.", 3500);
+      if (convRef.current) startListen(); else setModeS("idle");
     }
   }
 
@@ -189,8 +237,10 @@ export default function Assistant() {
     let sent = false;
     mr.onstop = async () => {
       if (vadTimerRef.current) { clearInterval(vadTimerRef.current); vadTimerRef.current = null; }
+      if (dropRecordingRef.current) { dropRecordingRef.current = false; return; } // the answer arrived → discard this recording
       const blob = new Blob(chunksRef.current, { type: mimeRef.current || "audio/webm" });
-      if (sent) await transcribe(blob); else if (convRef.current) setModeS("idle");
+      if (sent) await transcribe(blob);
+      else if (convRef.current) setModeS(taskActiveRef.current ? "processing" : "idle");
     };
     recorderRef.current = mr; mr.start(200); setModeS("listening");
 
@@ -208,7 +258,7 @@ export default function Assistant() {
       if (rms > 0.03) { speech = true; lastLoud = now; }
       const finish = () => { sent = speech; try { src.disconnect(); } catch { /* ignore */ } try { if (recorderRef.current && recorderRef.current.state !== "inactive") recorderRef.current.stop(); } catch { /* ignore */ } };
       if (speech && now - lastLoud > 1300) { finish(); }
-      else if (!speech && now - started > 7000) { finish(); if (convRef.current) { flash("Ik hoorde niets — tik het logo om opnieuw te starten.", 3500); setConv(false); } }
+      else if (!speech && now - started > 7000) { finish(); if (!taskActiveRef.current && convRef.current) { flash("Ik hoorde niets — tik het logo om opnieuw te starten.", 3500); setConv(false); } }
       else if (now - started > 30000) { finish(); }
     }, 80);
   }
@@ -224,23 +274,28 @@ export default function Assistant() {
 
   function toggleConversation() {
     primeTTS();
-    if (convRef.current) { reqRef.current++; setConv(false); stopSpeaking(); stopListenHard(); releaseMic(); setModeS("idle"); }
+    // Working in the background? A tap = ask a quick question ("hoe gaat het?") WITHOUT stopping the work.
+    if (taskActiveRef.current && modeRef.current === "processing") { startListen(); return; }
+    if (convRef.current) { reqRef.current++; setConv(false); stopSpeaking(); stopListenHard(); stopPolling(); releaseMic(); setModeS("idle"); }
     else { setConv(true); startListen(); }
   }
 
+  // When a task is running, an empty/failed capture must NOT re-open the mic — just go back to waiting.
+  const backToWait = () => { if (taskActiveRef.current) setModeS("processing"); else if (convRef.current) startListen(); else setModeS("idle"); };
+
   async function transcribe(blob: Blob) {
-    if (blob.size < 600) { if (convRef.current) startListen(); return; }
+    if (blob.size < 600) { backToWait(); return; }
     setModeS("processing");
     try {
       const dataUrl: string = await new Promise((resolve, reject) => { const fr = new FileReader(); fr.onload = () => resolve(String(fr.result)); fr.onerror = reject; fr.readAsDataURL(blob); });
       const r = await fetch("/api/voice/transcribe", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ audio: dataUrl }) });
       let j: { text?: string; error?: string } = {};
       try { j = await r.json(); } catch { /* non-JSON */ }
-      if (!r.ok) { const msg = j.error || (r.status === 413 ? "Opname te groot." : r.status === 503 ? "Spraak staat nog niet aan op de server." : r.status === 401 ? "Je bent uitgelogd — log opnieuw in." : `Transcriptie mislukt (fout ${r.status}).`); flash(msg, 5000); setConv(false); setModeS("idle"); return; }
+      if (!r.ok) { const msg = j.error || (r.status === 413 ? "Opname te groot." : r.status === 503 ? "Spraak staat nog niet aan op de server." : r.status === 401 ? "Je bent uitgelogd — log opnieuw in." : `Transcriptie mislukt (fout ${r.status}).`); flash(msg, 5000); if (!taskActiveRef.current) setConv(false); backToWait(); return; }
       const text = String(j.text || "").trim();
-      if (!text) { if (convRef.current) startListen(); else setModeS("idle"); return; }
+      if (!text) { backToWait(); return; }
       askClaude(text);
-    } catch { flash("Geen verbinding met de server.", 3500); setModeS("idle"); }
+    } catch { flash("Geen verbinding met de server.", 3500); backToWait(); }
   }
 
   // ================= RENDER =================
@@ -345,7 +400,7 @@ export default function Assistant() {
               <div>
                 <div className="px-4 pt-3 pb-1 text-[11px] uppercase tracking-wide text-muted-foreground">Wissel website</div>
                 {projects.map((p) => (
-                  <button key={p.id} onClick={() => { if (p.id !== projectId) { setConv(false); releaseMic(); stopSpeaking(); setModeS("idle"); reqRef.current++; } setProjectId(p.id); setPickerOpen(false); }}
+                  <button key={p.id} onClick={() => { if (p.id !== projectId) { setConv(false); releaseMic(); stopSpeaking(); stopPolling(); setModeS("idle"); reqRef.current++; } setProjectId(p.id); setPickerOpen(false); }}
                     className={`w-full text-left px-4 py-2.5 text-sm ${p.id === projectId ? "font-medium bg-muted/50" : "text-foreground/80"}`}>{p.name}</button>
                 ))}
               </div>
