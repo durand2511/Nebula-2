@@ -241,19 +241,12 @@ async function executeTask(userId: number, projectId: number, message: string): 
     finally { clearTimeout(timer); }
   }
   async function run() {
-    // Prefer the customer's OWN Claude Code subscription (better models/quality), on the account's
-    // default model. Generous timeout so a real run isn't cut off; if it fails, cool down for a while and
-    // fall back to the platform key so it still answers.
-    if (!ownSubBrokenUntil(userId) && await isClaudeConnected(userId)) {
-      const own = await prepareUserClaudeEnv(userId);
-      if (own.connected) {
-        try { return await runOnce({ subprocessEnv: own.env, model: null }, 90000); }
-        catch (err) { markOwnSubBroken(userId); logger.warn({ err, projectId }, "[voice] own-subscription run failed — using platform key for a while"); }
-      }
-    }
-    // Fallback: platform key on Haiku, Sonnet if Haiku isn't available on the key.
-    try { return await runOnce({}, 120000); }
-    catch (err) { logger.warn({ err, projectId }, "[voice] platform Haiku run failed — retrying on Sonnet"); return await runOnce({ model: "claude-sonnet-4-5" }, 120000); }
+    // PURELY the customer's own Claude Code subscription — no platform API key, ever. If the login isn't
+    // coupled or the run fails, we surface an error instead of falling back to an API key.
+    if (!(await isClaudeConnected(userId))) throw new Error("NO_SUBSCRIPTION");
+    const own = await prepareUserClaudeEnv(userId);
+    if (!own.connected) throw new Error("NO_SUBSCRIPTION");
+    return await runOnce({ subprocessEnv: own.env, model: null }, 90000);
   }
   const r = await run();
   // Auto-republish an edit to WHERE THE SITE ALREADY LIVES (its connected custom domain via publishSite,
@@ -284,7 +277,15 @@ router.post("/voice/ask", express.json({ limit: "256kb" }), async (req, res) => 
   tasks.set(key, { running: true, result: null, at: Date.now() });
   executeTask(u.id, projectId, message)
     .then((result) => tasks.set(key, { running: false, result, at: Date.now() }))
-    .catch((err) => { logger.error({ err, projectId }, "[voice] task failed"); tasks.set(key, { running: false, result: { ok: false, text: "Ik kon dit even niet uitvoeren. Probeer het opnieuw.", domain: null }, at: Date.now() }); progress.delete(key); });
+    .catch((err) => {
+      logger.error({ err, projectId }, "[voice] task failed");
+      const noSub = err instanceof Error && err.message === "NO_SUBSCRIPTION";
+      const text = noSub
+        ? "Je Claude-abonnement is nog niet gekoppeld. Koppel het eerst in de Nebula-editor via de Claude-knop, dan kan ik aan de slag."
+        : "Ik kon dit even niet uitvoeren. Probeer het zo nog eens.";
+      tasks.set(key, { running: false, result: { ok: false, text, domain: null }, at: Date.now() });
+      progress.delete(key);
+    });
   res.json({ busy: false, started: true, ack: makeAck(message) });
 });
 
