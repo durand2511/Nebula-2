@@ -203,8 +203,14 @@ router.post("/voice/speak", express.json({ limit: "256kb" }), async (req, res) =
 // as an interjection and answered with the live status, without disturbing the running task.
 type TaskState = { running: boolean; result: { ok: boolean; text: string; domain: string | null } | null; at: number };
 const tasks = new Map<string, TaskState>();
-// Short, varied spoken acknowledgements so a command gets an INSTANT reply before the work is done.
-const ACKS = ["Oké, ik pak het op!", "Doe ik, momentje.", "Ja hoor, komt goed.", "Oké, ik ga ermee aan de slag.", "Prima, ik regel het even.", "Komt in orde, momentje.", "Top, ik ga het doen.", "Oké, ik kijk er even naar."];
+// Instant spoken acknowledgement — echoes back WHAT was understood so the user knows it heard them right,
+// with a varied opener so it doesn't sound robotic.
+const ACK_OPENERS = ["Oké", "Doe ik", "Komt goed", "Top", "Prima", "Helder"];
+function makeAck(message: string): string {
+  const opener = ACK_OPENERS[Math.floor(Math.random() * ACK_OPENERS.length)];
+  const heard = message.length > 140 ? message.slice(0, 140) + "…" : message;
+  return `${opener}. Ik hoorde: ${heard}. Momentje, ik ga ermee aan de slag.`;
+}
 function statusReply(key: string): string {
   const a = progress.get(key)?.activity || "";
   const nice = a && a !== "Aan het werk…" ? ` Ik ben nu bezig met ${a.toLowerCase()}.` : "";
@@ -275,8 +281,7 @@ router.post("/voice/ask", express.json({ limit: "256kb" }), async (req, res) => 
   executeTask(u.id, projectId, message)
     .then((result) => tasks.set(key, { running: false, result, at: Date.now() }))
     .catch((err) => { logger.error({ err, projectId }, "[voice] task failed"); tasks.set(key, { running: false, result: { ok: false, text: "Ik kon dit even niet uitvoeren. Probeer het opnieuw.", domain: null }, at: Date.now() }); progress.delete(key); });
-  const ack = ACKS[Math.floor(Math.random() * ACKS.length)];
-  res.json({ busy: false, started: true, ack });
+  res.json({ busy: false, started: true, ack: makeAck(message) });
 });
 
 // The app polls this for the final answer while the task runs in the background.

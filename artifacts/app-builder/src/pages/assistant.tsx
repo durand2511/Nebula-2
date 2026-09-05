@@ -23,6 +23,15 @@ function pickAudioMime(): string {
   return "";
 }
 
+// A tiny valid silent WAV — played once inside the first tap to UNLOCK the <audio> element, so later
+// (async) speech is allowed and keeps playing even when the screen is off.
+function silentWavUrl(): string {
+  const sr = 8000, n = 400; const buf = new ArrayBuffer(44 + n * 2); const v = new DataView(buf);
+  const w = (o: number, s: string) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+  w(0, "RIFF"); v.setUint32(4, 36 + n * 2, true); w(8, "WAVE"); w(12, "fmt "); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true); v.setUint32(24, sr, true); v.setUint32(28, sr * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true); w(36, "data"); v.setUint32(40, n * 2, true);
+  return URL.createObjectURL(new Blob([buf], { type: "audio/wav" }));
+}
+
 export default function Assistant() {
   const [authState, setAuthState] = useState<"checking" | "out" | "in">("checking");
   const [showForm, setShowForm] = useState(false);
@@ -127,6 +136,7 @@ export default function Assistant() {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const taskActiveRef = useRef(false);
   const dropRecordingRef = useRef(false);
+  const audioElRef = useRef<HTMLAudioElement | null>(null); // real <audio> so speech keeps playing with the screen off
 
   function afterResult() { if (convRef.current) startListen(); else setModeS("idle"); }
 
@@ -155,13 +165,37 @@ export default function Assistant() {
       void (async () => {
         try {
           const r = await fetch("/api/voice/speak", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, voice: "nova" }) });
-          if (r.ok) { const buf = await r.arrayBuffer(); if (await playViaContext(buf)) { resolve(); return; } }
+          if (r.ok) {
+            const buf = await r.arrayBuffer();
+            if (await playViaAudioEl(new Blob([buf], { type: "audio/mpeg" }))) { resolve(); return; } // plays with screen off
+            if (await playViaContext(buf)) { resolve(); return; }                                     // proven fallback (foreground)
+          }
         } catch { /* fall through to the browser voice */ }
         speakBrowserOnce(text, resolve);
       })();
     });
   }
 
+  // Play through the <audio> element (unlike Web Audio, an <audio> that started keeps playing when the
+  // screen locks — like a music app). Media Session marks it as playing media.
+  function playViaAudioEl(blob: Blob): Promise<boolean> {
+    return new Promise((resolve) => {
+      const el = audioElRef.current;
+      if (!el) { resolve(false); return; }
+      const url = URL.createObjectURL(blob);
+      let safety: ReturnType<typeof setTimeout> | null = null;
+      const done = (ok: boolean) => { if (safety) clearTimeout(safety); el.onended = null; el.onerror = null; try { URL.revokeObjectURL(url); } catch { /* ignore */ } resolve(ok); };
+      el.onended = () => done(true);
+      el.onerror = () => done(false);
+      try {
+        el.src = url;
+        try { if ("mediaSession" in navigator) { navigator.mediaSession.metadata = new MediaMetadata({ title: "Nebula Assistent", artist: "Claude" }); navigator.mediaSession.playbackState = "playing"; } } catch { /* ignore */ }
+        el.play().then(() => { safety = setTimeout(() => done(true), 90000); }).catch(() => done(false));
+      } catch { done(false); }
+    });
+  }
+
+  // Proven foreground fallback (Web Audio) if the <audio> element can't play.
   function playViaContext(buf: ArrayBuffer): Promise<boolean> {
     return new Promise((resolve) => {
       const ac = audioCtxRef.current;
@@ -174,7 +208,6 @@ export default function Assistant() {
           const audioBuf = await ac.decodeAudioData(buf.slice(0));
           const src = ac.createBufferSource(); src.buffer = audioBuf; src.connect(ac.destination);
           ttsSourceRef.current = src;
-          // Failsafe: never let the speech queue hang if onended doesn't fire (e.g. after a screen sleep).
           safety = setTimeout(() => done(true), Math.ceil(audioBuf.duration * 1000) + 2500);
           src.onended = () => { if (ttsSourceRef.current === src) ttsSourceRef.current = null; done(true); };
           src.start();
@@ -198,7 +231,7 @@ export default function Assistant() {
     } catch { finish(); }
   }
 
-  function stopSpeaking() { speakQ.current = []; speakingRef.current = false; try { window.speechSynthesis?.cancel(); } catch { /* ignore */ } try { ttsSourceRef.current?.stop(); } catch { /* ignore */ } ttsSourceRef.current = null; }
+  function stopSpeaking() { speakQ.current = []; speakingRef.current = false; try { window.speechSynthesis?.cancel(); } catch { /* ignore */ } try { const el = audioElRef.current; if (el) { el.pause(); el.onended = null; el.onerror = null; } } catch { /* ignore */ } try { ttsSourceRef.current?.stop(); } catch { /* ignore */ } ttsSourceRef.current = null; }
 
   // ---- ask Claude: start a background task, get an INSTANT ack, poll for the real answer ----
   function stopPolling() { if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; } taskActiveRef.current = false; }
@@ -292,8 +325,11 @@ export default function Assistant() {
 
   const ttsPrimedRef = useRef(false);
   function primeTTS() {
-    if (ttsPrimedRef.current || typeof window === "undefined" || !("speechSynthesis" in window)) return;
-    try { const u = new SpeechSynthesisUtterance(" "); u.volume = 0; window.speechSynthesis.speak(u); ttsPrimedRef.current = true; } catch { /* ignore */ }
+    if (ttsPrimedRef.current || typeof window === "undefined") return;
+    try { if ("speechSynthesis" in window) { const u = new SpeechSynthesisUtterance(" "); u.volume = 0; window.speechSynthesis.speak(u); } } catch { /* ignore */ }
+    const el = audioElRef.current;
+    if (el) { try { const url = silentWavUrl(); el.src = url; void el.play().then(() => { el.pause(); el.currentTime = 0; try { URL.revokeObjectURL(url); } catch { /* ignore */ } }).catch(() => {}); } catch { /* ignore */ } }
+    ttsPrimedRef.current = true;
   }
 
   function toggleConversation() {
@@ -369,6 +405,8 @@ export default function Assistant() {
   return (
     <div className="light flex flex-col text-foreground" style={{ height: "100dvh", paddingTop: "env(safe-area-inset-top)", paddingBottom: "env(safe-area-inset-bottom)" }}>
       {bgLayer}
+      {/* Hidden media element so Claude's voice keeps playing with the screen off (like a music app). */}
+      <audio ref={audioElRef} playsInline preload="auto" style={{ display: "none" }} />
       <style>{`
         @keyframes nebulaSpin { 0%{transform:rotate(0deg) scale(1)} 50%{transform:rotate(180deg) scale(1.12)} 100%{transform:rotate(360deg) scale(1)} }
         @keyframes nebulaBreath { 0%,100%{transform:scale(1)} 50%{transform:scale(1.07)} }
