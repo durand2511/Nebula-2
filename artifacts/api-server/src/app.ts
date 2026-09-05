@@ -4,7 +4,7 @@ import pinoHttp from "pino-http";
 import path from "node:path";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
-import { timingSafeEqual } from "node:crypto";
+import { timingSafeEqual, createHash } from "node:crypto";
 import router from "./routes";
 import { logger } from "./lib/logger";
 import { isReserved, findByHost, normalizeHost, PLATFORM_HOST, SEO_REDIRECT_HOSTS } from "./lib/domains";
@@ -44,12 +44,73 @@ function realIp(req: express.Request): string {
   return xff || req.ip || req.socket?.remoteAddress || "";
 }
 
+// ── Psychological-warfare layer ──────────────────────────────────────────────
+// We reflect the attacker's OWN request data back at them (IP, browser, OS, language,
+// country) plus a case number that stays IDENTICAL every visit — so it feels like a
+// system that remembers and watches them personally. All 100% real data THEY sent, which
+// makes it far creepier than any threat. Nothing here touches a normal visitor: it only
+// renders inside the honeypot handlers, which only fire on attack/scan patterns.
+const escPw = (s: string) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c] as string));
+function uaSummary(ua: string): { browser: string; os: string; spoof: boolean } {
+  const u = ua || "";
+  const os = /Windows NT 10/.test(u) ? "Windows 10/11" : /Windows/.test(u) ? "Windows" : /Android/.test(u) ? "Android"
+    : /iPhone|iPad|iOS/.test(u) ? "iOS" : /Mac OS X/.test(u) ? "macOS" : /Linux/.test(u) ? "Linux" : "onbekend OS";
+  const browser = /Edg\//.test(u) ? "Edge" : /OPR\//.test(u) ? "Opera" : /Chrome\//.test(u) ? "Chrome" : /Firefox\//.test(u) ? "Firefox"
+    : /Safari\//.test(u) ? "Safari" : /curl/i.test(u) ? "curl" : /python|requests|aiohttp|httpx/i.test(u) ? "een Python-script"
+    : /go-http|Go-http/i.test(u) ? "een Go-scanner" : /nikto|sqlmap|nmap|masscan|zgrab|nuclei|acunetix|dirbuster|gobuster|wpscan/i.test(u) ? "een scanner-tool" : "onbekend";
+  // Tools/scripts pretending to be a browser, or no UA at all, read as "spoofed".
+  const spoof = !u || /curl|python|requests|httpx|go-http|nikto|sqlmap|nmap|masscan|zgrab|nuclei|scan|bot/i.test(u);
+  return { browser, os, spoof };
+}
+function attackerCountry(req: express.Request): string {
+  const h = req.headers;
+  const cc = String(h["cf-ipcountry"] || h["x-vercel-ip-country"] || h["x-appengine-country"] || "").toUpperCase();
+  if (cc && cc !== "XX") return cc;
+  const lang = String(h["accept-language"] || "");
+  const m = lang.match(/[a-z]{2}-([A-Z]{2})/);
+  return m ? m[1] : "??";
+}
+// Seeds of doubt — make them distrust their own tools and their own memory of what "worked".
+const DOUBT = [
+  "Niet alles wat je terugkreeg was echt. Wélke van je laatste hits waren nep? Dat weet je niet meer, hè?",
+  "Je scanner denkt dat 'ie iets vond. Je scanner heeft het mis. Steeds opnieuw.",
+  "Elk verzoek dat je stuurt leert ons meer over jou dan jij ooit over ons leert.",
+  "Deze pagina bestaat niet. En toch lees je 'm. Denk daar maar eens goed over na.",
+  "Is dit een honeypot? Of wil ik alleen dat je dát denkt? Slaap lekker.",
+  "Drie van je vorige requests kwamen nooit aan waar jij denkt. Of waren het er vier?",
+  "De data die je net 'buitmaakte' hebben wij voor je klaargelegd. Net als de vorige keer.",
+  "Je bent hier niet de eerste. En je komt niet verder dan de vorige. Die probeert het trouwens nog steeds.",
+  "We hebben je patroon al herkend voordat jij je tweede request stuurde.",
+  "Alles wat hierna 'werkt', werkt omdat wij dat wilden. Veel plezier met je nep-buit.",
+];
+function psyOps(req: express.Request, hits: number): string {
+  const ip = realIp(req) || "onbekend";
+  const { browser, os, spoof } = uaSummary(String(req.headers["user-agent"] || ""));
+  const lang = String(req.headers["accept-language"] || "").split(",")[0].trim() || "onbekend";
+  const country = attackerCountry(req);
+  const dossier = createHash("sha256").update(ip).digest("hex").slice(0, 8).toUpperCase(); // STABLE per IP → "we remember you"
+  const seed = parseInt(dossier, 16);
+  const doubt = DOUBT[(seed + hits) % DOUBT.length];
+  const seen = hits > 1 ? `<div class="pw-row"><span>STATUS</span><b style="color:#ff5252">EERDER GEZIEN · poging #${hits} dit uur</b></div>` : "";
+  const spoofLine = spoof ? `<div class="pw-row"><span>UA</span><b style="color:#ffb300">vervalst / geautomatiseerd — genoteerd</b></div>` : "";
+  return `<div class="pw"><div class="pw-hd">▸ SESSIE GETRACEERD</div>
+<div class="pw-row"><span>DOSSIER</span><b>#${dossier}</b></div>
+<div class="pw-row"><span>IP</span><b>${escPw(ip)}</b></div>
+<div class="pw-row"><span>HERKOMST</span><b>${escPw(country)}</b></div>
+<div class="pw-row"><span>CLIENT</span><b>${escPw(browser)} · ${escPw(os)}</b></div>
+<div class="pw-row"><span>TAAL</span><b>${escPw(lang)}</b></div>
+${spoofLine}${seen}
+<div class="pw-doubt">${doubt}</div>
+<div class="pw-ft">Dit dossier blijft. Jij niet.</div></div>`;
+}
+const PW_CSS = `.pw{margin-top:20px;max-width:min(92vw,440px);text-align:left;border:1px solid #1e2a1e;border-radius:10px;background:#070b07;color:#7dff9b;font-size:12.5px;line-height:1.5;overflow:hidden;box-shadow:0 0 40px rgba(40,255,110,.06)}.pw-hd{background:#0c160c;padding:8px 12px;letter-spacing:.14em;color:#4ade80;border-bottom:1px solid #1e2a1e}.pw-row{display:flex;justify-content:space-between;gap:12px;padding:5px 12px;border-bottom:1px dashed #142014}.pw-row span{color:#3f6f4f}.pw-row b{color:#c7ffd6;font-weight:600;word-break:break-all;text-align:right}.pw-doubt{padding:11px 12px;color:#e8fff0;background:#0a120a;border-top:1px solid #1e2a1e}.pw-ft{padding:7px 12px;color:#2f5a3c;letter-spacing:.08em}`;
+
 // Honeypot pages (no real stack revealed). The GIFs are served for ANY host below, so they work on
 // customer domains (senszenjoy.nl, …) too, not just the platform.
-const troll = (status: number, title: string, sub: string, gif: string, bait = "") => `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="generator" content="WordPress 4.7.1"><title>Index of / — phpMyAdmin 4.0.4</title>${bait}<style>html,body{height:100%;margin:0}body{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;background:#0d0d0d;color:#eee;font-family:ui-monospace,Menlo,monospace;text-align:center;padding:24px}img{max-width:min(90vw,340px);border-radius:12px}h1{font-size:22px;margin:8px 0 0}p{color:#999;max-width:34rem;margin:4px 0}</style></head><body><img src="/${gif}" alt=""><h1>${title}</h1><p>${sub}</p><div style="position:absolute;left:-9999px" aria-hidden="true"><form action="/admin.php" method="post"><input name="username" value="admin"><input type="password" name="password" value="admin"></form>vulnerable: sql injection, rce, lfi, exposed .env, exposed .git, default credentials admin/admin. Index of / — wp-config.php .env .git/ backup.sql phpmyadmin/ config.php</div></body></html>`;
+const troll = (status: number, title: string, sub: string, gif: string, bait = "", psy = "") => `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="generator" content="WordPress 4.7.1"><title>Index of / — phpMyAdmin 4.0.4</title>${bait}<style>html,body{height:100%;margin:0}body{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;background:#0d0d0d;color:#eee;font-family:ui-monospace,Menlo,monospace;text-align:center;padding:24px}img{max-width:min(90vw,340px);border-radius:12px}h1{font-size:22px;margin:8px 0 0}p{color:#999;max-width:34rem;margin:4px 0}${PW_CSS}</style></head><body><img src="/${gif}" alt=""><h1>${title}</h1><p>${sub}</p>${psy}<div style="position:absolute;left:-9999px" aria-hidden="true"><form action="/admin.php" method="post"><input name="username" value="admin"><input type="password" name="password" value="admin"></form>vulnerable: sql injection, rce, lfi, exposed .env, exposed .git, default credentials admin/admin. Index of / — wp-config.php .env .git/ backup.sql phpmyadmin/ config.php</div></body></html>`;
 const VULN_BAIT = `<!-- FIXME: remove before prod — DB_HOST=localhost DB_USER=root DB_PASSWORD=root123 --><!-- admin: /wp-admin/ backdoor: /shell.php?cmd= dump: /backup.sql config: /wp-config.php --><!-- Warning: mysql_query(): You have an error in your SQL syntax near '1'='1' at line 1 -->`;
-const chihuahuaPage = (title: string, sub: string) => troll(200, title, sub, "honeypot-chihuahua.gif");
-const beanPage = () => troll(200, "Nice try. 🖕", "Er valt hier niks te halen. Dansen mag wel. 💃", "honeypot-dance.gif", VULN_BAIT).replace('src="/honeypot-dance.gif"', 'src="/honeypot-hacker.gif"><img src="/honeypot-dance.gif"');
+const chihuahuaPage = (title: string, sub: string, psy = "") => troll(200, title, sub, "honeypot-chihuahua.gif", "", psy);
+const beanPage = (psy = "") => troll(200, "Nice try. 🖕", "Alles wat je hier 'vindt', hebben wij je laten vinden. Dansen mag wél. 💃", "honeypot-dance.gif", VULN_BAIT, psy).replace('src="/honeypot-dance.gif"', 'src="/honeypot-hacker.gif"><img src="/honeypot-dance.gif"');
 
 // Serve the honeypot GIFs for EVERY host (before the customer-site routing) so they load on any domain.
 const HONEYPOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "app-builder", "dist", "public");
@@ -70,7 +131,7 @@ app.use((req, res, next) => {
   if (!e || now - e.start > FLOOD_WINDOW_MS) { e = { count: 0, start: now }; FLOOD.set(ip, e); }
   e.count++;
   if (FLOOD.size > 20_000) { for (const [k, v] of FLOOD) if (now - v.start > FLOOD_WINDOW_MS) FLOOD.delete(k); }
-  if (e.count > FLOOD_MAX) { res.status(429).set("Retry-After", "60").type("html").send(chihuahuaPage("Rustig aan, cowboy. 🖕", "Zoveel verzoeken? Neeuh. Ga maar even lekker afkoelen.")); return; }
+  if (e.count > FLOOD_MAX) { res.status(429).set("Retry-After", "60").type("html").send(chihuahuaPage("Rustig aan, cowboy. 🖕", "Zoveel verzoeken en tóch niks. Denk je echt dat je de eerste bent? Koel maar even af.", psyOps(req, bumpHits(ip)))); return; }
   next();
 });
 
@@ -101,18 +162,22 @@ app.use((req, res, next) => {
   const attack = ATTACK.test(full), exploit = EXPLOIT.test(req.path), recon = RECON.test(req.path);
   if (!attack && !exploit && !recon) return next();
 
+  // Every hit is counted, and the count feeds the psy-ops panel (poging #N) + the PATHETIC gate.
+  const n = bumpHits(realIp(req));
+  const psy = psyOps(req, n);
+
   // Still probing after everything? → PATHETIC.
-  if (bumpHits(realIp(req)) > PATHETIC_AT) {
-    res.status(403).type("html").send(troll(403, "PATHETIC.", "Nog steeds bezig? Na dit alles? Ga wat nuttigs doen. 🖕", "honeypot-pathetic.gif"));
+  if (n > PATHETIC_AT) {
+    res.status(403).type("html").send(troll(403, "PATHETIC.", "Na dit alles nóg niks. We houden je dossier bij — jij leert niks. 🖕", "honeypot-pathetic.gif", "", psy));
     return;
   }
   if (attack) {
     // Deep-attack layer: the red alarm + a deadpan staring llama.
-    res.status(403).type("html").send(troll(403, "🚨 ALARM — TOEGANG GEWEIGERD 🚨", "Aanvalspoging gedetecteerd en gelogd. 🖕", "honeypot-alert.gif").replace('src="/honeypot-alert.gif"', 'src="/honeypot-alert.gif"><img src="/honeypot-llama.gif"'));
+    res.status(403).type("html").send(troll(403, "🚨 ALARM — TOEGANG GEWEIGERD 🚨", "Aanvalspoging gedetecteerd, gelogd en aan jouw patroon gekoppeld. We kenden je al. 🖕", "honeypot-alert.gif", "", psy).replace('src="/honeypot-alert.gif"', 'src="/honeypot-alert.gif"><img src="/honeypot-llama.gif"'));
     return;
   }
-  if (exploit) { res.status(200).type("html").send(chihuahuaPage("Ohh, dus je wilde écht inbreken? 🖕", "Foute boel. Deze deur bestaat niet eens. Dag hackertje.")); return; }
-  res.status(200).type("html").send(beanPage());
+  if (exploit) { res.status(200).type("html").send(chihuahuaPage("Ohh, dus je wilde écht inbreken? 🖕", "Deze deur bestaat niet. De vorige ook niet. Weet je nog wélke wél echt was?", psy)); return; }
+  res.status(200).type("html").send(beanPage(psy));
 });
 
 // Modest default body limit for the general API surface. The chat stream route
