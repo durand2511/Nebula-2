@@ -314,9 +314,9 @@ export default function Assistant() {
       const rms = Math.sqrt(sum / data.length); const now = Date.now();
       if (rms > 0.03) { speech = true; lastLoud = now; }
       const finish = () => { sent = speech; try { src.disconnect(); } catch { /* ignore */ } try { if (recorderRef.current && recorderRef.current.state !== "inactive") recorderRef.current.stop(); } catch { /* ignore */ } };
-      if (speech && now - lastLoud > 1300) { finish(); }
-      else if (!speech && now - started > 7000) { finish(); if (!taskActiveRef.current && convRef.current) { flash("Ik hoorde niets — tik het logo om opnieuw te starten.", 3500); setConv(false); } }
-      else if (now - started > 30000) { finish(); }
+      if (speech && now - lastLoud > 2200) { finish(); }  // wait longer so a mid-sentence pause isn't cut off
+      else if (!speech && now - started > 8000) { finish(); if (!taskActiveRef.current && convRef.current) { flash("Ik hoorde niets — tik het logo om opnieuw te starten.", 3500); setConv(false); } }
+      else if (now - started > 45000) { finish(); }
     }, 80);
   }
 
