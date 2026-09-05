@@ -14,7 +14,6 @@ import { republishMatching, isPublished } from "./site-publish.js";
 import { submitToIndexNow } from "./indexnow.js";
 import { listDomains, PLATFORM_HOST } from "./domains.js";
 import { eq, and } from "drizzle-orm";
-import { anthropic } from "@workspace/integrations-openai-ai-server";
 import { addNavItem, emailBrandSeed, type ProjectFile } from "./actions.js";
 import { isClaudeConnected, prepareUserClaudeEnv } from "./claude-terminal.js";
 import { query } from "@anthropic-ai/claude-agent-sdk";
@@ -103,7 +102,7 @@ export function deriveContext(files: ProjectFile[], language = "nl", domainOverr
 // through the async pipeline (concurrency-proof) — the pipeline code itself is untouched.
 const genCtx = new AsyncLocalStorage<{ env?: Record<string, string | undefined> }>();
 
-async function withOwnerGen<T>(projectId: number, fn: () => Promise<T>): Promise<T> {
+async function withOwnerGen<T>(projectId: number, fn: () => Promise<T>): Promise<T | null> {
   let env: Record<string, string | undefined> | undefined;
   try {
     const [p] = await db.select({ ownerId: projects.ownerId }).from(projects).where(eq(projects.id, projectId));
@@ -111,7 +110,9 @@ async function withOwnerGen<T>(projectId: number, fn: () => Promise<T>): Promise
       const own = await prepareUserClaudeEnv(p.ownerId);
       if (own.connected) env = own.env;
     }
-  } catch (err) { logger.warn({ err: (err as Error)?.message, projectId }, "[seo] owner-subscription setup failed — using API key"); }
+  } catch (err) { logger.warn({ err: (err as Error)?.message, projectId }, "[seo] owner-subscription setup failed"); }
+  // No platform API key: the SEO engine ONLY runs on the customer's own coupled Claude subscription.
+  if (!env) { logger.info({ projectId }, "[seo] skipped — owner has not coupled a Claude subscription"); return null; }
   return genCtx.run({ env }, fn);
 }
 
@@ -134,25 +135,15 @@ async function aiViaSubscription(env: Record<string, string | undefined>, prompt
   }
 }
 
-async function ai(prompt: string, maxTokens: number, timeoutMs = 120000): Promise<string> {
-  // Prefer the owner's own Claude subscription when this pipeline runs inside withOwnerGen().
+async function ai(prompt: string, _maxTokens: number, timeoutMs = 120000): Promise<string> {
+  // ONLY the owner's own Claude subscription — no platform API key. withOwnerGen guarantees an env is
+  // present before the pipeline runs; a failed step degrades gracefully (returns "").
   const env = genCtx.getStore()?.env;
-  if (env) {
-    try {
-      const t = await aiViaSubscription(env, prompt, timeoutMs);
-      if (t) return t;
-    } catch (err) { logger.warn({ err: (err as Error)?.message }, "[seo] subscription generation failed — falling back to API key"); }
-  }
-  // Per-call timeout + no SDK retries; catch errors so one slow/failed step degrades gracefully
-  // (returns "") instead of throwing and 500-ing the whole request.
+  if (!env) return "";
   try {
-    const resp = await anthropic.messages.create(
-      { model: "claude-sonnet-4-5", max_tokens: maxTokens, messages: [{ role: "user", content: prompt }] },
-      { timeout: timeoutMs, maxRetries: 0 },
-    );
-    return resp.content[0]?.type === "text" ? resp.content[0].text : "";
+    return await aiViaSubscription(env, prompt, timeoutMs);
   } catch (err) {
-    logger.warn({ err: (err as Error)?.message }, "[seo] ai call failed");
+    logger.warn({ err: (err as Error)?.message }, "[seo] subscription generation failed");
     return "";
   }
 }
