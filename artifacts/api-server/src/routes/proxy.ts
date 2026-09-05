@@ -4,8 +4,28 @@ import { readCookies, storeCookies, isPrivateHostname } from "../lib/preview-ses
 
 const router = Router();
 
+// The proxy is open (no login) because it runs inside preview iframes that can't attach a token.
+// SSRF is blocked below; these limits stop it being abused as a bandwidth relay.
+const PROXY_MAX_BYTES = 15_000_000;            // cap a single fetched response
+const RL = new Map<string, { count: number; start: number }>();
+const RL_WINDOW_MS = 60_000, RL_MAX = 240;     // per-IP requests per minute (a heavy preview is well under)
+function proxyIp(req: Request): string {
+  const xff = String(req.headers["x-forwarded-for"] || "").split(",")[0].trim();
+  return xff || req.ip || req.socket?.remoteAddress || "";
+}
+
 // ── Proxy handler ─────────────────────────────────────────────────────────────
 async function handleProxy(req: Request, res: Response): Promise<void> {
+  const ip = proxyIp(req);
+  if (ip) {
+    const now = Date.now();
+    let e = RL.get(ip);
+    if (!e || now - e.start > RL_WINDOW_MS) { e = { count: 0, start: now }; RL.set(ip, e); }
+    e.count++;
+    if (RL.size > 20_000) { for (const [k, v] of RL) if (now - v.start > RL_WINDOW_MS) RL.delete(k); }
+    if (e.count > RL_MAX) { res.status(429).set("Retry-After", "30").json({ error: "rate limited" }); return; }
+  }
+
   const rawUrl = (req.query.url as string) ?? "";
   if (!rawUrl) { res.status(400).json({ error: "url required" }); return; }
 
@@ -81,10 +101,14 @@ async function handleProxy(req: Request, res: Response): Promise<void> {
       if (setCookies.length) storeCookies(sid, domain, setCookies);
     }
 
+    const declared = Number(upstream.headers.get("content-length") || 0);
+    if (declared && declared > PROXY_MAX_BYTES) { res.status(413).json({ error: "response too large" }); return; }
+    const buf = Buffer.from(await upstream.arrayBuffer());
+    if (buf.byteLength > PROXY_MAX_BYTES) { res.status(413).json({ error: "response too large" }); return; }
     const ct = upstream.headers.get("content-type");
     if (ct) res.setHeader("Content-Type", ct);
     res.status(upstream.status);
-    res.send(Buffer.from(await upstream.arrayBuffer()));
+    res.send(buf);
   } catch (err) {
     console.error("[proxy] upstream error:", err);
     res.status(502).json({ error: "upstream error" });
