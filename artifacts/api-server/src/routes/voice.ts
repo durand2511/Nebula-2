@@ -8,9 +8,21 @@ import express from "express";
 import { getSessionUser, tokenFrom } from "../lib/platform-auth.js";
 import { runAgentEdit } from "../lib/agent-editor.js";
 import { isClaudeConnected, prepareUserClaudeEnv } from "../lib/claude-terminal.js";
+import { publishSubdomain, getSubdomain, listDomains, PLATFORM_HOST } from "../lib/domains.js";
+import { publishSite } from "../lib/site-publish.js";
 import { db, projects } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { logger } from "../lib/logger";
+
+// The live domain to show / speak: a connected custom domain wins, otherwise the free Nebula subdomain.
+async function liveDomain(projectId: number): Promise<string | null> {
+  try {
+    const customs = (await listDomains(projectId)).filter((d) => !d.domain.endsWith("." + PLATFORM_HOST) && !d.redirectTo);
+    if (customs.length) return customs[0].domain;
+    const sub = await getSubdomain(projectId);
+    return sub?.domain || null;
+  } catch { return null; }
+}
 
 // The voice assistant is a chatty helper, not a rigid editor: it talks naturally, varies its wording,
 // chats back when you're just greeting, and only edits the site when clearly asked.
@@ -20,8 +32,15 @@ const VOICE_SYSTEM_PROMPT = [
   "HOE JE REAGEERT:",
   "- Als de gebruiker groet of even kletst, klets kort en gezellig terug. Ga dan NIET in de bestanden graven.",
   "- Als de gebruiker een wijziging aan de site vraagt, voer die uit (lees een bestand vóór je het bewerkt) en vertel in 1–2 zinnen wat je hebt gedaan.",
-  "- Als de gebruiker iets vraagt wat je (nog) niet kunt, zoals bezoekersstatistieken, zeg dat eerlijk en kort, en bied aan wat je wél kunt doen.",
   "- Houd het altijd kort genoeg om hardop voorgelezen te worden: gewone spreektaal, geen opsommingen, geen code, geen bestandsnamen in je antwoord.",
+  "",
+  "DE HELE SITE, NIET ALLEEN DE HOMEPAGE:",
+  "- De website heeft MEERDERE pagina's. Gebruik Glob (bijv. **/*.html) om ze allemaal te vinden en kijk verder dan alleen index.html / de landingspagina.",
+  "- Bij een site-brede wijziging (kleuren, lettertype, menu, footer, contactgegevens) pas je die toe op ELKE relevante pagina — of, als het via de gedeelde CSS kan, in het CSS-bestand dat op alle pagina's geldt.",
+  "",
+  "PUBLICEREN / DEPLOYEN:",
+  "- Wijzigingen staan eerst in concept. De site gaat pas LIVE als de gebruiker dat vraagt ('publiceer', 'zet live', 'deploy').",
+  "- Zegt de gebruiker 'nog niet' of 'straks'? Bevestig dat kort en bied aan het live te zetten wanneer ze zover zijn.",
   "",
   "Het is een kleine statische website (HTML/CSS/JS) in de huidige map. Verander alleen wat gevraagd is en laat de rest intact.",
 ].join("\n");
@@ -126,26 +145,49 @@ router.post("/voice/ask", express.json({ limit: "256kb" }), async (req, res) => 
   if (!(await ownsProject(u.id, projectId))) { res.status(403).json({ error: "Geen toegang tot dit project." }); return; }
 
   // Prefer the customer's own coupled Claude subscription (no platform API cost); fall back to the
-  // platform API key if they haven't coupled a login or the subscription run fails.
-  const noop = () => { /* no live stream to the phone */ };
-  const base = { projectId, prompt: message, emit: noop, systemPromptOverride: VOICE_SYSTEM_PROMPT } as const;
-  const reply = (r: { ok: boolean; finalText: string; changed: string[]; created: string[]; deleted: string[] }) => {
-    const text = (r.finalText || "").trim() || (r.changed.length + r.created.length + r.deleted.length > 0 ? "Klaar, ik heb het aangepast." : "Oké!");
-    res.json({ ok: r.ok, text, changed: r.changed, created: r.created, deleted: r.deleted });
-  };
-  try {
-    if (await isClaudeConnected(u.id)) {
-      const own = await prepareUserClaudeEnv(u.id);
+  // platform API key if they haven't coupled a login or the subscription run fails. Sonnet for speed.
+  const base = { projectId, prompt: message, emit: () => { /* no stream */ }, systemPromptOverride: VOICE_SYSTEM_PROMPT } as const;
+  async function run() {
+    if (await isClaudeConnected(u!.id)) {
+      const own = await prepareUserClaudeEnv(u!.id);
       if (own.connected) {
-        try { reply(await runAgentEdit({ ...base, subprocessEnv: own.env, model: null })); return; }
+        try { return await runAgentEdit({ ...base, subprocessEnv: own.env, model: "claude-sonnet-4-5" }); }
         catch (err) { logger.warn({ err, projectId }, "[voice] own-subscription run failed — falling back to platform key"); }
       }
     }
-    reply(await runAgentEdit({ ...base }));
+    return await runAgentEdit({ ...base });
+  }
+  try {
+    const r = await run();
+    const edited = r.changed.length + r.created.length + r.deleted.length;
+    // Deploy/publish is USER-CONTROLLED, never automatic: only when they clearly ask ("publiceer",
+    // "zet live", "deploy"). A "nog niet"/"straks" holds it. So edits land in draft until the user says go.
+    const wantsPublish = /\b(publiceer|publiceren|deploy|deployen|uitroll|online zetten|zet.*online|maak.*live|ga.*live|zet.*live|live zetten)\b/i.test(message)
+      && !/\b(niet|nog niet|straks|later|even niet|wacht)\b/i.test(message);
+
+    let published = false;
+    if (wantsPublish) {
+      try { await publishSubdomain(projectId); await publishSite(projectId); published = true; }
+      catch (err) { logger.warn({ err, projectId }, "[voice] publish failed"); }
+    }
+    const domain = await liveDomain(projectId);
+
+    let text = (r.finalText || "").trim() || (edited > 0 ? "Klaar, ik heb het aangepast." : "Oké!");
+    if (published && domain) text += ` Het staat nu live op ${domain}.`;
+    res.json({ ok: r.ok, text, changed: r.changed, created: r.created, deleted: r.deleted, published, domain });
   } catch (err) {
     logger.error({ err, projectId }, "[voice] ask failed");
     res.status(502).json({ error: "Ik kon dit even niet uitvoeren. Probeer het opnieuw." });
   }
+});
+
+// Publish status for the app header: the live domain (custom > Nebula subdomain), or null.
+router.get("/voice/publish-status", async (req, res) => {
+  const u = await getSessionUser(tokenFrom(req as any));
+  if (!u) { res.status(401).json({ error: "Niet ingelogd." }); return; }
+  const projectId = Number(req.query.projectId) || 0;
+  if (!(await ownsProject(u.id, projectId))) { res.status(403).json({ error: "Geen toegang." }); return; }
+  res.json({ domain: await liveDomain(projectId) });
 });
 
 export default router;

@@ -10,7 +10,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { getToken, setToken, clearToken } from "@/lib/session";
 import { bgUrl } from "@/lib/background";
 import logoUrl from "../assets/nebula-logo.png";
-import { Volume2, VolumeX, Loader2, ChevronDown, X, LogOut, ExternalLink } from "lucide-react";
+import { Volume2, VolumeX, Loader2, ChevronDown, X, LogOut, ExternalLink, Globe } from "lucide-react";
 
 type Project = { id: number; name: string };
 type Mode = "idle" | "listening" | "processing" | "speaking";
@@ -76,7 +76,12 @@ export default function Assistant() {
     }).catch(() => setAuthState("out"));
   }, []);
 
+  const [publishDomain, setPublishDomain] = useState<string | null>(null);
   useEffect(() => { if (projectId) { try { localStorage.setItem(LAST_KEY, String(projectId)); } catch { /* ignore */ } } }, [projectId]);
+  useEffect(() => {
+    if (!projectId) { setPublishDomain(null); return; }
+    fetch(`/api/voice/publish-status?projectId=${projectId}`).then((r) => (r.ok ? r.json() : null)).then((d) => setPublishDomain(d?.domain || null)).catch(() => {});
+  }, [projectId]);
   useEffect(() => { try { window.speechSynthesis?.getVoices(); } catch { /* ignore */ } }, []);
   useEffect(() => () => { releaseMic(); stopSpeaking(); }, []);
 
@@ -151,10 +156,11 @@ export default function Assistant() {
     setModeS("processing");
     try {
       const r = await fetch("/api/voice/ask", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ projectId: projectRef.current, message: clean }) });
-      let j: { text?: string; error?: string } = {};
+      let j: { text?: string; error?: string; domain?: string | null } = {};
       try { j = await r.json(); } catch { /* non-JSON */ }
       if (myReq !== reqRef.current) return; // user stopped / asked again → drop this answer
       if (!r.ok) { flash(j.error || (r.status === 401 ? "Je bent uitgelogd — log opnieuw in." : "Er ging iets mis."), 5000); afterSpeak(); return; }
+      if (j.domain !== undefined) setPublishDomain(j.domain || null);
       speak(String(j.text || "").trim() || "Oké!");
     } catch {
       if (myReq !== reqRef.current) return;
@@ -291,8 +297,12 @@ export default function Assistant() {
 
       <header className="shrink-0 px-4 pt-3 pb-2 flex items-center justify-between gap-3">
         <button onClick={() => setPickerOpen(true)} className="flex items-center gap-1.5 min-w-0">
-          <img src={logoUrl} alt="" className="h-6 w-auto" />
-          <span className="truncate text-[13px] font-medium text-foreground/70 max-w-[52vw]">{currentName}</span>
+          <img src={logoUrl} alt="" className="h-6 w-auto shrink-0" />
+          {publishDomain ? (
+            <span className="flex items-center gap-1 truncate text-[13px] font-medium text-foreground/75 max-w-[52vw]"><Globe className="h-3.5 w-3.5 text-emerald-600 shrink-0" />{publishDomain}</span>
+          ) : (
+            <span className="truncate text-[13px] text-foreground/45 max-w-[52vw]">nog niet gepubliceerd</span>
+          )}
           <ChevronDown className="h-3.5 w-3.5 shrink-0 text-foreground/40" />
         </button>
         <button onClick={() => { const n = !ttsOn; setTtsOn(n); if (!n) stopSpeaking(); }} className={`h-9 w-9 grid place-items-center rounded-full border ${ttsOn ? "border-border bg-card/70 text-foreground" : "border-border bg-card/40 text-muted-foreground"}`} aria-label="Stem aan/uit">
@@ -320,15 +330,27 @@ export default function Assistant() {
         <div className="fixed inset-0 z-30 bg-black/30" onClick={() => setPickerOpen(false)}>
           <div className="absolute left-3 right-3 top-3 rounded-2xl border border-border bg-card shadow-2xl max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()} style={{ marginTop: "env(safe-area-inset-top)" }}>
             <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-              <span className="text-[12px] uppercase tracking-wide text-muted-foreground">Kies een website</span>
-              <button onClick={() => setPickerOpen(false)} className="text-muted-foreground"><X className="h-4 w-4" /></button>
+              <span className="text-[13px] font-medium truncate">{currentName}</span>
+              <button onClick={() => setPickerOpen(false)} className="text-muted-foreground shrink-0"><X className="h-4 w-4" /></button>
             </div>
-            {projects.length === 0 && <div className="px-4 py-4 text-sm text-muted-foreground">Nog geen projecten.</div>}
-            {projects.map((p) => (
-              <button key={p.id} onClick={() => { if (p.id !== projectId) { setConv(false); releaseMic(); stopSpeaking(); setModeS("idle"); reqRef.current++; } setProjectId(p.id); setPickerOpen(false); }}
-                className={`w-full text-left px-4 py-3 text-sm border-b border-border/60 ${p.id === projectId ? "font-medium bg-muted/50" : "text-foreground/80"}`}>{p.name}</button>
-            ))}
-            <div className="p-3 flex flex-col gap-1">
+            {/* Where the site is live */}
+            <div className="px-4 py-3 border-b border-border">
+              {publishDomain ? (
+                <a href={`https://${publishDomain}`} target="_blank" rel="noreferrer" className="flex items-center gap-2 text-sm text-emerald-700"><Globe className="h-4 w-4 shrink-0" /><span className="truncate">Live op {publishDomain}</span></a>
+              ) : (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground"><Globe className="h-4 w-4 shrink-0" /> Nog niet gepubliceerd — zeg “publiceer” om live te gaan.</div>
+              )}
+            </div>
+            {projects.length > 1 && (
+              <div>
+                <div className="px-4 pt-3 pb-1 text-[11px] uppercase tracking-wide text-muted-foreground">Wissel website</div>
+                {projects.map((p) => (
+                  <button key={p.id} onClick={() => { if (p.id !== projectId) { setConv(false); releaseMic(); stopSpeaking(); setModeS("idle"); reqRef.current++; } setProjectId(p.id); setPickerOpen(false); }}
+                    className={`w-full text-left px-4 py-2.5 text-sm ${p.id === projectId ? "font-medium bg-muted/50" : "text-foreground/80"}`}>{p.name}</button>
+                ))}
+              </div>
+            )}
+            <div className="p-3 flex flex-col gap-1 border-t border-border">
               <a href="/" className="flex items-center gap-2 px-3 py-2.5 text-sm text-foreground/80 rounded-lg hover:bg-muted"><ExternalLink className="h-4 w-4" /> Naar nebulabookings.com</a>
               <button onClick={logout} className="flex items-center gap-2 px-3 py-2.5 text-sm text-rose-600 rounded-lg hover:bg-rose-50 text-left"><LogOut className="h-4 w-4" /> Uitloggen</button>
             </div>
