@@ -11,7 +11,12 @@ import { isClaudeConnected, prepareUserClaudeEnv } from "../lib/claude-terminal.
 import { buildVoiceTools } from "../lib/voice-tools.js";
 import { getSubdomain, listDomains, PLATFORM_HOST } from "../lib/domains.js";
 import { publishSite, isPublished } from "../lib/site-publish.js";
+import { userFeatureLevel } from "../lib/billing.js";
 import { db, projects } from "@workspace/db";
+
+// The voice assistant is a Premium (€140) feature. Owner is always level 3.
+const PREMIUM_MSG = "De spraakassistent zit in het Premium-abonnement (€140/maand). Upgrade in je profiel om 'm te gebruiken.";
+function isPremium(u: Parameters<typeof userFeatureLevel>[0]): boolean { return userFeatureLevel(u) >= 3; }
 import { eq } from "drizzle-orm";
 import { logger } from "../lib/logger";
 
@@ -136,6 +141,7 @@ const OPENAI_BASE = (process.env.AI_INTEGRATIONS_OPENAI_BASE_URL || "https://api
 router.post("/voice/transcribe", express.json({ limit: "30mb" }), async (req, res) => {
   const u = await getSessionUser(tokenFrom(req as any));
   if (!u) { res.status(401).json({ error: "Niet ingelogd." }); return; }
+  if (!isPremium(u)) { res.status(402).json({ error: PREMIUM_MSG }); return; }
   if (!OPENAI_KEY) {
     res.status(503).json({ error: "Spraak-naar-tekst staat nog niet aan op de server (OPENAI-sleutel ontbreekt)." });
     return;
@@ -188,6 +194,7 @@ router.post("/voice/transcribe", express.json({ limit: "30mb" }), async (req, re
 router.post("/voice/speak", express.json({ limit: "256kb" }), async (req, res) => {
   const u = await getSessionUser(tokenFrom(req as any));
   if (!u) { res.status(401).json({ error: "Niet ingelogd." }); return; }
+  if (!isPremium(u)) { res.status(402).json({ error: PREMIUM_MSG }); return; }
   if (!OPENAI_KEY) { res.status(503).json({ error: "Stem staat nog niet aan op de server." }); return; }
   const text = String(req.body?.text || "").trim().slice(0, 1200);
   if (!text) { res.status(400).json({ error: "Geen tekst." }); return; }
@@ -268,6 +275,7 @@ async function executeTask(userId: number, projectId: number, message: string): 
 router.post("/voice/ask", express.json({ limit: "256kb" }), async (req, res) => {
   const u = await getSessionUser(tokenFrom(req as any));
   if (!u) { res.status(401).json({ error: "Niet ingelogd." }); return; }
+  if (!isPremium(u)) { res.status(402).json({ error: PREMIUM_MSG }); return; }
   const projectId = Number(req.body?.projectId) || 0;
   const message = String(req.body?.message || "").trim().slice(0, 2000);
   if (!message) { res.status(400).json({ error: "Geen bericht." }); return; }
@@ -313,6 +321,13 @@ router.get("/voice/publish-status", async (req, res) => {
   const projectId = Number(req.query.projectId) || 0;
   if (!(await ownsProject(u.id, projectId))) { res.status(403).json({ error: "Geen toegang." }); return; }
   res.json({ domain: await liveDomain(projectId) });
+});
+
+// Does the logged-in user have the voice assistant (Premium)? Used by the app to show the upgrade screen.
+router.get("/voice/access", async (req, res) => {
+  const u = await getSessionUser(tokenFrom(req as any));
+  if (!u) { res.status(401).json({ error: "Niet ingelogd." }); return; }
+  res.json({ premium: isPremium(u) });
 });
 
 export default router;

@@ -116,9 +116,9 @@ export function NebulaApp() {
           ))}
         </div>
 
-        <p className="mt-8 text-center text-xs text-muted-foreground">
-          {t("Je moet ingelogd zijn en je Claude-account gekoppeld hebben. De app gebruikt dezelfde live sessie als de web-editor.",
-             "You need to be logged in with your Claude account linked. The app uses the same live session as the web editor.")}
+        <p className="mt-8 text-center text-sm text-muted-foreground">
+          {t("De spraakassistent hoort bij het Premium-abonnement (€140/maand). Je moet ingelogd zijn en je eigen Claude-account gekoppeld hebben.",
+             "The voice assistant is part of the Premium plan (€140/month). You need to be logged in with your own Claude account linked.")}
         </p>
       </div>
     </div>

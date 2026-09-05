@@ -34,6 +34,7 @@ function silentWavUrl(): string {
 
 export default function Assistant() {
   const [authState, setAuthState] = useState<"checking" | "out" | "in">("checking");
+  const [premium, setPremium] = useState<boolean | null>(null); // has the Premium voice assistant?
   const [showForm, setShowForm] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectId, setProjectId] = useState<number>(0);
@@ -82,6 +83,7 @@ export default function Assistant() {
     fetch("/api/auth/me").then((r) => (r.ok ? r.json() : null)).then((me) => {
       if (!me || !me.user?.id) { setAuthState("out"); return; }
       setAuthState("in"); loadProjects();
+      fetch("/api/voice/access").then((r) => (r.ok ? r.json() : null)).then((d) => setPremium(!!d?.premium)).catch(() => setPremium(true));
     }).catch(() => setAuthState("out"));
   }, []);
 
@@ -426,6 +428,21 @@ export default function Assistant() {
               <button type="button" onClick={() => setShowForm(false)} className="mt-3 w-full text-[13px] text-muted-foreground">Terug</button>
             </form>
           )}
+        </div>
+      </div>
+    );
+  }
+
+  if (premium === false) {
+    return (
+      <div className="light grid place-items-center px-6 text-foreground text-center" style={{ minHeight: "100dvh", paddingTop: "env(safe-area-inset-top)", paddingBottom: "env(safe-area-inset-bottom)" }}>
+        {bgLayer}
+        <div className="w-full max-w-sm rounded-3xl border border-border bg-card/85 backdrop-blur-xl shadow-xl p-8">
+          <img src={logoUrl} alt="Nebula" className="h-14 w-auto mx-auto" />
+          <h1 className="mt-4 text-2xl font-serif font-semibold tracking-tight">Spraakassistent</h1>
+          <p className="mt-2 text-sm text-muted-foreground leading-relaxed">De spraakassistent hoort bij <span className="font-semibold text-foreground">Premium</span> — €140 per maand. Daarmee praat je met Claude en pas je je hele website met je stem aan.</p>
+          <a href="/" className="mt-6 inline-block w-full rounded-full bg-foreground text-background font-semibold py-3">Upgraden naar Premium</a>
+          <button onClick={logout} className="mt-3 w-full text-[13px] text-muted-foreground">Uitloggen</button>
         </div>
       </div>
     );
