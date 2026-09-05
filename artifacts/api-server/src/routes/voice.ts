@@ -22,7 +22,9 @@ router.post("/voice/transcribe", express.json({ limit: "30mb" }), async (req, re
   }
   try {
     const dataUrl = String(req.body?.audio || "");
-    const m = dataUrl.match(/^data:([^;]+);base64,(.+)$/s);
+    // Tolerant parse: the data URL may carry codecs (e.g. "data:audio/webm;codecs=opus;base64,…" on
+    // Android) — capture the base MIME up to the first ; or , and take everything after "base64,".
+    const m = dataUrl.match(/^data:([^;,]+)[^,]*base64,(.+)$/s);
     if (!m) { res.status(400).json({ error: "Geen audio ontvangen." }); return; }
     const mime = m[1] || "audio/webm";
     const buf = Buffer.from(m[2], "base64");

@@ -138,7 +138,7 @@ export default function Assistant() {
         await transcribe(blob);
       };
       recorderRef.current = mr;
-      mr.start();
+      mr.start(250); // timeslice → chunks accumulate steadily (more robust on iOS/Android)
       setRecording(true);
     } catch {
       setNotice("Geen toegang tot de microfoon. Sta het toe in je browser-instellingen.");
@@ -148,7 +148,7 @@ export default function Assistant() {
   function stopRecording() { try { recorderRef.current?.stop(); } catch { /* ignore */ } setRecording(false); }
 
   async function transcribe(blob: Blob) {
-    if (blob.size < 1200) { setNotice("Niets gehoord — probeer opnieuw."); setTimeout(() => setNotice(""), 2500); return; }
+    if (blob.size < 600) { setNotice("Niets opgenomen — houd de knop langer vast en praat."); setTimeout(() => setNotice(""), 3500); return; }
     setTranscribing(true);
     try {
       const dataUrl: string = await new Promise((resolve, reject) => {
@@ -161,13 +161,21 @@ export default function Assistant() {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ audio: dataUrl }),
       });
-      const j = await r.json();
-      if (!r.ok) { setNotice(j.error || "Transcriptie mislukt."); setTimeout(() => setNotice(""), 4000); return; }
+      let j: { text?: string; error?: string } = {};
+      try { j = await r.json(); } catch { /* non-JSON error body */ }
+      if (!r.ok) {
+        const msg = j.error
+          || (r.status === 413 ? "Opname te groot voor de server."
+            : r.status === 503 ? "Spraak-naar-tekst staat nog niet aan op de server (OpenAI-sleutel ontbreekt)."
+            : r.status === 401 ? "Je bent uitgelogd — log opnieuw in."
+            : `Transcriptie mislukt (fout ${r.status}).`);
+        setNotice(msg); setTimeout(() => setNotice(""), 5000); return;
+      }
       const text = String(j.text || "").trim();
-      if (!text) { setNotice("Niets verstaan — probeer opnieuw."); setTimeout(() => setNotice(""), 2500); return; }
+      if (!text) { setNotice("Niets verstaan — probeer opnieuw, iets luider."); setTimeout(() => setNotice(""), 3000); return; }
       sendToClaude(text);
     } catch {
-      setNotice("Transcriptie mislukt.");
+      setNotice("Geen verbinding met de server.");
       setTimeout(() => setNotice(""), 3000);
     } finally { setTranscribing(false); }
   }
