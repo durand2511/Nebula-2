@@ -108,8 +108,17 @@ export default function Assistant() {
   useEffect(() => {
     const onVis = () => {
       if (document.visibilityState !== "visible") return;
-      try { if (audioCtxRef.current?.state === "suspended") void audioCtxRef.current.resume(); } catch { /* ignore */ }
+      try { if (audioCtxRef.current && audioCtxRef.current.state === "suspended") void audioCtxRef.current.resume(); } catch { /* ignore */ }
+      // A recording that was frozen by the sleep is dead now → recover to a clean, tappable state.
+      if (modeRef.current === "listening") {
+        stopListenHard();
+        if (taskActiveRef.current) setModeS("processing");
+        else if (convRef.current) startListen();
+        else setModeS("idle");
+      }
+      // Grab any answer that finished while the screen was off (and re-arm polling just in case).
       if (taskActiveRef.current && projectRef.current) {
+        if (!pollRef.current) startPolling();
         fetch(`/api/voice/result?projectId=${projectRef.current}`).then((r) => r.json()).then((j) => {
           if (j && !j.running && j.done) { stopPolling(); if (j.domain !== undefined) setPublishDomain(j.domain || null); enqueueSpeak(String(j.text || "").trim() || "Klaar.", true); }
         }).catch(() => {});
@@ -312,7 +321,10 @@ export default function Assistant() {
 
   // ---- speech IN (hands-free) ----
   async function ensureStream(): Promise<MediaStream | null> {
-    if (streamRef.current) return streamRef.current;
+    const cur = streamRef.current;
+    if (cur && cur.getAudioTracks().some((t) => t.readyState === "live")) return cur; // reuse only if still alive
+    try { cur?.getTracks().forEach((t) => t.stop()); } catch { /* ignore */ }             // stale (slept / ended) → drop it
+    streamRef.current = null;
     try { const s = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } }); streamRef.current = s; return s; }
     catch { flash("Geen toegang tot de microfoon. Sta het toe in je instellingen.", 5000); setConv(false); setModeS("idle"); return null; }
   }
@@ -341,8 +353,11 @@ export default function Assistant() {
     };
     recorderRef.current = mr; mr.start(200); setModeS("listening");
 
-    const ac = audioCtxRef.current || new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
-    audioCtxRef.current = ac;
+    // Self-heal: after a screen sleep the context can be closed/suspended — make a fresh one if needed.
+    if (!audioCtxRef.current || audioCtxRef.current.state === "closed") {
+      audioCtxRef.current = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+    }
+    const ac = audioCtxRef.current;
     try { if (ac.state === "suspended") await ac.resume(); } catch { /* ignore */ }
     const src = ac.createMediaStreamSource(stream);
     const analyser = ac.createAnalyser(); analyser.fftSize = 512; src.connect(analyser);
@@ -379,10 +394,15 @@ export default function Assistant() {
 
   function toggleConversation() {
     primeTTS();
-    // Working in the background? A tap = ask a quick question ("hoe gaat het?") WITHOUT stopping the work.
-    if (taskActiveRef.current && modeRef.current === "processing") { startListen(); return; }
-    if (convRef.current) { reqRef.current++; setConv(false); stopSpeaking(); stopListenHard(); stopPolling(); releaseMic(); setModeS("idle"); }
-    else { setConv(true); startListen(); }
+    // Working in the background → a tap = ask a mid-task question ("hoe gaat het?"), no matter what it's
+    // currently doing (even while it's speaking an ack/status). Never lose the running task.
+    if (taskActiveRef.current) { setConv(true); stopSpeaking(); stopListenHard(); startListen(); return; }
+    // Active OR stuck (listening/speaking) → stop everything cleanly, so a tap always recovers.
+    if (convRef.current || modeRef.current === "listening" || modeRef.current === "speaking") {
+      reqRef.current++; setConv(false); stopSpeaking(); stopListenHard(); stopPolling(); releaseMic(); setModeS("idle"); return;
+    }
+    // Idle → start.
+    setConv(true); startListen();
   }
 
   // When a task is running, an empty/failed capture must NOT re-open the mic — just go back to waiting.
