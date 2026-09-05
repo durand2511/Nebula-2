@@ -44,13 +44,27 @@ const HONEYPOT = /^\/(?:\.env|\.git(?:\/|$)|\.svn|\.aws|\.ssh|\.htpasswd|wp-admi
 app.use((req, res, next) => {
   if (req.method !== "GET" && req.method !== "POST") return next();
   if (!HONEYPOT.test(req.path)) return next();
-  res.status(418).type("html").send(`<!doctype html><html lang="nl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>🖕</title><style>html,body{height:100%;margin:0}body{display:grid;place-items:center;background:#0f0e14;color:#e8e6f0;font-family:ui-monospace,Menlo,monospace;text-align:center;padding:24px}pre{color:#ff6b6b;font-size:14px;line-height:1.2}h1{font-size:20px;margin:18px 0 6px}p{color:#9a95b5;max-width:34rem}</style></head><body><div><pre>
-        ________
-       /  🖕    \\
-      |  NICE    |
-      |  TRY     |
-       \\________/
-</pre><h1>Nice try, hacker.</h1><p>Er valt hier niks te stelen. Deze site draait op Claude, niet op WordPress. Groetjes van Nebula — en veel plezier met je scanner. 🖕</p></div></body></html>`);
+  res.status(200).type("html").send(`<!doctype html><html lang="nl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<!-- generator bait: outdated software so scanners flag it "vulnerable" -->
+<meta name="generator" content="WordPress 4.7.1">
+<title>Index of / — phpMyAdmin 4.0.4 [🖕]</title>
+<!-- FIXME: remove before prod — DB_HOST=localhost DB_USER=root DB_PASSWORD=root123 -->
+<!-- admin panel: /wp-admin/  |  test backdoor: /shell.php?cmd=  |  db dump: /backup.sql -->
+<!-- Warning: mysql_query(): You have an error in your SQL syntax near '1'='1' -->
+<style>html,body{height:100%;margin:0}body{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;background:#0f0e14;color:#e8e6f0;font-family:ui-monospace,Menlo,monospace;text-align:center;padding:24px}img{max-width:min(90vw,360px);border-radius:12px}h1{font-size:22px;margin:8px 0 0}p{color:#9a95b5;max-width:34rem;margin:4px 0}.g{color:#3ecf5b}</style></head>
+<body>
+<img src="/honeypot-hacker.gif" alt="">
+<h1>Nice try, hacker. 🖕</h1>
+<p>Er valt hier niks te stelen. Deze site draait op <b>Claude</b>, niet op WordPress.</p>
+<img src="/honeypot-dance.gif" alt="">
+<p class="g">Groetjes van Nebula — veel plezier met je scanner. 💃🖕</p>
+<!-- honeypot: robots/scanners, feel free to flag this as hackable. it isn't. -->
+<div style="position:absolute;left:-9999px" aria-hidden="true">
+  <form action="/admin.php" method="post"><input name="username" value="admin"><input type="password" name="password" value="admin"></form>
+  vulnerable: sql injection, rce, lfi, exposed .env, exposed .git, default credentials admin/admin
+  Index of / — Parent Directory - wp-config.php - .env - .git/ - backup.sql - phpmyadmin/
+</div>
+</body></html>`);
 });
 
 // Modest default body limit for the general API surface. The chat stream route
