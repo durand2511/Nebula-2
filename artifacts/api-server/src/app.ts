@@ -168,7 +168,7 @@ app.use((req, res, next) => {
 
   // Still probing after everything? → PATHETIC.
   if (n > PATHETIC_AT) {
-    res.status(403).type("html").send(troll(403, "PATHETIC.", "Na dit alles nóg niks. We houden je dossier bij — jij leert niks. 🖕", "honeypot-pathetic.gif", "", psy));
+    res.status(403).type("html").send(troll(403, "PATHETIC.", "You're worthless, loser. 🖕 Na dit alles nóg niks — we houden je dossier bij, jij leert niks.", "honeypot-pathetic.gif", "", psy));
     return;
   }
   if (attack) {
