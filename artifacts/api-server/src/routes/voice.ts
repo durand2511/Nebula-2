@@ -250,17 +250,17 @@ async function executeTask(userId: number, projectId: number, message: string): 
     if (!(await isClaudeConnected(userId))) throw new Error("NO_SUBSCRIPTION");
     const own = await prepareUserClaudeEnv(userId);
     if (!own.connected) throw new Error("NO_SUBSCRIPTION");
-    return await runOnce({ subprocessEnv: own.env, model: null }, 90000);
+    return await runOnce({ subprocessEnv: own.env, model: null }, 150000); // generous for a real edit on a big site
   }
   const r = await run();
   // Auto-republish an edit to WHERE THE SITE ALREADY LIVES (its connected custom domain via publishSite,
-  // or its existing Nebula subdomain). We never CREATE a Nebula subdomain here — a site that isn't
-  // published yet stays in draft until the user says "publiceer". So a change goes live on the site's own
-  // domain, not on the provider domain.
+  // or its existing Nebula subdomain). We never CREATE a Nebula subdomain here.
   const edited = r.changed.length + r.created.length + r.deleted.length;
-  if (edited > 0) { try { if (await isPublished(projectId)) await publishSite(projectId); } catch (err) { logger.warn({ err, projectId }, "[voice] auto-republish failed"); } }
+  let published = false;
+  if (edited > 0) { try { if (await isPublished(projectId)) { await publishSite(projectId); published = true; } } catch (err) { logger.warn({ err, projectId }, "[voice] auto-republish failed"); } }
   const domain = await liveDomain(projectId);
-  const text = stripForSpeech((r.finalText || "").trim()) || (edited > 0 ? "Klaar, ik heb het aangepast." : "Oké!");
+  let text = stripForSpeech((r.finalText || "").trim()) || (edited > 0 ? "Klaar, ik heb het aangepast." : "Oké!");
+  if (published && domain) text += ` Het staat nu live op ${domain}.`;   // tell the user it's actually live
   remember(convoKey, message, text);
   return { ok: r.ok, text, domain };
 }

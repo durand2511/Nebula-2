@@ -306,8 +306,11 @@ export default function Assistant() {
       if (vadTimerRef.current) { clearInterval(vadTimerRef.current); vadTimerRef.current = null; }
       if (dropRecordingRef.current) { dropRecordingRef.current = false; return; } // the answer arrived → discard this recording
       const blob = new Blob(chunksRef.current, { type: mimeRef.current || "audio/webm" });
-      if (sent) await transcribe(blob);
-      else if (convRef.current) setModeS(taskActiveRef.current ? "processing" : "idle");
+      if (sent) { await transcribe(blob); return; }
+      // Nothing captured this time — keep listening (hands-free) instead of getting stuck on "Even stil…".
+      if (taskActiveRef.current) setModeS("processing");
+      else if (convRef.current) startListen();
+      else setModeS("idle");
     };
     recorderRef.current = mr; mr.start(200); setModeS("listening");
 
@@ -329,9 +332,9 @@ export default function Assistant() {
       const threshold = Math.max(0.05, ambient * 2.5 + 0.02);
       if (rms > threshold) { speechStarted = true; lastLoud = now; speechMs += 80; }
       const finish = (send: boolean) => { sent = send; try { src.disconnect(); } catch { /* ignore */ } try { if (recorderRef.current && recorderRef.current.state !== "inactive") recorderRef.current.stop(); } catch { /* ignore */ } };
-      if (speechStarted && now - lastLoud > 3000) { finish(speechMs > 250); }   // spoke, then 3s quiet → send if it was real speech
-      else if (!speechStarted && elapsed > 7000) { finish(false); if (!taskActiveRef.current && convRef.current) setConv(false); } // only noise/silence → stop, don't keep looping
-      else if (elapsed > 45000) { finish(speechMs > 250); }
+      if (speechStarted && now - lastLoud > 3000) { finish(speechMs > 150); }   // spoke, then 3s quiet → send (short "ja"/"nee" counts too)
+      else if (!speechStarted && elapsed > 9000) { finish(false); if (!taskActiveRef.current && convRef.current) setConv(false); } // only noise/silence for 9s → stop, don't keep looping
+      else if (elapsed > 45000) { finish(speechMs > 150); }
     }, 80);
   }
 
