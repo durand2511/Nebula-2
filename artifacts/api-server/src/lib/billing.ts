@@ -17,7 +17,7 @@ export const PLANS: { id: PlanId; name: string; price: number; tagline: string; 
   { id: "instap", name: "Instap", price: 50, tagline: "Alles om online te gaan",
     features: ["Website bewerken met Claude Code", "Online boekingssysteem", "Basis-SEO & eigen domein", "Publiceren zonder watermerk"] },
   { id: "pro", name: "Pro", price: 80, tagline: "Groeien met inzicht", highlight: true,
-    features: ["Alles van Instap", "Bezoekers-statistieken & live online", "Klik-heatmap & conversie-tools", "Google-posities (Search Console)"] },
+    features: ["Alles van Instap", "SEO-, toegankelijkheids- & snelheidsanalyse", "Bezoekers-statistieken & live online", "Klik-heatmap & conversie-tools", "Google-posities & concurrentievergelijking"] },
   { id: "premium", name: "Premium", price: 140, tagline: "Alles eruit halen",
     features: ["Alles van Pro", "Spraakassistent (mobiele app)", "A/B-testen", "Automatisering & meertalige site", "Voorrang bij support"] },
 ];
