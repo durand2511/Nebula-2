@@ -44,6 +44,7 @@ const VOICE_SYSTEM_PROMPT = [
   "- Google-posities: roep bekijk_google_posities aan (ranking/vindbaarheid in Google).",
   "- Concurrent vergelijken: roep vergelijk_concurrent aan met de URL van de concurrent.",
   "- Automatische SEO: roep zet_auto_seo aan (aan/uit).",
+  "- Agenda (alleen als er een boekingssysteem is): bekijk_agenda toont de geplande lessen; voeg_les_toe zet een les in de agenda (datum jaar-maand-dag, tijd HH:MM); verwijder_les haalt een les weg. Reken data zelf uit met de datum van vandaag (zie onder).",
   "- Back-up: roep maak_backup aan.",
   "- Publiceren/deployen: roep publiceer_site aan ALLEEN als de gebruiker duidelijk om live zetten/publiceren/deployen vraagt. Zegt de gebruiker 'nog niet' of 'straks'? Doe het NIET, bevestig kort en bied aan het later te doen. Wijzigingen staan tot die tijd in concept.",
   "- Vertel na een gereedschap kort in spreektaal wat het resultaat was.",
@@ -162,8 +163,10 @@ router.post("/voice/ask", express.json({ limit: "256kb" }), async (req, res) => 
   // Prefer the customer's own coupled Claude subscription (no platform API cost); fall back to the
   // platform API key if they haven't coupled a login or the subscription run fails. Sonnet for speed.
   const tools = buildVoiceTools(projectId);
-  // Haiku for snappy voice replies.
-  const base = { projectId, prompt: message, emit: () => { /* no stream */ }, systemPromptOverride: VOICE_SYSTEM_PROMPT, mcpServers: tools.mcpServers, extraAllowedTools: tools.allowedTools, model: "claude-haiku-4-5-20251001" } as const;
+  // Haiku for snappy voice replies. Today's date lets the agent compute "volgende maandag" for the agenda.
+  const vandaag = new Date().toLocaleDateString("nl-NL", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
+  const sys = `${VOICE_SYSTEM_PROMPT}\n\nVandaag is ${vandaag}. Gebruik dit om data uit te rekenen (bijvoorbeeld 'volgende maandag' → de juiste datum in jaar-maand-dag).`;
+  const base = { projectId, prompt: message, emit: () => { /* no stream */ }, systemPromptOverride: sys, mcpServers: tools.mcpServers, extraAllowedTools: tools.allowedTools, model: "claude-haiku-4-5-20251001" } as const;
   async function run() {
     if (await isClaudeConnected(u!.id)) {
       const own = await prepareUserClaudeEnv(u!.id);

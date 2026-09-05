@@ -8,8 +8,8 @@
  */
 import { z } from "zod";
 import { tool, createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
-import { db, projects, platformUsers, projectSeo } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { db, projects, platformUsers, projectSeo, studioClasses } from "@workspace/db";
+import { eq, and, gte, asc } from "drizzle-orm";
 import { summary, liveVisitors } from "./analytics.js";
 import { runAudit, compareCompetitor } from "./seo-audit.js";
 import { getSearchPositions, gscStatus } from "./gsc.js";
@@ -142,7 +142,58 @@ export function buildVoiceTools(projectId: number): { mcpServers: Record<string,
     },
   );
 
-  const server = createSdkMcpServer({ name: "nebula", version: "1.0.0", tools: [stats, analyse, competitor, google, autoSeo, backup, publish] });
-  const allowedTools = ["bekijk_statistieken", "bekijk_analyse", "vergelijk_concurrent", "bekijk_google_posities", "zet_auto_seo", "maak_backup", "publiceer_site"].map((t) => `mcp__nebula__${t}`);
+  // ── Agenda / booking system (only meaningful if the project has a booking system) ──
+  const agendaBekijk = tool(
+    "bekijk_agenda",
+    "Bekijk de komende lessen/afspraken in de agenda van het boekingssysteem. Gebruik dit als de gebruiker naar de agenda, het rooster of de geplande lessen vraagt.",
+    {},
+    async () => {
+      try {
+        const today = new Date().toISOString().slice(0, 10);
+        const rows = await db.select().from(studioClasses).where(and(eq(studioClasses.projectId, projectId), gte(studioClasses.date, today))).orderBy(asc(studioClasses.date), asc(studioClasses.time)).limit(12);
+        if (!rows.length) return text("Er staan geen lessen in de agenda.");
+        const list = rows.slice(0, 8).map((c) => `${c.title} op ${c.date} om ${c.time}`).join(", ");
+        return text(`De komende lessen: ${list}.`);
+      } catch (err) { logger.error({ err, projectId }, "[voice-tool] agenda failed"); return text("Ik kon de agenda even niet ophalen."); }
+    },
+  );
+
+  const lesToevoegen = tool(
+    "voeg_les_toe",
+    "Voeg een les/afspraak toe aan de agenda van het boekingssysteem. Datum als jaar-maand-dag (yyyy-mm-dd), tijd als HH:MM. Optioneel herhaalWeken voor een wekelijks terugkerende les.",
+    { titel: z.string().describe("Naam van de les"), datum: z.string().describe("yyyy-mm-dd"), tijd: z.string().describe("HH:MM"), eindtijd: z.string().optional(), plekken: z.number().optional().describe("Aantal plekken (standaard 12)"), prijs: z.number().optional(), herhaalWeken: z.number().optional().describe("Aantal weken wekelijks herhalen") },
+    async (args) => {
+      try {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(args.datum)) return text("Ik heb een geldige datum nodig, bijvoorbeeld aanstaande maandag — zeg het jaar, de maand en de dag.");
+        const weeks = Math.min(52, Math.max(1, args.herhaalWeken || 1));
+        for (let i = 0; i < weeks; i++) {
+          const d = new Date(args.datum + "T00:00:00"); d.setDate(d.getDate() + i * 7);
+          await db.insert(studioClasses).values({ projectId, title: args.titel || "Les", date: d.toISOString().slice(0, 10), time: args.tijd || "09:00", endTime: args.eindtijd || "", cap: Math.max(1, args.plekken || 12), price: Math.max(0, args.prijs || 0) });
+        }
+        return text(weeks > 1 ? `${args.titel} staat nu ${weeks} weken lang wekelijks in de agenda.` : `${args.titel} staat op ${args.datum} om ${args.tijd} in de agenda.`);
+      } catch (err) { logger.error({ err, projectId }, "[voice-tool] add class failed"); return text("De les toevoegen lukte even niet."); }
+    },
+  );
+
+  const lesVerwijderen = tool(
+    "verwijder_les",
+    "Verwijder een les uit de agenda op titel en/of datum (yyyy-mm-dd). Geef minstens één van beide.",
+    { titel: z.string().optional(), datum: z.string().optional() },
+    async (args) => {
+      try {
+        if (!args.titel && !args.datum) return text("Zeg welke les je wilt verwijderen — de naam of de datum.");
+        const conds = [eq(studioClasses.projectId, projectId)];
+        if (args.datum) conds.push(eq(studioClasses.date, args.datum));
+        const rows = await db.select().from(studioClasses).where(and(...conds));
+        const matches = args.titel ? rows.filter((r) => r.title.toLowerCase().includes(args.titel!.toLowerCase())) : rows;
+        if (!matches.length) return text("Ik kon die les niet vinden in de agenda.");
+        for (const m of matches) await db.delete(studioClasses).where(eq(studioClasses.id, m.id));
+        return text(matches.length === 1 ? `${matches[0].title} is uit de agenda gehaald.` : `Ik heb ${matches.length} lessen verwijderd.`);
+      } catch (err) { logger.error({ err, projectId }, "[voice-tool] delete class failed"); return text("De les verwijderen lukte even niet."); }
+    },
+  );
+
+  const server = createSdkMcpServer({ name: "nebula", version: "1.0.0", tools: [stats, analyse, competitor, google, autoSeo, backup, publish, agendaBekijk, lesToevoegen, lesVerwijderen] });
+  const allowedTools = ["bekijk_statistieken", "bekijk_analyse", "vergelijk_concurrent", "bekijk_google_posities", "zet_auto_seo", "maak_backup", "publiceer_site", "bekijk_agenda", "voeg_les_toe", "verwijder_les"].map((t) => `mcp__nebula__${t}`);
   return { mcpServers: { nebula: server }, allowedTools };
 }
