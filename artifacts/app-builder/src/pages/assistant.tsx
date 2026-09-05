@@ -343,6 +343,21 @@ export default function Assistant() {
   // When a task is running, an empty/failed capture must NOT re-open the mic — just go back to waiting.
   const backToWait = () => { if (taskActiveRef.current) setModeS("processing"); else if (convRef.current) startListen(); else setModeS("idle"); };
 
+  // Voice "stop": the user can say "stop maar even" / "laat maar" / "wacht even" to cancel + go quiet.
+  function isStopCommand(text: string): boolean {
+    const t = text.toLowerCase().replace(/[.!,?]/g, "").trim();
+    return /^(stop|stop maar|stop even|stop maar even|stoppen|even stoppen|hou op|houd op|hou maar op|laat maar|laat maar zitten|annuleer|annuleren|wacht|wacht even|niet doen|niks doen|nee laat maar)$/.test(t);
+  }
+  function doStop() {
+    reqRef.current++;
+    taskActiveRef.current = false;
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+    stopListenHard();
+    setConv(false);
+    speakQ.current = []; speakingRef.current = false;
+    enqueueSpeak("Oké, ik stop.", true); // short confirmation, then go idle
+  }
+
   async function transcribe(blob: Blob) {
     if (blob.size < 600) { backToWait(); return; }
     setModeS("processing");
@@ -354,6 +369,7 @@ export default function Assistant() {
       if (!r.ok) { const msg = j.error || (r.status === 413 ? "Opname te groot." : r.status === 503 ? "Spraak staat nog niet aan op de server." : r.status === 401 ? "Je bent uitgelogd — log opnieuw in." : `Transcriptie mislukt (fout ${r.status}).`); flash(msg, 5000); if (!taskActiveRef.current) setConv(false); backToWait(); return; }
       const text = String(j.text || "").trim();
       if (!text) { backToWait(); return; }
+      if (isStopCommand(text)) { doStop(); return; }  // "stop maar even" → cancel + go quiet
       askClaude(text);
     } catch { flash("Geen verbinding met de server.", 3500); backToWait(); }
   }
