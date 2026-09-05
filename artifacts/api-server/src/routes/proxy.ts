@@ -52,7 +52,23 @@ async function handleProxy(req: Request, res: Response): Promise<void> {
   }
 
   try {
-    const upstream = await fetch(target.href, { method, headers: fwdHeaders, body, redirect: "follow" });
+    // Follow redirects MANUALLY so each hop is re-checked against the SSRF blocklist — otherwise a
+    // public URL could 3xx-redirect to a private address (e.g. cloud metadata) and fetch would follow.
+    let hopUrl = target.href;
+    let upstream: globalThis.Response;
+    for (let hop = 0; ; hop++) {
+      upstream = await fetch(hopUrl, { method, headers: fwdHeaders, body, redirect: "manual" });
+      const status = upstream.status;
+      const loc = upstream.headers.get("location");
+      if (status < 300 || status >= 400 || !loc) break;
+      if (hop >= 4) { res.status(508).json({ error: "too many redirects" }); return; }
+      let next: URL;
+      try { next = new URL(loc, hopUrl); } catch { res.status(502).json({ error: "bad redirect" }); return; }
+      if ((next.protocol !== "http:" && next.protocol !== "https:") || isPrivateHostname(next.hostname)) {
+        res.status(403).json({ error: "redirect to private address blocked" }); return;
+      }
+      hopUrl = next.href;
+    }
 
     // Persist Set-Cookie headers into the session store
     if (sid) {

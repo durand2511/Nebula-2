@@ -741,8 +741,14 @@ router.post("/stripe/webhook", raw({ type: "*/*" }), async (req, res) => {
   // An event signed with a per-project secret comes from a studio's OWN Stripe account (own-keys
   // mode): no event.account, but it must be routed to the STUDIO logic, never the platform branch.
   let fromOwnAccount = false;
-  if (secret && typeof sig === "string") {
+  // Fail CLOSED: an unsigned/unverifiable webhook must never be processed (it could grant free
+  // subscriptions or voice top-ups). Require both a configured secret and a signature header.
+  if (!secret || typeof sig !== "string") { res.status(400).send("webhook not configured"); return; }
+  {
     const parts = Object.fromEntries(sig.split(",").map((p) => p.split("=") as [string, string]));
+    // Reject stale/replayed events: Stripe's timestamp must be within 5 minutes (like constructEvent).
+    const ts = Number(parts.t);
+    if (!Number.isFinite(ts) || Math.abs(Date.now() / 1000 - ts) > 300) { res.status(400).send("stale signature"); return; }
     const check = (s: string) => {
       const expected = createHmac("sha256", s).update(`${parts.t}.${payload.toString("utf8")}`).digest("hex");
       return !!(parts.v1 && expected.length === parts.v1.length && timingSafeEqual(Buffer.from(expected), Buffer.from(parts.v1)));

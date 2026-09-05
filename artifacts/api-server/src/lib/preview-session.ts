@@ -42,11 +42,22 @@ export function storeCookies(sid: string, domain: string, setCookieHeaders: stri
 }
 
 export function isPrivateHostname(hostname: string): boolean {
-  if (!hostname || hostname === "localhost") return true;
-  if (/^127\./.test(hostname)) return true;
-  if (/^10\./.test(hostname)) return true;
-  if (/^172\.(1[6-9]|2\d|3[01])\./.test(hostname)) return true;
-  if (/^192\.168\./.test(hostname)) return true;
-  if (hostname === "::1" || hostname === "0.0.0.0") return true;
+  if (!hostname) return true;
+  const h = hostname.toLowerCase().replace(/^\[|\]$/g, ""); // strip IPv6 brackets
+  if (h === "localhost" || h.endsWith(".localhost") || h.endsWith(".internal") || h.endsWith(".local")) return true;
+  if (/^127\./.test(h)) return true;                         // loopback
+  if (/^10\./.test(h)) return true;                          // private A
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(h)) return true;     // private B
+  if (/^192\.168\./.test(h)) return true;                    // private C
+  if (/^169\.254\./.test(h)) return true;                    // link-local + CLOUD METADATA (169.254.169.254)
+  if (/^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(h)) return true; // carrier-grade NAT 100.64/10
+  if (/^0\./.test(h)) return true;                           // 0.0.0.0/8 (incl. 0.0.0.0)
+  if (h === "::1" || h === "::") return true;                // IPv6 loopback / unspecified
+  if (/^fe80:/i.test(h)) return true;                        // IPv6 link-local
+  if (/^f[cd][0-9a-f]{2}:/i.test(h)) return true;            // IPv6 unique-local fc00::/7
+  if (/^::ffff:/i.test(h)) {                                 // IPv4-mapped IPv6 → range-check the embedded v4
+    const v4 = h.replace(/^::ffff:/i, "");
+    if (/^\d{1,3}(\.\d{1,3}){3}$/.test(v4)) return isPrivateHostname(v4);
+  }
   return false;
 }
