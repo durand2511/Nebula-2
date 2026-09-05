@@ -209,10 +209,10 @@ router.post("/voice/ask", express.json({ limit: "256kb" }), async (req, res) => 
   const historyText = history.length ? "RECENT GESPREK (alleen als context, NIET opnieuw uitvoeren):\n" + history.map((t) => `${t.role === "user" ? "Gebruiker" : "Jij"}: ${t.text}`).join("\n") + "\n\n" : "";
   const prompt = `${historyText}NIEUWE VRAAG: ${message}`;
 
-  const base = { projectId, prompt, emit: () => { /* no stream */ }, systemPromptOverride: sys, mcpServers: tools.mcpServers, extraAllowedTools: tools.allowedTools, model: "claude-haiku-4-5-20251001", maxTurns: 20 } as const;
+  const base = { projectId, prompt, emit: () => { /* no stream */ }, systemPromptOverride: sys, mcpServers: tools.mcpServers, extraAllowedTools: tools.allowedTools, model: "claude-haiku-4-5-20251001", maxTurns: 40 } as const;
 
-  // Always time-bound a run so a hung subprocess (e.g. a token race on the customer's login) can never
-  // leave the phone waiting forever with "server not reachable".
+  // Time-bound a run (generous — a real edit on a big site legitimately takes a while) so only a truly
+  // HUNG subprocess is cut off, never a normal slow run.
   async function runOnce(extra: Record<string, unknown>, ms: number) {
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), ms);
@@ -220,16 +220,18 @@ router.post("/voice/ask", express.json({ limit: "256kb" }), async (req, res) => 
     finally { clearTimeout(timer); }
   }
   async function run() {
-    // Try the customer's own subscription, but only if it hasn't just failed — otherwise skip straight
-    // to the (fast, proven) platform key so every request doesn't eat a slow fallback.
+    // 1) Customer's own subscription — on the account's default model (forcing a model the subscription
+    //    doesn't recognise is what broke it). Skipped if it recently failed (cooldown).
     if (!ownSubBrokenUntil(u!.id) && await isClaudeConnected(u!.id)) {
       const own = await prepareUserClaudeEnv(u!.id);
       if (own.connected) {
-        try { return await runOnce({ subprocessEnv: own.env }, 40000); }
-        catch (err) { markOwnSubBroken(u!.id); logger.warn({ err, projectId }, "[voice] own-subscription run failed/timed out — using platform key for a while"); }
+        try { return await runOnce({ subprocessEnv: own.env, model: null }, 90000); }
+        catch (err) { markOwnSubBroken(u!.id); logger.warn({ err, projectId }, "[voice] own-subscription run failed — using platform key for a while"); }
       }
     }
-    return await runOnce({}, 55000);
+    // 2) Platform key on Haiku (fast); if that model isn't available, fall back to Sonnet (proven).
+    try { return await runOnce({}, 120000); }
+    catch (err) { logger.warn({ err, projectId }, "[voice] platform Haiku run failed — retrying on Sonnet"); return await runOnce({ model: "claude-sonnet-4-5" }, 120000); }
   }
   try {
     const r = await run();
