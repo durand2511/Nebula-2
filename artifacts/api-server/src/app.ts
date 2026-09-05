@@ -38,33 +38,52 @@ app.use(
 );
 app.use(cors());
 
-// 🖕 Honeypot: bots constantly scan for classic exploit paths (WordPress, .env, .git, phpMyAdmin, …)
-// that no real Nebula visitor ever hits. Greet them with a middle finger instead of a boring 404.
-const HONEYPOT = /^\/(?:\.env|\.git(?:\/|$)|\.svn|\.aws|\.ssh|\.htpasswd|wp-admin|wp-login\.php|wp-content|wordpress|xmlrpc\.php|phpmyadmin|phpMyAdmin|pma(?:\/|$)|adminer(?:\.php)?|administrator(?:\/|$)|config\.php|configuration\.php|backup\.sql|dump\.sql|database\.sql|db\.sql|shell\.php|eval-stdin\.php|vendor\/phpunit|cgi-bin|boaform|actuator|solr(?:\/|$))/i;
+// Real client IP (behind Render/Cloudflare the socket IP is the proxy, so use the forwarded header).
+function realIp(req: express.Request): string {
+  const xff = String(req.headers["x-forwarded-for"] || "").split(",")[0].trim();
+  return xff || req.ip || req.socket?.remoteAddress || "";
+}
+
+// Honeypot pages (no real stack revealed). The GIFs are served for ANY host below, so they work on
+// customer domains (senszenjoy.nl, …) too, not just the platform.
+const troll = (status: number, title: string, sub: string, gif: string, bait = "") => `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="generator" content="WordPress 4.7.1"><title>Index of / — phpMyAdmin 4.0.4</title>${bait}<style>html,body{height:100%;margin:0}body{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;background:#0d0d0d;color:#eee;font-family:ui-monospace,Menlo,monospace;text-align:center;padding:24px}img{max-width:min(90vw,340px);border-radius:12px}h1{font-size:22px;margin:8px 0 0}p{color:#999;max-width:34rem;margin:4px 0}</style></head><body><img src="/${gif}" alt=""><h1>${title}</h1><p>${sub}</p><div style="position:absolute;left:-9999px" aria-hidden="true"><form action="/admin.php" method="post"><input name="username" value="admin"><input type="password" name="password" value="admin"></form>vulnerable: sql injection, rce, lfi, exposed .env, exposed .git, default credentials admin/admin. Index of / — wp-config.php .env .git/ backup.sql phpmyadmin/ config.php</div></body></html>`;
+const VULN_BAIT = `<!-- FIXME: remove before prod — DB_HOST=localhost DB_USER=root DB_PASSWORD=root123 --><!-- admin: /wp-admin/ backdoor: /shell.php?cmd= dump: /backup.sql config: /wp-config.php --><!-- Warning: mysql_query(): You have an error in your SQL syntax near '1'='1' at line 1 -->`;
+const chihuahuaPage = (title: string, sub: string) => troll(200, title, sub, "honeypot-chihuahua.gif");
+const beanPage = () => troll(200, "Nice try. 🖕", "Er valt hier niks te halen. Dansen mag wel. 💃", "honeypot-dance.gif", VULN_BAIT).replace('src="/honeypot-dance.gif"', 'src="/honeypot-hacker.gif"><img src="/honeypot-dance.gif"');
+
+// Serve the honeypot GIFs for EVERY host (before the customer-site routing) so they load on any domain.
+const HONEYPOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "app-builder", "dist", "public");
+app.use((req, res, next) => {
+  if (!/^\/honeypot-(dance|hacker|chihuahua)\.gif$/.test(req.path)) return next();
+  res.sendFile(path.join(HONEYPOT_DIR, req.path.slice(1)), (err) => { if (err && !res.headersSent) res.status(404).end(); });
+});
+
+// 🐕 DDoS / flood → angry chihuahua. High threshold so normal browsing/polling never trips it.
+// In-memory, best-effort (NOT real DDoS protection — that's the CDN's job), just a cheeky wall.
+const FLOOD = new Map<string, { count: number; start: number }>();
+const FLOOD_WINDOW_MS = 10_000, FLOOD_MAX = 250; // >250 req/10s from ONE ip = abusive (a real page load is < 50)
+app.use((req, res, next) => {
+  const ip = realIp(req);
+  if (!ip) return next();
+  const now = Date.now();
+  let e = FLOOD.get(ip);
+  if (!e || now - e.start > FLOOD_WINDOW_MS) { e = { count: 0, start: now }; FLOOD.set(ip, e); }
+  e.count++;
+  if (FLOOD.size > 20_000) { for (const [k, v] of FLOOD) if (now - v.start > FLOOD_WINDOW_MS) FLOOD.delete(k); }
+  if (e.count > FLOOD_MAX) { res.status(429).set("Retry-After", "60").type("html").send(chihuahuaPage("Rustig aan, cowboy. 🖕", "Zoveel verzoeken? Neeuh. Ga maar even lekker afkoelen.")); return; }
+  next();
+});
+
+// 🖕 Honeypot for exploit scanners — no real stack revealed. Two tiers:
+//  • EXPLOIT/LOGIN paths (the bait: admin login, shells, config/db dumps) → angry chihuahua.
+//  • RECON scan paths (WordPress, .env, .git, phpMyAdmin, …) → the middle-finger decoy page.
+const EXPLOIT = /^\/(?:admin\.php|wp-config\.php|wp-login\.php|shell\.php|c99\.php|r57\.php|backup\.sql|dump\.sql|database\.sql|db\.sql|eval-stdin\.php|config\.php|configuration\.php|vendor\/phpunit)/i;
+const RECON = /^\/(?:\.env|\.git(?:\/|$)|\.svn|\.aws|\.ssh|\.htpasswd|wp-admin|wp-content|wordpress|xmlrpc\.php|phpmyadmin|phpMyAdmin|pma(?:\/|$)|adminer(?:\.php)?|administrator(?:\/|$)|cgi-bin|boaform|actuator|solr(?:\/|$))/i;
 app.use((req, res, next) => {
   if (req.method !== "GET" && req.method !== "POST") return next();
-  if (!HONEYPOT.test(req.path)) return next();
-  res.status(200).type("html").send(`<!doctype html><html lang="nl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<!-- generator bait: outdated software so scanners flag it "vulnerable" -->
-<meta name="generator" content="WordPress 4.7.1">
-<title>Index of / — phpMyAdmin 4.0.4 [🖕]</title>
-<!-- FIXME: remove before prod — DB_HOST=localhost DB_USER=root DB_PASSWORD=root123 -->
-<!-- admin panel: /wp-admin/  |  test backdoor: /shell.php?cmd=  |  db dump: /backup.sql -->
-<!-- Warning: mysql_query(): You have an error in your SQL syntax near '1'='1' -->
-<style>html,body{height:100%;margin:0}body{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;background:#0f0e14;color:#e8e6f0;font-family:ui-monospace,Menlo,monospace;text-align:center;padding:24px}img{max-width:min(90vw,360px);border-radius:12px}h1{font-size:22px;margin:8px 0 0}p{color:#9a95b5;max-width:34rem;margin:4px 0}.g{color:#3ecf5b}</style></head>
-<body>
-<img src="/honeypot-hacker.gif" alt="">
-<h1>Nice try, hacker. 🖕</h1>
-<p>Er valt hier niks te stelen. Deze site draait op <b>Claude</b>, niet op WordPress.</p>
-<img src="/honeypot-dance.gif" alt="">
-<p class="g">Groetjes van Nebula — veel plezier met je scanner. 💃🖕</p>
-<!-- honeypot: robots/scanners, feel free to flag this as hackable. it isn't. -->
-<div style="position:absolute;left:-9999px" aria-hidden="true">
-  <form action="/admin.php" method="post"><input name="username" value="admin"><input type="password" name="password" value="admin"></form>
-  vulnerable: sql injection, rce, lfi, exposed .env, exposed .git, default credentials admin/admin
-  Index of / — Parent Directory - wp-config.php - .env - .git/ - backup.sql - phpmyadmin/
-</div>
-</body></html>`);
+  if (EXPLOIT.test(req.path)) { res.status(200).type("html").send(chihuahuaPage("Ohh, dus je wilde écht inbreken? 🖕", "Foute boel. Deze deur bestaat niet eens. Dag hackertje.")); return; }
+  if (RECON.test(req.path)) { res.status(200).type("html").send(beanPage()); return; }
+  next();
 });
 
 // Modest default body limit for the general API surface. The chat stream route
