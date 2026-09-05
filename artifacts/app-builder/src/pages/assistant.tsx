@@ -307,16 +307,21 @@ export default function Assistant() {
     const src = ac.createMediaStreamSource(stream);
     const analyser = ac.createAnalyser(); analyser.fftSize = 512; src.connect(analyser);
     const data = new Uint8Array(analyser.fftSize);
-    const started = Date.now(); let speech = false, lastLoud = Date.now();
+    const started = Date.now();
+    let ambient = 0.02, ambientN = 0;   // learned background-noise level
+    let speechStarted = false, lastLoud = started, speechMs = 0;
     vadTimerRef.current = setInterval(() => {
       analyser.getByteTimeDomainData(data);
       let sum = 0; for (let i = 0; i < data.length; i++) { const x = (data[i] - 128) / 128; sum += x * x; }
-      const rms = Math.sqrt(sum / data.length); const now = Date.now();
-      if (rms > 0.03) { speech = true; lastLoud = now; }
-      const finish = () => { sent = speech; try { src.disconnect(); } catch { /* ignore */ } try { if (recorderRef.current && recorderRef.current.state !== "inactive") recorderRef.current.stop(); } catch { /* ignore */ } };
-      if (speech && now - lastLoud > 3000) { finish(); }  // wait 3s of silence so a mid-sentence pause isn't cut off
-      else if (!speech && now - started > 8000) { finish(); if (!taskActiveRef.current && convRef.current) { flash("Ik hoorde niets — tik het logo om opnieuw te starten.", 3500); setConv(false); } }
-      else if (now - started > 45000) { finish(); }
+      const rms = Math.sqrt(sum / data.length); const now = Date.now(); const elapsed = now - started;
+      // First ~450ms: learn the room's background level, so we only react to speech clearly ABOVE it.
+      if (elapsed < 450) { ambient = (ambient * ambientN + rms) / (ambientN + 1); ambientN++; return; }
+      const threshold = Math.max(0.05, ambient * 2.5 + 0.02);
+      if (rms > threshold) { speechStarted = true; lastLoud = now; speechMs += 80; }
+      const finish = (send: boolean) => { sent = send; try { src.disconnect(); } catch { /* ignore */ } try { if (recorderRef.current && recorderRef.current.state !== "inactive") recorderRef.current.stop(); } catch { /* ignore */ } };
+      if (speechStarted && now - lastLoud > 3000) { finish(speechMs > 250); }   // spoke, then 3s quiet → send if it was real speech
+      else if (!speechStarted && elapsed > 7000) { finish(false); if (!taskActiveRef.current && convRef.current) setConv(false); } // only noise/silence → stop, don't keep looping
+      else if (elapsed > 45000) { finish(speechMs > 250); }
     }, 80);
   }
 
