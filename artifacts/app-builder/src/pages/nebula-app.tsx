@@ -80,21 +80,29 @@ export function NebulaApp() {
             <p className="mt-1 text-sm text-muted-foreground">{t("Open deze pagina op je telefoon en volg de stappen. Daarna staat Nebula als een echte app op je scherm.", "Open this page on your phone and follow the steps. Nebula then sits on your screen like a real app.")}</p>
             <div className="mt-5 grid gap-5 sm:grid-cols-2">
               <div className={`rounded-xl border p-4 ${isIOS ? "border-primary/40 bg-primary/5" : "border-border"}`}>
-                <div className="text-sm font-semibold flex items-center gap-2"><span className="text-base"></span>iPhone / iPad (Safari)</div>
+                <div className="text-sm font-semibold flex items-center gap-2"><span aria-hidden="true"></span>iPhone / iPad (Safari)</div>
                 <ol className="mt-3 space-y-2 text-sm text-muted-foreground">
-                  <li className="flex items-start gap-2"><Share className="h-4 w-4 mt-0.5 shrink-0 text-primary" /> {t("Tik op de deel-knop onderin.", "Tap the Share button at the bottom.")}</li>
-                  <li className="flex items-start gap-2"><Plus className="h-4 w-4 mt-0.5 shrink-0 text-primary" /> {t("Kies 'Zet op beginscherm'.", "Choose 'Add to Home Screen'.")}</li>
-                  <li className="flex items-start gap-2"><ArrowRight className="h-4 w-4 mt-0.5 shrink-0 text-primary" /> {t("Tik op 'Voeg toe' — klaar.", "Tap 'Add' — done.")}</li>
+                  <li className="flex items-start gap-2"><Share className="h-4 w-4 mt-0.5 shrink-0 text-primary" /> {t("Tik op de deel-knop onderin (vierkantje met pijltje omhoog).", "Tap the Share button at the bottom (square with an up-arrow).")}</li>
+                  <li className="flex items-start gap-2"><Plus className="h-4 w-4 mt-0.5 shrink-0 text-primary" /> {t("Scrol en kies 'Zet op beginscherm'.", "Scroll and choose 'Add to Home Screen'.")}</li>
+                  <li className="flex items-start gap-2"><ArrowRight className="h-4 w-4 mt-0.5 shrink-0 text-primary" /> {t("Tik rechtsboven op 'Voeg toe' — klaar.", "Tap 'Add' at the top right — done.")}</li>
                 </ol>
               </div>
               <div className={`rounded-xl border p-4 ${!isIOS ? "border-primary/40 bg-primary/5" : "border-border"}`}>
-                <div className="text-sm font-semibold flex items-center gap-2"><span className="text-base"></span>Android (Chrome)</div>
+                <div className="text-sm font-semibold flex items-center gap-2"><span aria-hidden="true">🤖</span>Android (Chrome)</div>
                 <ol className="mt-3 space-y-2 text-sm text-muted-foreground">
-                  <li className="flex items-start gap-2"><Download className="h-4 w-4 mt-0.5 shrink-0 text-primary" /> {t("Tik hierboven op 'Installeer op dit toestel'.", "Tap 'Install on this device' above.")}</li>
-                  <li className="flex items-start gap-2"><Plus className="h-4 w-4 mt-0.5 shrink-0 text-primary" /> {t("Of: menu (⋮) → 'App installeren'.", "Or: menu (⋮) → 'Install app'.")}</li>
-                  <li className="flex items-start gap-2"><ArrowRight className="h-4 w-4 mt-0.5 shrink-0 text-primary" /> {t("Bevestig — klaar.", "Confirm — done.")}</li>
+                  <li className="flex items-start gap-2"><Download className="h-4 w-4 mt-0.5 shrink-0 text-primary" /> {t("Tik hierboven op de knop 'Installeer op dit toestel'.", "Tap the 'Install on this device' button above.")}</li>
+                  <li className="flex items-start gap-2"><Plus className="h-4 w-4 mt-0.5 shrink-0 text-primary" /> {t("Zie je die knop niet? Menu (⋮) rechtsboven → 'App installeren' of 'Toevoegen aan startscherm'.", "No button? Menu (⋮) top right → 'Install app' or 'Add to Home screen'.")}</li>
+                  <li className="flex items-start gap-2"><ArrowRight className="h-4 w-4 mt-0.5 shrink-0 text-primary" /> {t("Tik op 'Installeren' en bevestig — klaar.", "Tap 'Install' and confirm — done.")}</li>
                 </ol>
+                <p className="mt-3 text-xs text-muted-foreground/80">{t("Samsung Internet: menu (☰) → 'Pagina toevoegen aan' → 'Startscherm'.", "Samsung Internet: menu (☰) → 'Add page to' → 'Home screen'.")}</p>
               </div>
+            </div>
+            <div className="mt-5 rounded-xl border border-border bg-muted/40 p-4">
+              <div className="text-sm font-semibold flex items-center gap-2"><Mic className="h-4 w-4 text-primary" /> {t("Microfoon toestaan", "Allow the microphone")}</div>
+              <p className="mt-1.5 text-sm text-muted-foreground leading-relaxed">
+                {t("De eerste keer dat je praat, vraagt je telefoon toestemming voor de microfoon — tik op 'Toestaan'. Later terug te zien op Android via Instellingen → Apps → Nebula → Machtigingen → Microfoon; op iPhone via Instellingen → Nebula → Microfoon.",
+                   "The first time you talk, your phone asks for microphone permission — tap 'Allow'. Review it later on Android via Settings → Apps → Nebula → Permissions → Microphone; on iPhone via Settings → Nebula → Microphone.")}
+              </p>
             </div>
             <p className="mt-4 text-xs text-muted-foreground">{t("Op de computer? Open ", "On a computer? Open ")}<span className="font-mono text-foreground">nebulabookings.com/app</span>{t(" op je telefoon.", " on your phone.")}</p>
           </div>
