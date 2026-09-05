@@ -85,6 +85,22 @@ export default function Assistant() {
   useEffect(() => { try { window.speechSynthesis?.getVoices(); } catch { /* ignore */ } }, []);
   useEffect(() => () => { releaseMic(); stopSpeaking(); stopPolling(); }, []);
 
+  // Phone woke up: resume audio and grab any answer that finished while the screen was off (the task
+  // keeps running server-side; polling pauses when the tab is hidden).
+  useEffect(() => {
+    const onVis = () => {
+      if (document.visibilityState !== "visible") return;
+      try { if (audioCtxRef.current?.state === "suspended") void audioCtxRef.current.resume(); } catch { /* ignore */ }
+      if (taskActiveRef.current && projectRef.current) {
+        fetch(`/api/voice/result?projectId=${projectRef.current}`).then((r) => r.json()).then((j) => {
+          if (j && !j.running && j.done) { stopPolling(); if (j.domain !== undefined) setPublishDomain(j.domain || null); enqueueSpeak(String(j.text || "").trim() || "Klaar.", true); }
+        }).catch(() => {});
+      }
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, []);
+
   async function doLogin(e: React.FormEvent) {
     e.preventDefault();
     if (!email.trim() || !password) return;
@@ -150,28 +166,36 @@ export default function Assistant() {
     return new Promise((resolve) => {
       const ac = audioCtxRef.current;
       if (!ac || ac.state === "closed") { resolve(false); return; }
-      ac.decodeAudioData(buf.slice(0)).then((audioBuf) => {
+      let safety: ReturnType<typeof setTimeout> | null = null;
+      const done = (ok: boolean) => { if (safety) clearTimeout(safety); resolve(ok); };
+      void (async () => {
+        try { if (ac.state === "suspended") await ac.resume(); } catch { /* ignore */ }
         try {
+          const audioBuf = await ac.decodeAudioData(buf.slice(0));
           const src = ac.createBufferSource(); src.buffer = audioBuf; src.connect(ac.destination);
           ttsSourceRef.current = src;
-          src.onended = () => { if (ttsSourceRef.current === src) ttsSourceRef.current = null; resolve(true); };
-          if (ac.state === "suspended") ac.resume().catch(() => {});
+          // Failsafe: never let the speech queue hang if onended doesn't fire (e.g. after a screen sleep).
+          safety = setTimeout(() => done(true), Math.ceil(audioBuf.duration * 1000) + 2500);
+          src.onended = () => { if (ttsSourceRef.current === src) ttsSourceRef.current = null; done(true); };
           src.start();
-        } catch { resolve(false); }
-      }).catch(() => resolve(false));
+        } catch { done(false); }
+      })();
     });
   }
 
   function speakBrowserOnce(text: string, done: () => void) {
     if (typeof window === "undefined" || !("speechSynthesis" in window)) { done(); return; }
+    let called = false;
+    const finish = () => { if (called) return; called = true; done(); };
     try {
       const u = new SpeechSynthesisUtterance(text); u.lang = "nl-NL";
       const voices = window.speechSynthesis.getVoices();
       const nl = voices.find((v) => /^nl/i.test(v.lang) && /google|enhanced|premium|natural|siri/i.test(v.name)) || voices.find((v) => /^nl/i.test(v.lang) && !v.localService) || voices.find((v) => /^nl/i.test(v.lang));
       if (nl) u.voice = nl;
-      u.onend = () => done(); u.onerror = () => done();
+      u.onend = finish; u.onerror = finish;
+      setTimeout(finish, Math.min(15000, 1500 + text.length * 90)); // failsafe: some browsers never fire onend
       window.speechSynthesis.cancel(); window.speechSynthesis.speak(u);
-    } catch { done(); }
+    } catch { finish(); }
   }
 
   function stopSpeaking() { speakQ.current = []; speakingRef.current = false; try { window.speechSynthesis?.cancel(); } catch { /* ignore */ } try { ttsSourceRef.current?.stop(); } catch { /* ignore */ } ttsSourceRef.current = null; }

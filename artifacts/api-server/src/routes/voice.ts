@@ -231,17 +231,16 @@ async function executeTask(userId: number, projectId: number, message: string): 
     finally { clearTimeout(timer); }
   }
   async function run() {
-    if (!ownSubBrokenUntil(userId) && await isClaudeConnected(userId)) {
-      const own = await prepareUserClaudeEnv(userId);
-      if (own.connected) {
-        try { return await runOnce({ subprocessEnv: own.env, model: null }, 90000); }
-        catch (err) { markOwnSubBroken(userId); logger.warn({ err, projectId }, "[voice] own-subscription run failed — using platform key for a while"); }
-      }
-    }
+    // Platform key on Haiku for speed + reliability (the own-subscription path hung on prod — it can be
+    // re-enabled once verified). Sonnet fallback if Haiku isn't available on the key.
     try { return await runOnce({}, 120000); }
     catch (err) { logger.warn({ err, projectId }, "[voice] platform Haiku run failed — retrying on Sonnet"); return await runOnce({ model: "claude-sonnet-4-5" }, 120000); }
   }
   const r = await run();
+  // Auto-republish an edit to WHERE THE SITE ALREADY LIVES (its connected custom domain via publishSite,
+  // or its existing Nebula subdomain). We never CREATE a Nebula subdomain here — a site that isn't
+  // published yet stays in draft until the user says "publiceer". So a change goes live on the site's own
+  // domain, not on the provider domain.
   const edited = r.changed.length + r.created.length + r.deleted.length;
   if (edited > 0) { try { if (await isPublished(projectId)) await publishSite(projectId); } catch (err) { logger.warn({ err, projectId }, "[voice] auto-republish failed"); } }
   const domain = await liveDomain(projectId);
