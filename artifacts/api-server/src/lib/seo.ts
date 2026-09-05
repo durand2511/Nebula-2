@@ -9,13 +9,19 @@
  * internal links, sitemap) and interlink with siblings (content cluster via the blog hub).
  * Generation uses AI; publishing is deterministic (writes project files).
  */
-import { db, projectFiles, seoArticles, projectSeo } from "@workspace/db";
+import { db, projectFiles, seoArticles, projectSeo, projects } from "@workspace/db";
 import { republishMatching, isPublished } from "./site-publish.js";
 import { submitToIndexNow } from "./indexnow.js";
 import { listDomains, PLATFORM_HOST } from "./domains.js";
 import { eq, and } from "drizzle-orm";
 import { anthropic } from "@workspace/integrations-openai-ai-server";
 import { addNavItem, emailBrandSeed, type ProjectFile } from "./actions.js";
+import { isClaudeConnected, prepareUserClaudeEnv } from "./claude-terminal.js";
+import { query } from "@anthropic-ai/claude-agent-sdk";
+import { AsyncLocalStorage } from "node:async_hooks";
+import { promises as fsp } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { logger } from "./logger";
 
 const esc = (s: string) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c] as string));
@@ -90,7 +96,53 @@ export function deriveContext(files: ProjectFile[], language = "nl", domainOverr
   return { studio: seed.studio, logo: seed.logo, accent: seed.accent, domain, description, language, author };
 }
 
+// ── AI backend selection ─────────────────────────────────────────────────────────────────────────
+// The WHOLE pipeline flows through ai(). When a project's owner has coupled their own Claude, we run
+// the generation on THEIR subscription (better + no platform API cost); the platform API key is the
+// fallback so the daily article never silently fails. AsyncLocalStorage carries the owner's env safely
+// through the async pipeline (concurrency-proof) — the pipeline code itself is untouched.
+const genCtx = new AsyncLocalStorage<{ env?: Record<string, string | undefined> }>();
+
+async function withOwnerGen<T>(projectId: number, fn: () => Promise<T>): Promise<T> {
+  let env: Record<string, string | undefined> | undefined;
+  try {
+    const [p] = await db.select({ ownerId: projects.ownerId }).from(projects).where(eq(projects.id, projectId));
+    if (p?.ownerId && (await isClaudeConnected(p.ownerId))) {
+      const own = await prepareUserClaudeEnv(p.ownerId);
+      if (own.connected) env = own.env;
+    }
+  } catch (err) { logger.warn({ err: (err as Error)?.message, projectId }, "[seo] owner-subscription setup failed — using API key"); }
+  return genCtx.run({ env }, fn);
+}
+
+// Generate plain text on the customer's Claude subscription (single-turn, no tools) via the Agent SDK.
+async function aiViaSubscription(env: Record<string, string | undefined>, prompt: string, timeoutMs: number): Promise<string> {
+  const cwd = await fsp.realpath(await fsp.mkdtemp(path.join(os.tmpdir(), "nebula-seo-")));
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), timeoutMs);
+  try {
+    const q = query({ prompt, options: { cwd, allowedTools: [], settingSources: [], maxTurns: 1, env, abortController: ac } as never });
+    let text = "";
+    for await (const msg of q as AsyncIterable<{ type: string; message?: { content: { type: string; text?: string }[] }; subtype?: string; result?: string }>) {
+      if (msg.type === "assistant" && msg.message) { for (const b of msg.message.content) { if (b.type === "text" && b.text) text += b.text; } }
+      else if (msg.type === "result" && msg.subtype === "success" && msg.result) text = msg.result;
+    }
+    return text.trim();
+  } finally {
+    clearTimeout(timer);
+    await fsp.rm(cwd, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
 async function ai(prompt: string, maxTokens: number, timeoutMs = 120000): Promise<string> {
+  // Prefer the owner's own Claude subscription when this pipeline runs inside withOwnerGen().
+  const env = genCtx.getStore()?.env;
+  if (env) {
+    try {
+      const t = await aiViaSubscription(env, prompt, timeoutMs);
+      if (t) return t;
+    } catch (err) { logger.warn({ err: (err as Error)?.message }, "[seo] subscription generation failed — falling back to API key"); }
+  }
   // Per-call timeout + no SDK retries; catch errors so one slow/failed step degrades gracefully
   // (returns "") instead of throwing and 500-ing the whole request.
   try {
@@ -713,6 +765,9 @@ function ensureLocationsLink(html: string): string {
  *  city and opts.force bypasses the daily limit (manual trigger). Rebuilds hub/nav/footer/sitemap and
  *  pings the search engines. Best-effort. Returns the city, or null if nothing to do. */
 export async function generateLocationPage(projectId: number, opts?: { city?: string; force?: boolean }): Promise<{ city: string } | null> {
+  return withOwnerGen(projectId, () => generateLocationPageImpl(projectId, opts));
+}
+async function generateLocationPageImpl(projectId: number, opts?: { city?: string; force?: boolean }): Promise<{ city: string } | null> {
   const rows0 = await db.select().from(projectFiles).where(eq(projectFiles.projectId, projectId));
   const files = rows0.map((f) => ({ path: f.path, content: f.content }));
   let cfg = locationConfig(files);
@@ -896,6 +951,9 @@ function briefFromPayload(p: PipelineResult, ctx: Ctx): Brief {
  * decision, or null if there's no site content. `mode` = 'manual' | 'auto'.
  */
 export async function publishArticle(projectId: number, isoDate: string, opts?: { topic?: { title: string; keyword: string }; mode?: "manual" | "auto" }): Promise<(PipelineResult & { skipped?: string }) | null> {
+  return withOwnerGen(projectId, () => publishArticleImpl(projectId, isoDate, opts));
+}
+async function publishArticleImpl(projectId: number, isoDate: string, opts?: { topic?: { title: string; keyword: string }; mode?: "manual" | "auto" }): Promise<(PipelineResult & { skipped?: string }) | null> {
   const rows = await db.select().from(projectFiles).where(eq(projectFiles.projectId, projectId));
   const files = rows.map((f) => ({ path: f.path, content: f.content }));
   if (!files.some((f) => f.path.endsWith(".html"))) return null;
@@ -1032,6 +1090,9 @@ export async function publishManualArticle(projectId: number, input: { title: st
 
 /** Update/refresh an existing published article (re-writes the body, bumps the date). */
 export async function improveArticle(projectId: number, isoDate: string, articleId?: number): Promise<{ title: string; slug: string } | null> {
+  return withOwnerGen(projectId, () => improveArticleImpl(projectId, isoDate, articleId));
+}
+async function improveArticleImpl(projectId: number, isoDate: string, articleId?: number): Promise<{ title: string; slug: string } | null> {
   const pub = await db.select().from(seoArticles).where(and(eq(seoArticles.projectId, projectId), eq(seoArticles.status, "published")));
   if (!pub.length) return null;
   const target = articleId ? pub.find((a) => a.id === articleId) : pub.slice().sort((a, b) => new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime())[0];
