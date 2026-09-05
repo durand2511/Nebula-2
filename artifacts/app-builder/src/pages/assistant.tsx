@@ -139,7 +139,9 @@ export default function Assistant() {
   const dropRecordingRef = useRef(false);
   const audioElRef = useRef<HTMLAudioElement | null>(null); // real <audio> so speech keeps playing with the screen off
 
-  function afterResult() { if (convRef.current) startListen(); else setModeS("idle"); }
+  // After Claude answers, STOP listening (tap to ask the next thing). The conversation still continues —
+  // memory is kept server-side — but the mic isn't left on, which felt like it "kept listening".
+  function afterResult() { setConv(false); setModeS("idle"); }
 
   function enqueueSpeak(text: string, final: boolean) {
     if (!ttsRef.current || !text) { if (final) afterResult(); return; }
@@ -157,8 +159,7 @@ export default function Assistant() {
     }
     speakingRef.current = false;
     if (taskActiveRef.current) setModeS("processing");   // asides done, task still running
-    else if (convRef.current) startListen();
-    else setModeS("idle");
+    else { setConv(false); setModeS("idle"); }           // done → stop; tap to talk again
   }
 
   function speakOne(text: string): Promise<void> {

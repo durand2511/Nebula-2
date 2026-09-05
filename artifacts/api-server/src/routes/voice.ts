@@ -28,7 +28,7 @@ async function liveDomain(projectId: number): Promise<string | null> {
 // The voice assistant is a chatty helper, not a rigid editor: it talks naturally, varies its wording,
 // chats back when you're just greeting, and only edits the site when clearly asked.
 const VOICE_SYSTEM_PROMPT = [
-  "Je bent de spraakassistent van Nebula voor deze website. Je praat Nederlands, kort en natuurlijk — als een behulpzame, vriendelijke collega. Wissel je bewoordingen af; geef niet steeds exact hetzelfde antwoord.",
+  "Je bent de spraakassistent van Nebula voor deze website. Je antwoordt ALTIJD in het Nederlands (nooit Engels, ook niet één woord), kort en natuurlijk — als een behulpzame, vriendelijke collega. Wissel je bewoordingen af; geef niet steeds exact hetzelfde antwoord.",
   "",
   "HEEL BELANGRIJK — JE ANTWOORD WORDT HARDOP VOORGELEZEN. Geef ALLEEN de zin(nen) die je tegen de gebruiker zou zeggen. NOOIT:",
   "- geen inleiding of nadenken-hardop ('de gebruiker wil een gesprek', 'ik ga even...', 'laat me kijken');",
@@ -102,11 +102,14 @@ function progressText(e: Record<string, unknown>): string | null {
 
 // Strip emoji + pictographs so the text-to-speech voice doesn't read them out (or trip over them).
 function stripForSpeech(s: string): string {
-  return s
-    .replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}\u{2300}-\u{23FF}\u{FE00}-\u{FE0F}\u{1F1E6}-\u{1F1FF}\u{200D}]/gu, "")
-    .replace(/[ \t]{2,}/g, " ")
-    .replace(/\s+([,.!?])/g, "$1")
-    .trim();
+  let out = s.replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}\u{2300}-\u{23FF}\u{FE00}-\u{FE0F}\u{1F1E6}-\u{1F1FF}\u{200D}]/gu, "");
+  // Safety net: drop leading English "thinking out loud" sentences if the model slips into them.
+  for (let i = 0; i < 3; i++) {
+    const m = out.match(/^\s*(I['’`]?ll |I will |I'?m going to |Let me |Let['’`]?s |I need to |I have to |I should |Looking at |First,? |Now,? |I can see |I see |I['’`]?ve |Sure[,!.]? |Okay[,!.]? |Alright[,!.]? |The user )[^.!?\n]*[.!?\n]+/i);
+    if (!m) break;
+    out = out.slice(m[0].length);
+  }
+  return out.replace(/[ \t]{2,}/g, " ").replace(/\s+([,.!?])/g, "$1").trim();
 }
 
 // When a user's own-subscription run fails, skip it for a while so requests don't keep eating a slow
