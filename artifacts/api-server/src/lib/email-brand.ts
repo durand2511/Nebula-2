@@ -5,7 +5,7 @@
  */
 import { db, projectFiles } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
-import { anthropic } from "@workspace/integrations-openai-ai-server";
+import { generateOnSubscription, projectOwnerEnv, type SubEnv } from "./subscription-ai.js";
 import { emailBrandSeed, type ProjectFile } from "./actions.js";
 import { resolvePublishedDomain } from "./seo.js";
 import { logger } from "./logger";
@@ -14,21 +14,15 @@ import { BRAND_KINDS as KINDS, fallbackCopy, type BrandCopy, type EmailBrand } f
 export const BRAND_PATH = "assets/email-brand.json";
 export type { BrandCopy, EmailBrand };
 
-async function aiCopy(studio: string): Promise<Record<string, BrandCopy> | null> {
+async function aiCopy(studio: string, env: SubEnv | null): Promise<Record<string, BrandCopy> | null> {
+  if (!env) return null; // no coupled subscription → caller uses the fallback template
   try {
-    const resp = await anthropic.messages.create({
-      model: "claude-sonnet-4-5",
-      max_tokens: 900,
-      messages: [{
-        role: "user",
-        content:
-          `Je schrijft warme, persoonlijke e-mailteksten (in het Nederlands) voor de studio "${studio}". ` +
-          `Geef PURE JSON terug (geen uitleg, geen markdown) met exact deze sleutels: booking, cancel, welcome, reset, reminder. ` +
-          `Elke sleutel is een object met "heading" (korte titel, mag 1 emoji), "intro" (1-2 warme zinnen, verwerk de studionaam natuurlijk), "outro" (1 hartelijke afsluitzin). ` +
-          `Toon: lief, persoonlijk, uitnodigend. booking=boeking bevestigd, cancel=annulering, welcome=welkom nieuw account, reset=nieuw wachtwoord, reminder=herinnering 24u voor de les.`,
-      }],
-    });
-    const text = resp.content[0]?.type === "text" ? resp.content[0].text : "";
+    const text = await generateOnSubscription(env,
+      `Je schrijft warme, persoonlijke e-mailteksten (in het Nederlands) voor de studio "${studio}". ` +
+      `Geef PURE JSON terug (geen uitleg, geen markdown) met exact deze sleutels: booking, cancel, welcome, reset, reminder. ` +
+      `Elke sleutel is een object met "heading" (korte titel, mag 1 emoji), "intro" (1-2 warme zinnen, verwerk de studionaam natuurlijk), "outro" (1 hartelijke afsluitzin). ` +
+      `Toon: lief, persoonlijk, uitnodigend. booking=boeking bevestigd, cancel=annulering, welcome=welkom nieuw account, reset=nieuw wachtwoord, reminder=herinnering 24u voor de les.`,
+      60000);
     const json = text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1);
     const parsed = JSON.parse(json) as Record<string, BrandCopy>;
     // Keep only well-formed entries; fill any gaps from the fallback.
@@ -50,7 +44,7 @@ export async function generateEmailBrand(projectId: number, files: ProjectFile[]
     const [existing] = await db.select().from(projectFiles).where(and(eq(projectFiles.projectId, projectId), eq(projectFiles.path, BRAND_PATH)));
     if (existing) return; // already done — "een keer en daarna niet meer"
     const seed = emailBrandSeed(files);
-    const copy = (await aiCopy(seed.studio)) ?? fallbackCopy(seed.studio);
+    const copy = (await aiCopy(seed.studio, await projectOwnerEnv(projectId))) ?? fallbackCopy(seed.studio);
     const brand: EmailBrand = { ...seed, copy };
     await db.insert(projectFiles).values({ projectId, path: BRAND_PATH, content: JSON.stringify(brand), language: "json" });
     logger.info({ projectId, studio: seed.studio }, "[email-brand] generated");

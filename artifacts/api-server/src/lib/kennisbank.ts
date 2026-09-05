@@ -11,7 +11,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { db, platformBlog } from "@workspace/db";
 import { desc, eq } from "drizzle-orm";
-import { anthropic } from "@workspace/integrations-openai-ai-server";
+import { generateOnSubscription, platformOwnerEnv, type SubEnv } from "./subscription-ai.js";
 import { INDEXNOW_KEY, submitToIndexNow } from "./indexnow.js";
 import { PLATFORM_HOST } from "./domains.js";
 
@@ -42,17 +42,12 @@ const THEMES = [
   "teksten en foto's voor je website die verkopen",
 ];
 
-async function ai(prompt: string, maxTokens: number): Promise<string> {
-  try {
-    const resp = await anthropic.messages.create(
-      { model: "claude-sonnet-4-5", max_tokens: maxTokens, messages: [{ role: "user", content: prompt }] },
-      { timeout: 180000, maxRetries: 0 },
-    );
-    return resp.content[0]?.type === "text" ? resp.content[0].text : "";
-  } catch (err) {
-    logger.warn({ err: (err as Error)?.message }, "[kennisbank] ai call failed");
-    return "";
-  }
+// The Kennisbank is the platform's OWN blog, so it generates on the PLATFORM OWNER's Claude
+// subscription — no API key. kbEnv is set for the duration of one generation run.
+let kbEnv: SubEnv | null = null;
+async function ai(prompt: string, _maxTokens: number): Promise<string> {
+  if (!kbEnv) return "";
+  return generateOnSubscription(kbEnv, prompt, 180000);
 }
 
 function parseJson<T>(text: string): T | null {
@@ -66,6 +61,12 @@ function parseJson<T>(text: string): T | null {
 type Article = { title: string; metaTitle: string; metaDescription: string; slug: string; html: string; topic: string };
 
 export async function generateKennisbankArticle(): Promise<{ status: "published" | "failed"; slug?: string; reason?: string }> {
+  const env = await platformOwnerEnv();
+  if (!env) return { status: "failed", reason: "platform owner has no coupled Claude subscription" };
+  kbEnv = env;
+  try { return await generateKennisbankArticleImpl(); } finally { kbEnv = null; }
+}
+async function generateKennisbankArticleImpl(): Promise<{ status: "published" | "failed"; slug?: string; reason?: string }> {
   const existing = await db.select({ title: platformBlog.title, topic: platformBlog.topic }).from(platformBlog).orderBy(desc(platformBlog.createdAt)).limit(40);
   const theme = THEMES[existing.length % THEMES.length];
   const prompt = [
@@ -200,7 +201,8 @@ export function startKennisbankScheduler(): void {
   if (started) return;
   started = true;
   void seedCornerstoneArticles(); // idempotent — ensures the cornerstone articles are always live
-  if (!process.env.ANTHROPIC_API_KEY) { logger.warn("[kennisbank] ANTHROPIC_API_KEY not set — daily article generation disabled"); return; }
+  // Daily articles now run on the platform owner's OWN Claude subscription (no API key); if the owner
+  // hasn't coupled a login, generateKennisbankArticle() simply reports "failed" and we retry later.
   const tick = async () => {
     try { await translatePending(); } catch { /* backfill EN for older articles, best-effort */ }
     try {
