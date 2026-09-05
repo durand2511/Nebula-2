@@ -12,6 +12,7 @@ import studioRouter from "./studio";
 import gcalRouter from "./gcal";
 import gscRouter from "./gsc";
 import claudeRouter from "./claude";
+import voiceRouter from "./voice";
 
 const router: IRouter = Router();
 
@@ -28,5 +29,6 @@ router.use(studioRouter);
 router.use(gcalRouter);
 router.use(gscRouter);
 router.use(claudeRouter);
+router.use(voiceRouter);
 
 export default router;

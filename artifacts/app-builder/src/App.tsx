@@ -16,6 +16,8 @@ import { Uitleg } from "@/pages/uitleg";
 import { Help } from "@/pages/help";
 import { Welkom } from "@/pages/welkom";
 import { PlatformUitleg } from "@/pages/platform-uitleg";
+import { NebulaApp } from "@/pages/nebula-app";
+import Assistant from "@/pages/assistant";
 import NotFound from "@/pages/not-found";
 
 const queryClient = new QueryClient({
@@ -40,6 +42,8 @@ function Router() {
       <Route path="/help" component={Help} />
       <Route path="/welkom" component={Welkom} />
       <Route path="/platform-uitleg" component={PlatformUitleg} />
+      <Route path="/app" component={NebulaApp} />
+      <Route path="/assistent" component={Assistant} />
       <Route path="/projects/:id" component={ProjectWorkspace} />
       <Route component={NotFound} />
     </Switch>

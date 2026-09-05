@@ -24,7 +24,41 @@ type Props = {
   onConnected?: (connected: boolean) => void;
   onStatus?: (s: TerminalStatus) => void;
   onLocked?: (message: string) => void;
+  /** Fires with Claude's latest prose reply (clean text from the buffer) once output settles — used by
+   *  the mobile assistant to read the answer out loud. Best-effort extraction. */
+  onAssistantText?: (text: string) => void;
 };
+
+/**
+ * Pull Claude's most recent natural-language reply out of the rendered terminal buffer. xterm decodes
+ * ANSI into a plain character grid, so translateToString gives clean text (no escape codes). We take the
+ * last contiguous block of sentence-like lines, skipping the input box and obvious tool-call lines.
+ */
+function extractReply(term: Terminal): string {
+  const buf = term.buffer.active;
+  const start = Math.max(0, buf.length - 80);
+  const lines: string[] = [];
+  for (let i = start; i < buf.length; i++) lines.push((buf.getLine(i)?.translateToString(true) ?? "").replace(/\s+$/, ""));
+  const isChrome = (s: string) => /[╭╮╰╯│─┌┐└┘┃━]/.test(s) || /^\s*>/.test(s) || /shortcuts|bypass permissions|auto-?accept|for shortcuts/i.test(s);
+  const leadGlyph = /^[\s]*[⏺✳✶●•·*]/;
+  let i = lines.length - 1;
+  while (i >= 0 && (lines[i].trim() === "" || isChrome(lines[i]))) i--;
+  const block: string[] = [];
+  for (; i >= 0; i--) {
+    const s = lines[i];
+    if (s.trim() === "") { if (block.length) break; else continue; }
+    if (isChrome(s)) break;
+    const startsMsg = leadGlyph.test(s);
+    block.unshift(s.replace(/^[\s⏺✳✶●•·*]+/, "").trim());
+    if (startsMsg) break;
+  }
+  let text = block.join(" ").replace(/\s+/g, " ").trim();
+  // Skip tool-call / status noise: "Bash(...)", pure paths, or lines with almost no letters.
+  if (/^\w+\([^)]*\)\.?$/.test(text)) return "";
+  const letters = (text.match(/[a-zà-ÿ]/gi) || []).length;
+  if (text.length < 4 || letters < text.length * 0.5) return "";
+  return text.slice(0, 500);
+}
 
 function wsUrl(projectId: number, cols?: number, rows?: number): string {
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
@@ -42,7 +76,7 @@ export type ClaudeTerminalHandle = {
 };
 
 export const ClaudeTerminal = forwardRef<ClaudeTerminalHandle, Props>(function ClaudeTerminal(
-  { projectId, className, onFilesChanged, onConnected, onStatus, onLocked }: Props,
+  { projectId, className, onFilesChanged, onConnected, onStatus, onLocked, onAssistantText }: Props,
   ref,
 ) {
   const { t } = useLang();
@@ -65,8 +99,8 @@ export const ClaudeTerminal = forwardRef<ClaudeTerminalHandle, Props>(function C
   const [gen, setGen] = useState(0); // bump to force a fresh connection ("Opnieuw starten")
 
   // Keep latest callbacks without re-subscribing the socket.
-  const cb = useRef({ onFilesChanged, onConnected, onStatus, onLocked });
-  cb.current = { onFilesChanged, onConnected, onStatus, onLocked };
+  const cb = useRef({ onFilesChanged, onConnected, onStatus, onLocked, onAssistantText });
+  cb.current = { onFilesChanged, onConnected, onStatus, onLocked, onAssistantText };
 
   const setStat = useCallback((s: TerminalStatus) => { statusRef.current = s; setStatus(s); cb.current.onStatus?.(s); }, []);
 
@@ -107,6 +141,8 @@ export const ClaudeTerminal = forwardRef<ClaudeTerminalHandle, Props>(function C
 
   // (Re)connect the socket.
   const attemptsRef = useRef(0);
+  const replyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastReplyRef = useRef("");
   useEffect(() => {
     const term = termRef.current;
     if (!term) return;
@@ -136,7 +172,21 @@ export const ClaudeTerminal = forwardRef<ClaudeTerminalHandle, Props>(function C
       let m: any;
       try { m = JSON.parse(String(ev.data)); } catch { return; }
       switch (m.t) {
-        case "o": attemptsRef.current = 0; term.write(m.d); break;
+        case "o":
+          attemptsRef.current = 0;
+          term.write(m.d);
+          // When output settles (Claude finished), read the reply out of the buffer for the voice
+          // assistant. Only when someone is listening (onAssistantText set).
+          if (cb.current.onAssistantText) {
+            if (replyTimerRef.current) clearTimeout(replyTimerRef.current);
+            replyTimerRef.current = setTimeout(() => {
+              try {
+                const reply = extractReply(term);
+                if (reply && reply !== lastReplyRef.current) { lastReplyRef.current = reply; cb.current.onAssistantText?.(reply); }
+              } catch { /* ignore */ }
+            }, 1100);
+          }
+          break;
         case "ping": attemptsRef.current = 0; break; // keepalive heartbeat — proves the tunnel is alive
         case "hello": cb.current.onConnected?.(!!m.connected); break;
         case "status": cb.current.onConnected?.(!!m.connected); break;
@@ -174,7 +224,7 @@ export const ClaudeTerminal = forwardRef<ClaudeTerminalHandle, Props>(function C
     // crash Claude Code, which then respawned at the bypass-permissions startup screen.
     const clientPing = setInterval(() => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ t: "ka" })); }, 12000);
 
-    return () => { closedByUs = true; clearInterval(clientPing); if (retryTimer) clearTimeout(retryTimer); sub.dispose(); try { ws.close(); } catch { /* ignore */ } if (wsRef.current === ws) wsRef.current = null; };
+    return () => { closedByUs = true; clearInterval(clientPing); if (retryTimer) clearTimeout(retryTimer); if (replyTimerRef.current) clearTimeout(replyTimerRef.current); sub.dispose(); try { ws.close(); } catch { /* ignore */ } if (wsRef.current === ws) wsRef.current = null; };
   }, [projectId, gen, setStat]);
 
   return (
