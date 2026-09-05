@@ -523,6 +523,12 @@ function broadcast(s: Session, msg: Record<string, unknown>) {
   for (const c of s.clients) if (c.readyState === WebSocket.OPEN) c.send(data);
 }
 
+// Last ~600 printable chars of the buffer, ANSI stripped — for diagnosing why Claude exited.
+function stripAnsiTail(scrollback: string): string {
+  // eslint-disable-next-line no-control-regex
+  return scrollback.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").replace(/[^\S\r\n]+/g, " ").replace(/\n{2,}/g, "\n").trim().slice(-600);
+}
+
 async function getOrCreateSession(userId: number, projectId: number, projectName: string, dims?: { cols: number; rows: number }): Promise<Session> {
   const key = sessionKey(userId, projectId);
   const existing = sessions.get(key);
@@ -604,7 +610,10 @@ async function getOrCreateSession(userId: number, projectId: number, projectName
     broadcast(s, { t: "o", d });
   });
   s.proc.onExit(({ exitCode }) => {
-    logger.info({ key, exitCode }, "[claude-terminal] claude exited");
+    // Log the tail of the buffer on a non-zero exit so we can see WHY Claude quit (e.g. invalid_grant
+    // from a token race, an unknown flag, or an unaccepted prompt).
+    const tail = exitCode ? stripAnsiTail(s.scrollback) : "";
+    logger.info({ key, exitCode, tail }, "[claude-terminal] claude exited");
     s.exited = true;
     void (async () => {
       await runSync(s).catch(() => {});

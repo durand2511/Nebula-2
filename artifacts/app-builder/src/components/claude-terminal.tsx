@@ -27,37 +27,70 @@ type Props = {
   /** Fires with Claude's latest prose reply (clean text from the buffer) once output settles — used by
    *  the mobile assistant to read the answer out loud. Best-effort extraction. */
   onAssistantText?: (text: string) => void;
+  /** Mobile assistant: silently restart Claude Code if it exits (bounded), instead of showing a button. */
+  autoRestart?: boolean;
+  /** Fires when Claude Code exits. willRestart=true means an auto-restart was scheduled. */
+  onExit?: (code: number, willRestart: boolean) => void;
 };
+
+// Terminal chrome / status lines that must NEVER be read aloud as if they were Claude's reply.
+const CHROME_RE = /Esc to cancel|Enter to confirm|Opnieuw starten|is gestopt|bypass permissions|Bypass Permissions|for shortcuts|auto-?accept|Do you trust|Welcome to Claude|\/login|Choose the text|Select theme|context left|tokens|esc to interrupt/i;
+const TOOLCALL_RE = /^[A-Z][A-Za-z0-9]+\([^)]*\)/; // e.g. Bash(…), Update(…), Read(…)
+
+function looksLikeProse(text: string): boolean {
+  if (text.length < 4) return false;
+  if (CHROME_RE.test(text)) return false;
+  if (TOOLCALL_RE.test(text)) return false;
+  const letters = (text.match(/[a-zà-ÿ]/gi) || []).length;
+  return letters >= text.length * 0.55;
+}
 
 /**
  * Pull Claude's most recent natural-language reply out of the rendered terminal buffer. xterm decodes
- * ANSI into a plain character grid, so translateToString gives clean text (no escape codes). We take the
- * last contiguous block of sentence-like lines, skipping the input box and obvious tool-call lines.
+ * ANSI into a plain character grid, so translateToString gives clean text (no escape codes). Claude
+ * Code prints each assistant message on a line that starts with the "⏺" bullet; we grab the LAST such
+ * block (plus its wrapped continuation lines) and only accept it if it reads like real prose — never
+ * tool-call lines, prompts, warnings or the "stopped" notice.
  */
 function extractReply(term: Terminal): string {
   const buf = term.buffer.active;
-  const start = Math.max(0, buf.length - 80);
+  const start = Math.max(0, buf.length - 160);
   const lines: string[] = [];
   for (let i = start; i < buf.length; i++) lines.push((buf.getLine(i)?.translateToString(true) ?? "").replace(/\s+$/, ""));
-  const isChrome = (s: string) => /[╭╮╰╯│─┌┐└┘┃━]/.test(s) || /^\s*>/.test(s) || /shortcuts|bypass permissions|auto-?accept|for shortcuts/i.test(s);
-  const leadGlyph = /^[\s]*[⏺✳✶●•·*]/;
+  const bullet = /^\s*⏺\s+(.*)$/;
+
+  const isBox = (s: string) => /[╭╮╰╯│─┌┐└┘┃━]/.test(s) || /^\s*>/.test(s);
+
+  // Preferred: the last ⏺-bulleted assistant message.
+  let idx = -1;
+  for (let i = lines.length - 1; i >= 0; i--) { if (bullet.test(lines[i])) { idx = i; break; } }
+  if (idx >= 0) {
+    const parts = [lines[idx].match(bullet)![1].trim()];
+    for (let j = idx + 1; j < lines.length; j++) {
+      const s = lines[j];
+      if (s.trim() === "" || /^\s*⏺/.test(s) || isBox(s)) break;
+      parts.push(s.trim());
+    }
+    const text = parts.join(" ").replace(/\s+/g, " ").trim();
+    if (looksLikeProse(text)) return text.slice(0, 600);
+    return ""; // a ⏺ block that's a tool call or chrome → say nothing
+  }
+
+  // Fallback (no bullet in this Claude Code build): the last contiguous prose block sitting just above
+  // the input box, skipping the box, hint lines and tool output.
   let i = lines.length - 1;
-  while (i >= 0 && (lines[i].trim() === "" || isChrome(lines[i]))) i--;
+  while (i >= 0 && (lines[i].trim() === "" || isBox(lines[i]) || CHROME_RE.test(lines[i]))) i--;
   const block: string[] = [];
   for (; i >= 0; i--) {
     const s = lines[i];
     if (s.trim() === "") { if (block.length) break; else continue; }
-    if (isChrome(s)) break;
-    const startsMsg = leadGlyph.test(s);
-    block.unshift(s.replace(/^[\s⏺✳✶●•·*]+/, "").trim());
-    if (startsMsg) break;
+    if (isBox(s)) break;
+    const clean = s.replace(/^[\s⏺✳✶●•·*⎿]+/, "").trim();
+    if (CHROME_RE.test(clean) || TOOLCALL_RE.test(clean)) break;
+    block.unshift(clean);
   }
-  let text = block.join(" ").replace(/\s+/g, " ").trim();
-  // Skip tool-call / status noise: "Bash(...)", pure paths, or lines with almost no letters.
-  if (/^\w+\([^)]*\)\.?$/.test(text)) return "";
-  const letters = (text.match(/[a-zà-ÿ]/gi) || []).length;
-  if (text.length < 4 || letters < text.length * 0.5) return "";
-  return text.slice(0, 500);
+  const text = block.join(" ").replace(/\s+/g, " ").trim();
+  return looksLikeProse(text) ? text.slice(0, 600) : "";
 }
 
 function wsUrl(projectId: number, cols?: number, rows?: number): string {
@@ -76,7 +109,7 @@ export type ClaudeTerminalHandle = {
 };
 
 export const ClaudeTerminal = forwardRef<ClaudeTerminalHandle, Props>(function ClaudeTerminal(
-  { projectId, className, onFilesChanged, onConnected, onStatus, onLocked, onAssistantText }: Props,
+  { projectId, className, onFilesChanged, onConnected, onStatus, onLocked, onAssistantText, autoRestart, onExit }: Props,
   ref,
 ) {
   const { t } = useLang();
@@ -99,8 +132,8 @@ export const ClaudeTerminal = forwardRef<ClaudeTerminalHandle, Props>(function C
   const [gen, setGen] = useState(0); // bump to force a fresh connection ("Opnieuw starten")
 
   // Keep latest callbacks without re-subscribing the socket.
-  const cb = useRef({ onFilesChanged, onConnected, onStatus, onLocked, onAssistantText });
-  cb.current = { onFilesChanged, onConnected, onStatus, onLocked, onAssistantText };
+  const cb = useRef({ onFilesChanged, onConnected, onStatus, onLocked, onAssistantText, onExit });
+  cb.current = { onFilesChanged, onConnected, onStatus, onLocked, onAssistantText, onExit };
 
   const setStat = useCallback((s: TerminalStatus) => { statusRef.current = s; setStatus(s); cb.current.onStatus?.(s); }, []);
 
@@ -143,6 +176,7 @@ export const ClaudeTerminal = forwardRef<ClaudeTerminalHandle, Props>(function C
   const attemptsRef = useRef(0);
   const replyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastReplyRef = useRef("");
+  const restartCountRef = useRef(0);
   useEffect(() => {
     const term = termRef.current;
     if (!term) return;
@@ -191,7 +225,23 @@ export const ClaudeTerminal = forwardRef<ClaudeTerminalHandle, Props>(function C
         case "hello": cb.current.onConnected?.(!!m.connected); break;
         case "status": cb.current.onConnected?.(!!m.connected); break;
         case "files": cb.current.onFilesChanged?.({ changed: m.changed || [], created: m.created || [], deleted: m.deleted || [] }); break;
-        case "exit": gotExit = true; term.writeln(`\r\n\x1b[2m» ${t(`Claude Code is gestopt (code ${m.code}). Klik op "Opnieuw starten" om verder te gaan.`, `Claude Code stopped (code ${m.code}). Click "Restart" to continue.`)}\x1b[0m`); setStat("closed"); break;
+        case "exit": {
+          gotExit = true;
+          const willRestart = !!autoRestart && restartCountRef.current < 3;
+          cb.current.onExit?.(m.code, willRestart);
+          if (willRestart) {
+            // Mobile assistant: bring Claude back on its own instead of stranding the user on a button.
+            restartCountRef.current += 1;
+            setStat("connecting");
+            gotExit = false; // allow the reconnect path
+            if (retryTimer) clearTimeout(retryTimer);
+            retryTimer = setTimeout(() => setGen((g) => g + 1), 900);
+          } else {
+            term.writeln(`\r\n\x1b[2m» ${t(`Claude Code is gestopt (code ${m.code}). Klik op "Opnieuw starten" om verder te gaan.`, `Claude Code stopped (code ${m.code}). Click "Restart" to continue.`)}\x1b[0m`);
+            setStat("closed");
+          }
+          break;
+        }
         case "locked": cb.current.onLocked?.(String(m.message || "")); setErrMsg(String(m.message || t("Abonnement vereist.", "Subscription required."))); setStat("error"); break;
         case "err": setErrMsg(String(m.message || "Onbekende fout")); setStat("error"); break;
       }
