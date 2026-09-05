@@ -8,8 +8,8 @@ import express from "express";
 import { getSessionUser, tokenFrom } from "../lib/platform-auth.js";
 import { runAgentEdit } from "../lib/agent-editor.js";
 import { isClaudeConnected, prepareUserClaudeEnv } from "../lib/claude-terminal.js";
-import { publishSubdomain, getSubdomain, listDomains, PLATFORM_HOST } from "../lib/domains.js";
-import { publishSite } from "../lib/site-publish.js";
+import { buildVoiceTools } from "../lib/voice-tools.js";
+import { getSubdomain, listDomains, PLATFORM_HOST } from "../lib/domains.js";
 import { db, projects } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { logger } from "../lib/logger";
@@ -32,20 +32,35 @@ const VOICE_SYSTEM_PROMPT = [
   "HOE JE REAGEERT:",
   "- Als de gebruiker groet of even kletst, klets kort en gezellig terug. Ga dan NIET in de bestanden graven.",
   "- Als de gebruiker een wijziging aan de site vraagt, voer die uit (lees een bestand vóór je het bewerkt) en vertel in 1–2 zinnen wat je hebt gedaan.",
-  "- Houd het altijd kort genoeg om hardop voorgelezen te worden: gewone spreektaal, geen opsommingen, geen code, geen bestandsnamen in je antwoord.",
+  "- Houd het altijd kort genoeg om hardop voorgelezen te worden: gewone spreektaal, geen opsommingen, geen code, geen bestandsnamen, GEEN emoji's in je antwoord.",
   "",
   "DE HELE SITE, NIET ALLEEN DE HOMEPAGE:",
   "- De website heeft MEERDERE pagina's. Gebruik Glob (bijv. **/*.html) om ze allemaal te vinden en kijk verder dan alleen index.html / de landingspagina.",
   "- Bij een site-brede wijziging (kleuren, lettertype, menu, footer, contactgegevens) pas je die toe op ELKE relevante pagina — of, als het via de gedeelde CSS kan, in het CSS-bestand dat op alle pagina's geldt.",
   "",
-  "PUBLICEREN / DEPLOYEN:",
-  "- Wijzigingen staan eerst in concept. De site gaat pas LIVE als de gebruiker dat vraagt ('publiceer', 'zet live', 'deploy').",
-  "- Zegt de gebruiker 'nog niet' of 'straks'? Bevestig dat kort en bied aan het live te zetten wanneer ze zover zijn.",
+  "WAT JE ALLEMAAL KUNT (gebruik hiervoor je gereedschap):",
+  "- Statistieken / bezoekers: roep bekijk_statistieken aan (bezoekers, verkeer, wie er nu online is).",
+  "- Analyse: roep bekijk_analyse aan met soort 'seo', 'toegankelijkheid' of 'snelheid'. Vraagt de gebruiker de punten op te lossen? Bekijk de analyse en pas daarna zelf de bestanden aan.",
+  "- Google-posities: roep bekijk_google_posities aan (ranking/vindbaarheid in Google).",
+  "- Concurrent vergelijken: roep vergelijk_concurrent aan met de URL van de concurrent.",
+  "- Automatische SEO: roep zet_auto_seo aan (aan/uit).",
+  "- Back-up: roep maak_backup aan.",
+  "- Publiceren/deployen: roep publiceer_site aan ALLEEN als de gebruiker duidelijk om live zetten/publiceren/deployen vraagt. Zegt de gebruiker 'nog niet' of 'straks'? Doe het NIET, bevestig kort en bied aan het later te doen. Wijzigingen staan tot die tijd in concept.",
+  "- Vertel na een gereedschap kort in spreektaal wat het resultaat was.",
   "",
   "Het is een kleine statische website (HTML/CSS/JS) in de huidige map. Verander alleen wat gevraagd is en laat de rest intact.",
 ].join("\n");
 
 const router: IRouter = Router();
+
+// Strip emoji + pictographs so the text-to-speech voice doesn't read them out (or trip over them).
+function stripForSpeech(s: string): string {
+  return s
+    .replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}\u{2300}-\u{23FF}\u{FE00}-\u{FE0F}\u{1F1E6}-\u{1F1FF}\u{200D}]/gu, "")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/\s+([,.!?])/g, "$1")
+    .trim();
+}
 
 async function ownsProject(userId: number, projectId: number): Promise<boolean> {
   if (!projectId) return false;
@@ -146,12 +161,14 @@ router.post("/voice/ask", express.json({ limit: "256kb" }), async (req, res) => 
 
   // Prefer the customer's own coupled Claude subscription (no platform API cost); fall back to the
   // platform API key if they haven't coupled a login or the subscription run fails. Sonnet for speed.
-  const base = { projectId, prompt: message, emit: () => { /* no stream */ }, systemPromptOverride: VOICE_SYSTEM_PROMPT } as const;
+  const tools = buildVoiceTools(projectId);
+  // Haiku for snappy voice replies.
+  const base = { projectId, prompt: message, emit: () => { /* no stream */ }, systemPromptOverride: VOICE_SYSTEM_PROMPT, mcpServers: tools.mcpServers, extraAllowedTools: tools.allowedTools, model: "claude-haiku-4-5-20251001" } as const;
   async function run() {
     if (await isClaudeConnected(u!.id)) {
       const own = await prepareUserClaudeEnv(u!.id);
       if (own.connected) {
-        try { return await runAgentEdit({ ...base, subprocessEnv: own.env, model: "claude-sonnet-4-5" }); }
+        try { return await runAgentEdit({ ...base, subprocessEnv: own.env }); }
         catch (err) { logger.warn({ err, projectId }, "[voice] own-subscription run failed — falling back to platform key"); }
       }
     }
@@ -160,21 +177,11 @@ router.post("/voice/ask", express.json({ limit: "256kb" }), async (req, res) => 
   try {
     const r = await run();
     const edited = r.changed.length + r.created.length + r.deleted.length;
-    // Deploy/publish is USER-CONTROLLED, never automatic: only when they clearly ask ("publiceer",
-    // "zet live", "deploy"). A "nog niet"/"straks" holds it. So edits land in draft until the user says go.
-    const wantsPublish = /\b(publiceer|publiceren|deploy|deployen|uitroll|online zetten|zet.*online|maak.*live|ga.*live|zet.*live|live zetten)\b/i.test(message)
-      && !/\b(niet|nog niet|straks|later|even niet|wacht)\b/i.test(message);
-
-    let published = false;
-    if (wantsPublish) {
-      try { await publishSubdomain(projectId); await publishSite(projectId); published = true; }
-      catch (err) { logger.warn({ err, projectId }, "[voice] publish failed"); }
-    }
+    // Publishing/deploying is done by the agent via the publiceer_site tool (so "nog niet" is respected
+    // naturally). We just report the current live domain so the app header stays in sync.
     const domain = await liveDomain(projectId);
-
-    let text = (r.finalText || "").trim() || (edited > 0 ? "Klaar, ik heb het aangepast." : "Oké!");
-    if (published && domain) text += ` Het staat nu live op ${domain}.`;
-    res.json({ ok: r.ok, text, changed: r.changed, created: r.created, deleted: r.deleted, published, domain });
+    const text = stripForSpeech((r.finalText || "").trim()) || (edited > 0 ? "Klaar, ik heb het aangepast." : "Oké!");
+    res.json({ ok: r.ok, text, changed: r.changed, created: r.created, deleted: r.deleted, domain });
   } catch (err) {
     logger.error({ err, projectId }, "[voice] ask failed");
     res.status(502).json({ error: "Ik kon dit even niet uitvoeren. Probeer het opnieuw." });

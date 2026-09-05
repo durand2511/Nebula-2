@@ -130,6 +130,10 @@ export async function runAgentEdit(opts: {
   model?: string | null;
   /** Override the system prompt (the voice assistant is conversational, not just an editor). */
   systemPromptOverride?: string;
+  /** Extra in-process MCP tool servers (e.g. the voice assistant's statistics/SEO/backup/publish tools). */
+  mcpServers?: Record<string, unknown>;
+  /** Extra tool names to allow (the mcp__server__tool names for the servers above). */
+  extraAllowedTools?: string[];
 }): Promise<AgentEditResult> {
   const { projectId, prompt, images = [], emit } = opts;
   const abortController = opts.abortController ?? new AbortController();
@@ -217,8 +221,9 @@ export async function runAgentEdit(opts: {
       options: {
         cwd: tmpRoot,
         ...(modelOpt ? { model: modelOpt } : {}),
+        ...(opts.mcpServers ? { mcpServers: opts.mcpServers as never } : {}),
         systemPrompt: opts.systemPromptOverride ?? systemPrompt(),
-        allowedTools: ["Read", "Write", "Edit", "Glob", "Grep"],
+        allowedTools: ["Read", "Write", "Edit", "Glob", "Grep", ...(opts.extraAllowedTools ?? [])],
         // Use acceptEdits, NOT bypassPermissions: the Render container runs as root, and the
         // CLI refuses "--dangerously-skip-permissions cannot be used with root/sudo privileges"
         // (that flag is what bypassPermissions + allowDangerouslySkipPermissions emit), so it

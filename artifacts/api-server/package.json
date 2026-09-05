@@ -24,7 +24,8 @@
     "pino-http": "^10.5.0",
     "puppeteer-core": "23.11.1",
     "undici": "^8.4.1",
-    "ws": "8.21.3"
+    "ws": "8.21.3",
+    "zod": "3.25.76"
   },
   "devDependencies": {
     "@types/cookie-parser": "^1.4.10",
