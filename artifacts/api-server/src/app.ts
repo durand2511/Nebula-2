@@ -85,7 +85,7 @@ const RECON = /^\/(?:\.env|\.git(?:\/|$)|\.svn|\.aws|\.ssh|\.htpasswd|wp-admin|w
 // Persistent-attacker counter: keep probing after all the trolls and you eventually get the ultimate
 // disdain — Ian McShane calling you pathetic.
 const HITS = new Map<string, { count: number; start: number }>();
-const HITS_WINDOW_MS = 60 * 60 * 1000, PATHETIC_AT = 12;
+const HITS_WINDOW_MS = 60 * 60 * 1000, PATHETIC_AT = 500; // rare final boss: only a relentless attacker (500+ probes/hour) reaches it — a normal scan never does
 function bumpHits(ip: string): number {
   const now = Date.now();
   let e = HITS.get(ip);
