@@ -62,4 +62,31 @@ router.post("/voice/transcribe", express.json({ limit: "30mb" }), async (req, re
   }
 });
 
+// Natural text-to-speech: turn Claude's reply into a warm human voice (OpenAI TTS) instead of the
+// robotic built-in phone voice. Returns MP3 audio the app plays back. Small request body, so it can
+// ride the standard 1MB JSON parser.
+router.post("/voice/speak", express.json({ limit: "256kb" }), async (req, res) => {
+  const u = await getSessionUser(tokenFrom(req as any));
+  if (!u) { res.status(401).json({ error: "Niet ingelogd." }); return; }
+  if (!OPENAI_KEY) { res.status(503).json({ error: "Stem staat nog niet aan op de server." }); return; }
+  const text = String(req.body?.text || "").trim().slice(0, 1200);
+  if (!text) { res.status(400).json({ error: "Geen tekst." }); return; }
+  const voice = ["alloy", "echo", "fable", "onyx", "nova", "shimmer"].includes(String(req.body?.voice)) ? String(req.body.voice) : "nova";
+  try {
+    const r = await fetch(`${OPENAI_BASE}/audio/speech`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${OPENAI_KEY}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ model: "tts-1", voice, input: text, response_format: "mp3", speed: 1.0 }),
+    });
+    if (!r.ok) { const t = await r.text().catch(() => ""); logger.error({ status: r.status, body: t.slice(0, 300) }, "[voice] tts failed"); res.status(502).json({ error: "Stem mislukt." }); return; }
+    const buf = Buffer.from(await r.arrayBuffer());
+    res.setHeader("Content-Type", "audio/mpeg");
+    res.setHeader("Cache-Control", "no-store");
+    res.send(buf);
+  } catch (err) {
+    logger.error({ err }, "[voice] tts error");
+    res.status(500).json({ error: "Stem mislukt." });
+  }
+});
+
 export default router;

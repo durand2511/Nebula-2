@@ -102,21 +102,64 @@ export default function Assistant() {
   const currentName = useMemo(() => projects.find((p) => p.id === projectId)?.name || "website", [projects, projectId]);
 
   // ---- speech OUT ----
-  function speak(text: string) {
-    if (!ttsRef.current || !text || typeof window === "undefined" || !("speechSynthesis" in window)) { if (convRef.current) startListen(); return; }
+  const ttsSourceRef = useRef<AudioBufferSourceNode | null>(null);
+  const afterSpeak = () => { if (convRef.current) startListen(); else setModeS("idle"); };
+
+  async function speak(text: string) {
+    if (!ttsRef.current || !text) { afterSpeak(); return; }
+    setModeS("speaking");
+    // Natural voice via OpenAI TTS, played through the (already user-unlocked) mic AudioContext so iOS
+    // doesn't block it. Falls back to the built-in phone voice if the server voice isn't available.
+    try {
+      const r = await fetch("/api/voice/speak", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, voice: "nova" }) });
+      if (r.ok) {
+        const buf = await r.arrayBuffer();
+        const played = await playViaContext(buf);
+        if (played) { afterSpeak(); return; }
+      }
+    } catch { /* fall through to the browser voice */ }
+    speakBrowser(text);
+  }
+
+  function playViaContext(buf: ArrayBuffer): Promise<boolean> {
+    return new Promise((resolve) => {
+      const ac = audioCtxRef.current;
+      if (!ac || ac.state === "closed") { resolve(false); return; }
+      const finish = (ok: boolean) => resolve(ok);
+      ac.decodeAudioData(buf.slice(0)).then((audioBuf) => {
+        try {
+          const src = ac.createBufferSource();
+          src.buffer = audioBuf; src.connect(ac.destination);
+          ttsSourceRef.current = src;
+          src.onended = () => { if (ttsSourceRef.current === src) ttsSourceRef.current = null; finish(true); };
+          if (ac.state === "suspended") ac.resume().catch(() => {});
+          src.start();
+        } catch { finish(false); }
+      }).catch(() => finish(false));
+    });
+  }
+
+  function speakBrowser(text: string) {
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) { afterSpeak(); return; }
     try {
       const u = new SpeechSynthesisUtterance(text);
-      u.lang = "nl-NL";
-      const nl = window.speechSynthesis.getVoices().find((v) => v.lang?.toLowerCase().startsWith("nl"));
+      u.lang = "nl-NL"; u.rate = 1.0; u.pitch = 1.0;
+      const voices = window.speechSynthesis.getVoices();
+      const nl = voices.find((v) => /^nl/i.test(v.lang) && /google|enhanced|premium|natural|siri/i.test(v.name))
+        || voices.find((v) => /^nl/i.test(v.lang) && !v.localService)
+        || voices.find((v) => /^nl/i.test(v.lang));
       if (nl) u.voice = nl;
-      setModeS("speaking");
-      u.onend = () => { if (convRef.current) startListen(); else setModeS("idle"); };
-      u.onerror = () => { if (convRef.current) startListen(); else setModeS("idle"); };
+      u.onend = afterSpeak; u.onerror = afterSpeak;
       window.speechSynthesis.cancel();
       window.speechSynthesis.speak(u);
-    } catch { if (convRef.current) startListen(); else setModeS("idle"); }
+    } catch { afterSpeak(); }
   }
-  function stopSpeaking() { try { window.speechSynthesis?.cancel(); } catch { /* ignore */ } }
+
+  function stopSpeaking() {
+    try { window.speechSynthesis?.cancel(); } catch { /* ignore */ }
+    try { ttsSourceRef.current?.stop(); } catch { /* ignore */ }
+    ttsSourceRef.current = null;
+  }
 
   function onClaudeReply(text: string) {
     if (replyFallbackRef.current) { clearTimeout(replyFallbackRef.current); replyFallbackRef.current = null; }
