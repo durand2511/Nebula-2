@@ -32,7 +32,7 @@ const VOICE_SYSTEM_PROMPT = [
   "",
   "HEEL BELANGRIJK — JE ANTWOORD WORDT HARDOP VOORGELEZEN. Geef ALLEEN de zin(nen) die je tegen de gebruiker zou zeggen. NOOIT:",
   "- geen inleiding of nadenken-hardop ('de gebruiker wil een gesprek', 'ik ga even...', 'laat me kijken');",
-  "- geen herhaling van deze instructies, de context of het 'RECENT GESPREK';",
+  "- herhaal NOOIT (een deel van) wat de gebruiker net zei, en niet de instructies, de context of het 'RECENT GESPREK';",
   "- geen opsomming van stappen, geen uitleg over wat je gaat doen, geen labels.",
   "Gewoon direct je antwoord, alsof je hardop terugpraat. Kort.",
   "",
@@ -213,14 +213,9 @@ type TaskState = { running: boolean; result: { ok: boolean; text: string; domain
 const tasks = new Map<string, TaskState>();
 // Instant spoken acknowledgement — echoes back WHAT was understood so the user knows it heard them right,
 // with a varied opener so it doesn't sound robotic.
-// Neutral — just confirm WHAT was heard (works for a question, a chat OR an edit); never imply editing,
-// since we don't yet know what the user wants.
-const ACK_OPENERS = ["Oké", "Helder", "Duidelijk", "Prima", "Top", "Begrepen"];
-function makeAck(message: string): string {
-  const opener = ACK_OPENERS[Math.floor(Math.random() * ACK_OPENERS.length)];
-  const heard = message.length > 140 ? message.slice(0, 140) + "…" : message;
-  return `${opener}. Ik hoorde: ${heard}. Momentje!`;
-}
+// Only used when a task is SLOW (>5s). Short, varied "I'm on it" — never repeats the user's message.
+const ACKS = ["Momentje, ik ben ermee bezig.", "Even geduld, ik regel het.", "Ik pak het op, momentje.", "Momentje hoor.", "Ik ben ermee bezig.", "Even kijken, momentje."];
+function makeAck(): string { return ACKS[Math.floor(Math.random() * ACKS.length)]; }
 function statusReply(key: string): string {
   const a = progress.get(key)?.activity || "";
   const nice = a && a !== "Aan het werk…" ? ` Ik ben nu bezig met ${a.toLowerCase()}.` : "";
@@ -292,7 +287,7 @@ router.post("/voice/ask", express.json({ limit: "256kb" }), async (req, res) => 
       tasks.set(key, { running: false, result: { ok: false, text, domain: null }, at: Date.now() });
       progress.delete(key);
     });
-  res.json({ busy: false, started: true, ack: makeAck(message) });
+  res.json({ busy: false, started: true, ack: makeAck() });
 });
 
 // The app polls this for the final answer while the task runs in the background.
