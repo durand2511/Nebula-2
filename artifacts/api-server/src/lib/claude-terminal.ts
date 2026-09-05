@@ -84,10 +84,11 @@ const BINARY_EXT = new Set(["png", "jpg", "jpeg", "gif", "webp", "ico", "pdf", "
 const ALLOWED_TOOLS = ["Bash", "BashOutput", "KillShell", "Read", "Write", "Edit", "Glob", "Grep", "WebFetch", "WebSearch", "Agent", "Task", "NotebookEdit", "TodoWrite"];
 
 export const SESSION_SETTINGS = {
-  // bypassPermissions: no per-command prompts at all — the customer just types what they want and
-  // Claude runs it. Safe because the OS is the sandbox: own unix uid, 0700 home/workspace, no
-  // platform secrets in the child env. Mirrors /etc/claude-code/managed-settings.json (Dockerfile).
-  permissions: { allow: ALLOWED_TOOLS, defaultMode: "bypassPermissions" },
+  // acceptEdits: file edits are auto-approved (no prompts for the normal "change my site" flow) WITHOUT
+  // the scary "Bypass Permissions mode — Yes, I accept" startup screen. bypassPermissions emitted
+  // --dangerously-skip-permissions, which the CLI refuses under root and which made the terminal hang on
+  // that accept screen / restart. The OS is still the sandbox (own uid, 0700 home, no platform secrets).
+  permissions: { allow: ALLOWED_TOOLS, defaultMode: "acceptEdits" },
   includeCoAuthoredBy: false,
 };
 
@@ -617,7 +618,7 @@ async function getOrCreateSession(userId: number, projectId: number, projectName
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
     // Deliberately NOT forwarded: ANTHROPIC_API_KEY, DATABASE_URL, STRIPE_*, EMAIL_SECRET_KEY, …
   };
-  const args = ["--permission-mode", "bypassPermissions"];
+  const args = ["--permission-mode", "acceptEdits"];
 
   // Spawn at the connecting client's real terminal size: Claude Code's startup banner is printed
   // once and never redrawn, so starting at the wrong width leaves a permanently mangled header.

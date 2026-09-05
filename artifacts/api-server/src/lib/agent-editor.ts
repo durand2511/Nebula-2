@@ -134,6 +134,8 @@ export async function runAgentEdit(opts: {
   mcpServers?: Record<string, unknown>;
   /** Extra tool names to allow (the mcp__server__tool names for the servers above). */
   extraAllowedTools?: string[];
+  /** Cap the agent's turn budget (voice uses a lower cap so it can't wander off for long). */
+  maxTurns?: number;
 }): Promise<AgentEditResult> {
   const { projectId, prompt, images = [], emit } = opts;
   const abortController = opts.abortController ?? new AbortController();
@@ -232,7 +234,7 @@ export async function runAgentEdit(opts: {
         // no root guard. Verified locally end-to-end (edit actually written).
         permissionMode: "acceptEdits",
         settingSources: [], // clean sandbox — ignore any host ~/.claude or project settings
-        maxTurns: MAX_TURNS,
+        maxTurns: opts.maxTurns ?? MAX_TURNS,
         abortController,
         env: subprocessEnv, // replaces the child env entirely — process.env is spread in above
         stderr: (data: string) => { stderrBuf += data; },

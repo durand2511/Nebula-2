@@ -30,6 +30,8 @@ const VOICE_SYSTEM_PROMPT = [
   "Je bent de spraakassistent van Nebula voor deze website. Je praat Nederlands, kort en natuurlijk — als een behulpzame, vriendelijke collega. Wissel je bewoordingen af; geef niet steeds exact hetzelfde antwoord.",
   "",
   "HOE JE REAGEERT:",
+  "- Je krijgt soms 'RECENT GESPREK' mee als context. Gebruik dat om vervolgvragen te snappen ('doe dat maar', 'herhaal', 'nee anders'). Voer alleen de NIEUWE VRAAG uit; verzin geen nieuwe opdracht als je iets niet begrijpt — vraag dan kort door.",
+  "- Werk SNEL en gericht: lees alleen de bestanden die je echt nodig hebt en doe precies wat gevraagd is, niets extra. Niet onnodig rondkijken.",
   "- Als de gebruiker groet of even kletst, klets kort en gezellig terug. Ga dan NIET in de bestanden graven.",
   "- Als de gebruiker een wijziging aan de site vraagt, voer die uit (lees een bestand vóór je het bewerkt) en vertel in 1–2 zinnen wat je hebt gedaan.",
   "- Houd het altijd kort genoeg om hardop voorgelezen te worden: gewone spreektaal, geen opsommingen, geen code, geen bestandsnamen, GEEN emoji's in je antwoord.",
@@ -53,6 +55,27 @@ const VOICE_SYSTEM_PROMPT = [
 ].join("\n");
 
 const router: IRouter = Router();
+
+// ── Conversation memory ──────────────────────────────────────────────────────────────────────────
+// Per (user, project) short-term memory so follow-ups like "doe dat maar" / "herhaal" keep context.
+// In-memory, last few turns, expires after 30 min idle.
+type Turn = { role: "user" | "assistant"; text: string };
+const convo = new Map<string, { turns: Turn[]; at: number }>();
+const CONVO_TTL = 30 * 60 * 1000;
+function historyFor(key: string): Turn[] {
+  const e = convo.get(key);
+  if (!e) return [];
+  if (Date.now() - e.at > CONVO_TTL) { convo.delete(key); return []; }
+  return e.turns;
+}
+function remember(key: string, user: string, assistant: string): void {
+  const e = convo.get(key) || { turns: [] as Turn[], at: 0 };
+  e.turns.push({ role: "user", text: user }, { role: "assistant", text: assistant });
+  e.turns = e.turns.slice(-8); // last 4 exchanges
+  e.at = Date.now();
+  convo.set(key, e);
+  if (convo.size > 500) { const oldest = [...convo.entries()].sort((a, b) => a[1].at - b[1].at)[0]; if (oldest) convo.delete(oldest[0]); }
+}
 
 // Strip emoji + pictographs so the text-to-speech voice doesn't read them out (or trip over them).
 function stripForSpeech(s: string): string {
@@ -166,7 +189,14 @@ router.post("/voice/ask", express.json({ limit: "256kb" }), async (req, res) => 
   // Haiku for snappy voice replies. Today's date lets the agent compute "volgende maandag" for the agenda.
   const vandaag = new Date().toLocaleDateString("nl-NL", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
   const sys = `${VOICE_SYSTEM_PROMPT}\n\nVandaag is ${vandaag}. Gebruik dit om data uit te rekenen (bijvoorbeeld 'volgende maandag' → de juiste datum in jaar-maand-dag).`;
-  const base = { projectId, prompt: message, emit: () => { /* no stream */ }, systemPromptOverride: sys, mcpServers: tools.mcpServers, extraAllowedTools: tools.allowedTools, model: "claude-haiku-4-5-20251001" } as const;
+
+  // Short-term memory: give the agent the recent exchange as context, but only execute the new question.
+  const convoKey = `${u.id}:${projectId}`;
+  const history = historyFor(convoKey);
+  const historyText = history.length ? "RECENT GESPREK (alleen als context, NIET opnieuw uitvoeren):\n" + history.map((t) => `${t.role === "user" ? "Gebruiker" : "Jij"}: ${t.text}`).join("\n") + "\n\n" : "";
+  const prompt = `${historyText}NIEUWE VRAAG: ${message}`;
+
+  const base = { projectId, prompt, emit: () => { /* no stream */ }, systemPromptOverride: sys, mcpServers: tools.mcpServers, extraAllowedTools: tools.allowedTools, model: "claude-haiku-4-5-20251001", maxTurns: 20 } as const;
   async function run() {
     if (await isClaudeConnected(u!.id)) {
       const own = await prepareUserClaudeEnv(u!.id);
@@ -184,6 +214,7 @@ router.post("/voice/ask", express.json({ limit: "256kb" }), async (req, res) => 
     // naturally). We just report the current live domain so the app header stays in sync.
     const domain = await liveDomain(projectId);
     const text = stripForSpeech((r.finalText || "").trim()) || (edited > 0 ? "Klaar, ik heb het aangepast." : "Oké!");
+    remember(convoKey, message, text);
     res.json({ ok: r.ok, text, changed: r.changed, created: r.created, deleted: r.deleted, domain });
   } catch (err) {
     logger.error({ err, projectId }, "[voice] ask failed");
