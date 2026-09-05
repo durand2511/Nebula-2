@@ -81,8 +81,8 @@ export function NebulaApp() {
                 <div className="text-sm font-semibold">Android (Chrome)</div>
                 <ol className="mt-3 space-y-2 text-sm text-muted-foreground list-decimal pl-5">
                   <li>{t("Tik op de drie puntjes rechtsboven in Chrome.", "Tap the three dots at the top right in Chrome.")}</li>
-                  <li>{t("Scrol naar beneden.", "Scroll down.")}</li>
-                  <li>{t("Je ziet 'Installeren' en 'Snelkoppeling'. Kies de bovenste — die zónder het Chrome-logo erop.", "You'll see 'Install' and 'Shortcut'. Pick the top one — the one WITHOUT the Chrome logo on it.")}</li>
+                  <li>{t("Scrol naar beneden en tik op 'Installeren en snelkoppeling'.", "Scroll down and tap 'Install and shortcut'.")}</li>
+                  <li>{t("Op het volgende scherm kies je de optie ZÓNDER het Chrome-logo erop.", "On the next screen, choose the option WITHOUT the Chrome logo on it.")}</li>
                   <li>{t("Tik op 'Installeren' om te bevestigen. Klaar.", "Tap 'Install' to confirm. Done.")}</li>
                 </ol>
               </div>
